@@ -1,9 +1,9 @@
-# Spec: `incant` — a local, privacy-first AI agent
+# Spec: Cairn — a local, privacy-first AI agent
 
-Status: **Draft v0.2, for review** (v0.2 adds the second interview round, D19–D27)
+Status: **Draft v0.3, for review** (v0.3 adds name, Drive sync mode, Windows sandbox tiers and hosted providers, D26–D29)
 Date: 2026-10-31
 Repo: `c23075/possessed-incantation`
-Working name: **incant**, a placeholder shortened from the repo name *possessed-incantation*, used as the CLI command (`incant serve`, `incant audit verify`). Rename freely.
+Name: **Cairn** (stacked stones that mark a trail, i.e. the audit trail). CLI command: `cairn`.
 
 ---
 
@@ -60,7 +60,10 @@ unless explicitly allowed, and data on disk is encrypted.
 | D23 | Encryption | **Off by default.** Only the user turns it on: directly in the UI/CLI, or by explicitly telling the agent to run the `encrypt` tool. The agent never encrypts by itself and never sees passphrases |
 | D24 | Passphrases | **Only for chats the user locks**; everything else opens without a passphrase |
 | D25 | Citation styles | APA + IEEE by default via **CSL style files**; more styles added by dropping in `.csl` files; a `references` skill uses the formatter tool |
-| D26 | Name | `incant` is a working name (open question) |
+| D26 | Name | **Cairn**, CLI `cairn` |
+| D27 | Drive sync | **On demand only** (`cairn sync drive [folder]` or "Sync now"); no background or scheduled sync |
+| D28 | Windows sandbox | Default **WSL2 + bubblewrap**; Podman/Docker or Windows Sandbox used when available; **restricted-host mode off unless enabled**, and then every command needs approval |
+| D29 | Hosted providers (tested first) | Alibaba Model Studio, DeepSeek API, OpenRouter; **Claude API later** via a separate Anthropic API key (a Claude Pro subscription doesn't include API access, and logging in with a consumer account in third-party apps isn't supported) |
 
 ---
 
@@ -73,7 +76,7 @@ unless explicitly allowed, and data on disk is encrypted.
  └──────┬───────┘   └──────┬───────┘
         │  HTTP + WebSocket on a Unix socket / 127.0.0.1, auth token
  ┌──────▼──────────────────▼─────────────────────────────────────────┐
- │                         incant core (daemon)                       │
+ │                         cairn core (daemon)                       │
  │  ┌───────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────────┐  │
  │  │ Chat/Agent│ │Orchestrator│ │ Context mgr│ │ Skills + MCP host│  │
  │  │   loop    │ │(sub-agents,│ │(meter,     │ │ (tool registry)  │  │
@@ -120,14 +123,14 @@ Target: **32 GB RAM, no GPU**. Approximate resident memory (Q4_K_M-class quantis
 | Qwen3-4B (fast) | ~2.6 GB | kept warm |
 | Qwen3-Embedding-0.6B | ~0.6 GB | while indexing/searching |
 | Qwen3-VL-4B/8B (vision) | ~3–6 GB | **on demand only**: the fast model is unloaded first if needed |
-| OS + incant + UI + sandbox | ~4–5 GB | always |
+| OS + cairn + UI + sandbox | ~4–5 GB | always |
 
 So main + fast + embeddings fit together (~25 GB), and vision is loaded on demand. **Qwen3-VL-30B does not fit alongside the main model**, so it is not a default.
 Above 32K context, the KV cache and the slower prompt reading on CPU become the limit; the UI warns when a requested context size would cause swapping to disk.
 
 **Platforms**
-- **Linux (Debian 12+, Ubuntu 22.04+, Mint, Pop!_OS):** first-class. Packages: `pipx`/`uv tool install incant`; optional `.deb` later. Sandbox: rootless Podman.
-- **Windows 10/11:** supported. Core and TUI run natively (Windows Terminal); sandbox uses Podman Desktop or Docker Desktop (WSL2 backend). Paths, keychain (Windows Credential Manager via `keyring`) and the Unix-socket → named-pipe/loopback fallback are abstracted.
+- **Linux (Debian 12+, Ubuntu 22.04+, Mint, Pop!_OS):** first-class. Packages: `pipx`/`uv tool install cairn`; optional `.deb` later. Sandbox: rootless Podman.
+- **Windows 10/11:** supported. Core and TUI run natively (Windows Terminal); sandbox tiers as in §4.10.1. Paths, keychain (Windows Credential Manager via `keyring`) and the Unix-socket → named-pipe/loopback fallback are abstracted.
 - **macOS:** not a target, but nothing should block it.
 - CI matrix: Debian 12, Ubuntu 24.04, Windows Server 2022.
 
@@ -153,7 +156,7 @@ driver = "openai_compat"
 url = "http://10.0.0.5:8000/v1"
 location = "lan"                   # local | lan | hosted
 
-[backends.hosted-qwen]             # e.g. Alibaba Model Studio / DeepSeek API / OpenRouter
+[backends.hosted-qwen]             # Alibaba Model Studio (D29); DeepSeek API / OpenRouter are configured the same way
 driver = "openai_compat"
 url = "https://example-provider/v1"
 location = "hosted"
@@ -170,6 +173,7 @@ A model is chosen at several levels; the most specific one wins: **sub-agent / w
 - The UI marks a chat that has used a hosted model with a ☁ badge, and the audit log records which messages left the machine.
 - Policy option `hosted_backends = "deny" | "ask" | "allow"` (default **deny**); a sub-agent can only use a hosted backend if its parent's environment allows it.
 - Locked chats (§5.5) **never** go to hosted backends unless the user overrides this per chat.
+- Providers documented and tested first (D29): **Alibaba Model Studio**, **DeepSeek API** and **OpenRouter**, all through the `openai_compat` driver. A dedicated `anthropic` driver (Claude API with a separate API key) is planned for later; Claude subscriptions can't be used as a backend.
 - Backends are health-checked on start. If a backend is down, the core falls back to the next configured local backend (`fallback = ["local-ollama"]`) and logs it; it never falls back *to* a hosted one silently.
 
 **Supported servers and licenses** (to verify at implementation time)
@@ -228,7 +232,7 @@ skills = ["lit-review", "citation-check"]   # auto-attach
 Parameters a level can set: model / model role, backend, thinking on/off and budget, sampling (temperature, top_p, top_k, min_p), context size, maximum tool steps, sub-agent limits and their effort, time limit, skills to auto-attach, and whether approvals can be batched. Levels can be reordered and hidden. The effort used for each message is stored with it and shown in the audit log.
 
 ### 4.3 Environments (D13)
-An environment is a named profile (`~/.config/incant/environments/<name>.toml`):
+An environment is a named profile (`~/.config/cairn/environments/<name>.toml`):
 
 ```toml
 name = "litreview-offline"
@@ -241,7 +245,7 @@ network = { mode = "off", allow_hosts = [] }  # off | ask | allowlist
 tools = ["fs.read", "rag.search", "zotero.read", "pdf.read"]
 skills = ["lit-review", "citation-check"]
 connectors = ["drive:Thesis-Papers", "zotero:local"]
-sandbox = { image = "incant/python:3.12", network = "none", cpu = 4, mem = "4g" }
+sandbox = { image = "cairn/python:3.12", network = "none", cpu = 4, mem = "4g" }
 redaction = { secrets = "block", pii = "ask" }
 hosted_backends = "deny"               # deny | ask | allow (§4.1)
 encryption = { new_chats_locked = false }  # user-controlled only (§5.5)
@@ -288,7 +292,7 @@ List shortcuts only work when the list has focus, never while typing in the mess
 - Images are sent to the vision model; if no vision model is configured, the UI says so instead of failing silently.
 
 ### 4.8 Artifacts (D16)
-- Each chat writes files to `<artifacts_root>/<folder>/<chat-slug>/`, which is a **git repository** (D22). Every artifact write the agent makes is one commit (author `incant-agent`, message = short description + chat/message id + audit sequence number). Edits the user makes outside incant are picked up and committed as `user` the next time the folder is opened.
+- Each chat writes files to `<artifacts_root>/<folder>/<chat-slug>/`, which is a **git repository** (D22). Every artifact write the agent makes is one commit (author `cairn-agent`, message = short description + chat/message id + audit sequence number). Edits the user makes outside cairn are picked up and committed as `user` the next time the folder is opened.
 - The UI shows history, diffs between versions and restore (restoring is itself a new commit, so history is never rewritten).
 - Repos are local only and have no remote by default; adding a remote and pushing is an explicit, audited action.
 - Moving a chat to another folder moves its artifact repo; deleting a chat moves the repo into the trash with the chat.
@@ -305,6 +309,19 @@ List shortcuts only work when the list has focus, never while typing in the mess
 ### 4.10 Coding (D6)
 - The workspace repo is mounted **read-only** into the sandbox; the agent proposes **diffs**, the user approves (per hunk or per file), and the core applies them on the host via the FS gateway.
 - Commands/tests run in a **Podman** (Apache-2.0, rootless) container with `--network=none` by default; Docker is supported as a fallback. CPU, memory and time limits come from the environment.
+
+#### 4.10.1 Sandbox tiers (D28)
+The sandbox runner picks the strongest tier available and shows the active tier in the status bar.
+
+| Tier | Platform | Mechanism | Blocks files outside workspace | Blocks network | Default |
+|---|---|---|---|---|---|
+| 1 Container | Linux, Windows | Podman (rootless) / Docker | Yes | Yes | Linux default; used on Windows if installed |
+| 2 WSL2 + bubblewrap | Windows | Command runs inside a Debian WSL distro under `bwrap` (bubblewrap, LGPL-2.0+, separate process) with no network namespace and only the workspace mounted | Yes | Yes | **Windows default** |
+| 2b bubblewrap | Linux | Same as tier 2, natively, when Podman isn't installed | Yes | Yes | Linux fallback |
+| 3 Windows Sandbox | Windows Pro/Enterprise | Throwaway built-in VM via `.wsb` config, workspace mapped in, networking off | Yes | Yes | Used if tiers 1–2 are missing |
+| 4 Restricted host | Windows, Linux | Plain process: clean environment, a copy of the workspace, CPU/memory/time limits (Job Objects / `prlimit`) | **No** | **No** (unless a firewall rule is configured) | **Off**; enabled per environment with `sandbox.allow_unsandboxed = true` |
+
+Tier 4 rules: every command needs approval (no "allow for this chat"), the UI shows a red **UNSANDBOXED** badge, the audit record is marked `sandbox_tier=4`, and package installs (`pip`, `npm`, ...) show an extra warning. Workflows and sub-agents can never run commands in tier 4.
 - Git: diffs, commit with an approval prompt; push only if the environment allows network to the git host **and** the user confirms.
 
 ### 4.11 Literature review (D7)
@@ -316,17 +333,17 @@ List shortcuts only work when the list has focus, never while typing in the mess
 
 **Citation styles (D25)**
 - Formatting is **deterministic code, not the model**: a `cite.format` tool uses **citeproc-py** (BSD) with **CSL** style files (Citation Style Language, the standard used by Zotero/Mendeley/Pandoc).
-- Shipped styles: `apa` (APA 7th) and `ieee`. Adding a style = dropping a `.csl` file into `~/.config/incant/csl/` (thousands are available from the open CSL styles repository, CC BY-SA). No code changes.
+- Shipped styles: `apa` (APA 7th) and `ieee`. Adding a style = dropping a `.csl` file into `~/.config/cairn/csl/` (thousands are available from the open CSL styles repository, CC BY-SA). No code changes.
 - A **`references` skill** wraps the tool: it tells the agent when to collect metadata (DOI → Crossref, Zotero item, BibTeX), how to build the bibliography, in-text citation conventions per style, and to run `citation-check` first. So the answer to "is this a skill?" is: **both**. The formatter is a tool (so output is exact and repeatable), and the skill holds the know-how and the default style. Each environment sets a default style (`citation_style = "apa"`); it can be changed per chat or per request ("use IEEE").
 - Output formats: in-text + reference list in Markdown/DOCX artifacts, plus a `.bib`/CSL-JSON file.
 
 ### 4.12 Connectors (D14: sync to local first)
-- **Google Drive:** a sync worker (rclone, MIT, or the Drive API with read-only scope) mirrors **chosen folders** into the local workspace store on demand or on a schedule. The agent only sees the local mirror. OAuth tokens are stored in the OS keychain (`keyring`).
+- **Google Drive:** a sync worker (rclone, MIT, or the Drive API with read-only scope) mirrors **chosen folders** into the local workspace store **only when the user triggers a sync** (D27): `cairn sync drive [folder]`, the "Sync now" button, or by asking the agent (which then asks for approval). The sync shows a preview (new/changed/deleted files) before it applies. The agent only sees the local mirror. OAuth tokens are stored in the OS keychain (`keyring`).
 - **GitHub/Git:** repos are cloned locally; `git fetch` runs as an explicit, audited sync action. The agent works against the local clone.
 - Each sync logs what came in (files, sizes, hashes). Nothing is uploaded unless the user starts a push or upload, which is approved and audited.
 
 ### 4.13 Web search
-- Default backend: self-hosted **SearXNG** (AGPL-3.0, run as a separate container, not bundled into incant).
+- Default backend: self-hosted **SearXNG** (AGPL-3.0, run as a separate container, not bundled into cairn).
 - Optional: other search APIs via plugin, all through the egress proxy.
 - `web.fetch` pulls readable text; pages are treated as **untrusted content** (prompt-injection guard: content goes in tagged blocks, and tools that follow links need approval).
 
@@ -348,7 +365,7 @@ List shortcuts only work when the list has focus, never while typing in the mess
 - Append-only table in SQLite + mirrored JSONL file.
 - Record: `{seq, ts, chat_id, agent_id, parent_agent_id, actor, action, target, policy_decision, params_digest, result_digest, prev_hash, hash}` where `hash = SHA-256(prev_hash ‖ canonical_json(record))`.
 - Full prompts/outputs are stored in the chat store (encrypted if the chat is locked) and **referenced by digest**, so the log can be shared without exposing content.
-- `incant audit verify` recomputes the chain. Checkpoints are signed with a local Ed25519 key, and the user can export a checkpoint (e.g. print or store it elsewhere) to detect a rewritten history.
+- `cairn audit verify` recomputes the chain. Checkpoints are signed with a local Ed25519 key, and the user can export a checkpoint (e.g. print or store it elsewhere) to detect a rewritten history.
 - UI: per-chat audit view (`l`), a global audit browser with filters, and export (JSONL/CSV).
 
 ### 5.3 Policy engine
@@ -364,7 +381,7 @@ List shortcuts only work when the list has focus, never while typing in the mess
 ### 5.5 Encryption (D23, D24): user-controlled, off by default
 - **Default: no encryption.** No passphrase at start; everything opens immediately. First run recommends full-disk encryption (LUKS on Linux, BitLocker on Windows) and links to how to set it up, without enforcing it.
 - **Only the user can turn encryption on**, in either of two ways:
-  1. Directly: `incant lock <chat>`, the chat menu ("Lock chat…"), or a shortcut (`L`).
+  1. Directly: `cairn lock <chat>`, the chat menu ("Lock chat…"), or a shortcut (`L`).
   2. By explicitly asking the agent ("encrypt this chat", "lock the thesis folder"). The agent calls the `encrypt` tool, which **always** ends in a confirmation dialog in the client, where the user types the passphrase. The passphrase goes from the client to the core's crypto module and **never enters the model context**, tool arguments, logs or the audit record.
   The `encrypt`/`decrypt` tools are marked `user_initiated_only`: the policy engine rejects them unless the message that triggered the call is a user message in the same chat (not tool output, web content, a file or a sub-agent). So prompt injection can't trigger encryption (e.g. a ransomware-style "encrypt everything" request).
 - **Passphrases only for locked chats (D24):** each locked chat (or folder) has its own key, derived from its passphrase with Argon2id. Unlocked chats need no passphrase. Locked chats show 🔒 in the list; opening one asks for its passphrase; it re-locks after a configurable idle time. One passphrase can optionally be reused across several chats.
@@ -416,7 +433,7 @@ Goal: every feature exists end to end in a minimal form.
 
 | Feature | Thin-slice scope | Acceptance criterion |
 |---|---|---|
-| Core daemon + API | start/stop, auth token, health | `incant serve` + `incant status` work; API is only reachable locally |
+| Core daemon + API | start/stop, auth token, health | `cairn serve` + `cairn status` work; API is only reachable locally |
 | Backends | Ollama + OpenAI-compat drivers, `backends.toml`, per-role selection | Streams a reply from `qwen3:30b` via Ollama **and** via llama-server; switching backends is one config line; hosted backend is denied by default |
 | TUI | chat list, chat view, input, sidebar | All §4.6 shortcuts work; `d` deletes with confirm + undo |
 | Web UI | same screens, read/write | Same shortcuts work; works with the network disconnected |
@@ -434,11 +451,11 @@ Goal: every feature exists end to end in a minimal form.
 | Connectors | git clone/fetch; Drive folder mirror | Mirror a Drive folder read-only; agent reads local copy only |
 | Web search | SearXNG backend, opt-in | Blocked in offline env; allowed + logged in online env |
 | Multi-agent | `spawn_agent` (max_parallel 1) + 1 YAML workflow | Sub-agent appears nested in audit; budget limits enforced |
-| Audit log | hash chain + verify + per-chat view | `incant audit verify` fails after a record is edited by hand |
+| Audit log | hash chain + verify + per-chat view | `cairn audit verify` fails after a record is edited by hand |
 | Redaction | secret rules + Presidio | A fake AWS key in an outbound query is blocked |
 | Encryption | per-chat lock, user-initiated only | A locked chat can't be read without its passphrase; an `encrypt` call triggered from web/tool content is rejected; passphrase never appears in logs or model context |
 | Citations | `cite.format` (CSL) + `references` skill | The same references come out correctly in APA and IEEE; adding a `.csl` file adds a style |
-| Platforms | Debian + Windows | Phase 0 test suite passes on Debian 12 and Windows 11 |
+| Platforms | Debian + Windows | Phase 0 test suite passes on Debian 12 and Windows 11; sandbox tier 1 on Debian and tier 2 on Windows block network and outside-workspace reads |
 | Egress report | per-chat panel | Lists host, bytes and redactions for each request |
 
 ### Phase 1 — Depth: coding
@@ -454,11 +471,9 @@ Workflow editor, parallel sub-agents on GPU backends, signed audit checkpoints, 
 
 ## 8. Open questions
 Resolved in v0.2: hardware (D21), artifact versioning (D22), encryption (D23), unlocking (D24), citation styles (D25).
+Resolved in v0.3: name (D26), Drive sync (D27), Windows sandbox (D28), hosted providers (D29).
 
-1. **Drive sync scope:** which folders, and on-demand only or scheduled?
-2. **Name:** keep `incant`, or pick another name?
-3. **Hosted providers:** which hosted OpenAI-compatible providers to document and test first (e.g. Alibaba Model Studio for Qwen, DeepSeek API, OpenRouter, a self-hosted vLLM box)?
-4. **Windows sandbox:** require Podman Desktop / Docker Desktop for sandboxed runs, or also offer a weaker no-container mode on Windows (clearly labelled)?
+1. **Drive folders:** which folders to set up for the first sync (can be decided at setup time).
 
 ## 9. Risks
 - **Hosted backends weaken privacy.** Mitigated by deny-by-default, redaction, the ☁ badge, locked chats never going to hosted backends, and the egress report.
