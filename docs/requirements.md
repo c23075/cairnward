@@ -1,6 +1,8 @@
 # Cairnward requirements
 
-Status: Draft v0.2 (goes with spec v0.6; v0.1 described the all-in-one design and is in git history)
+Status: Draft v0.3 (goes with spec v0.7: all protections optional; v0.1 described the all-in-one design and is in git history)
+
+All security requirements below describe what each protection does **when it is switched on**; FR-PRIV-* require that each can be switched off.
 
 - **IDs** are stable: never reuse or renumber. v0.1 IDs that no longer apply are listed at the end as withdrawn.
 - **Priority (MoSCoW) for Phase 0:** **M** Must, **S** Should (may slip to 0.x), **C** Could, **W** Won't in Phase 0.
@@ -10,6 +12,16 @@ Status: Draft v0.2 (goes with spec v0.6; v0.1 described the all-in-one design an
 ---
 
 ## Functional requirements
+
+### Privacy settings and presets
+| ID | Requirement | Pri | MS | Verification |
+|---|---|---|---|---|
+| FR-PRIV-1 | `[privacy]` settings (spec §5.0 table) with presets Open / Balanced / Strict; individual overrides mark *Custom* | M | M0 | `test_privacy_settings.py` |
+| FR-PRIV-2 | Resolution environment → global; virtual models carry the environment's privacy level; `cairnward run --env` applies it | M | M0 | `test_privacy_resolution.py` |
+| FR-PRIV-3 | `cairnward setup` first-run preset choice + prerequisite check; unmet prerequisites shown as *requested but inactive* | M | M0 | integration |
+| FR-PRIV-4 | `cairnward privacy show [--env]`, status badge in CLI and dashboard; warnings for ineffective combinations (e.g. allowlist without isolation = advisory) | M | M0 (CLI), M2 (dashboard) | unit + e2e |
+| FR-PRIV-5 | Every settings change audited; `audit.disabled` written before audit is switched off, `audit.enabled` with gap duration when back on | M | M0 | `test_settings_audit.py` |
+| FR-PRIV-6 | Each protection can be switched off independently and Cairnward keeps working; full test suite passes under Open, Balanced, Strict and all-off | M | M0 onward | CI matrix over presets |
 
 ### Gateway: model endpoint and backends
 | ID | Requirement | Pri | MS | Verification |
@@ -145,14 +157,14 @@ Status: Draft v0.2 (goes with spec v0.6; v0.1 described the all-in-one design an
 
 | ID | Requirement | Pri | Verification |
 |---|---|---|---|
-| NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time | M | benchmark test with fake backend |
+| NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | benchmark test with fake backend |
 | NFR-P3 | *Provisional:* main model first token ≤ 10 s for 2K-token prompt (warm) on reference machine | S | `scripts/bench_backend.py` |
 | NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | CI measurement |
 | NFR-R1 | No data loss on crash; research jobs resumable | M | kill tests |
 | NFR-R2 | Audit record before every effect | M | FR-AUD-1 |
-| NFR-S1 | Default install makes zero outbound connections | M | isolation suite |
+| NFR-S1 | Strict: zero outbound connections unless allowlisted; Balanced: none without approval | M | isolation suite per preset |
 | NFR-S2 | Threat model reviewed each milestone | M | PR checklist |
-| NFR-S4 | Isolation holds for every sandbox type (direct network attempts fail) | M | isolation suite in CI (Linux) |
+| NFR-S4 | With isolation on, isolation holds for every sandbox type (direct network attempts fail) | M | isolation suite in CI (Linux) |
 | NFR-A1 | Dashboard WCAG 2.2 AA | S | axe-core |
 | NFR-PORT-1 | Linux (Debian 12+, Ubuntu 22.04+); Python 3.12+; unit tests also pass on Windows | M | CI |
 | NFR-PORT-2 | Windows via WSL2 | W | L |

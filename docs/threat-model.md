@@ -5,6 +5,8 @@ Method: **STRIDE** (security) and **LINDDUN** (privacy) applied to the component
 
 Review this document whenever a component, data flow or trust boundary changes, and at least once per phase.
 
+**Assumed configuration:** the **Strict** preset (spec §5.0). Every protection is optional; a control listed here applies only when its setting is on. `cairnward privacy show` tells you which controls are active in each environment.
+
 ---
 
 ## 1. Assets
@@ -86,6 +88,7 @@ The model is **not** a trusted component: anything it decides passes through the
 | LLM10 | Unbounded Consumption | Effort budgets; time limits; sub-agent limits; context warnings | T-13 |
 
 ## 6. Accepted risks (Phase 0)
+- Protections the user switches off (Open preset, Custom settings) don't apply; this is the user's choice, made visible by badges and audited (spec §5.0).
 - A compromised OS account or root user can read everything that's unlocked and capture passphrases as they're typed.
 - Prompt injection can't be fully prevented by any known method; Cairnward limits its impact instead (approvals, network off, user-only actions).
 - Unlocked chats' search index and embeddings are plaintext in SQLite; deleting them is best effort on SSDs.

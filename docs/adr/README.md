@@ -17,5 +17,6 @@ ADRs are never edited after acceptance except to change their status; a changed 
 | [0009](0009-gateway-pivot.md) | Pivot to a client-neutral privacy gateway plus research workflows | Accepted |
 | [0010](0010-os-level-egress-enforcement.md) | Enforce egress at the OS level | Accepted |
 | [0011](0011-transcript-vault.md) | Transcript vault for conversations from any client | Accepted |
+| [0012](0012-optional-privacy-controls-and-presets.md) | Optional privacy controls with presets and per-environment overrides | Accepted |
 
 Template: copy [`template.md`](template.md).

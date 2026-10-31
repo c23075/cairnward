@@ -1,7 +1,8 @@
 # Spec: Cairnward — a local privacy gateway and research agent
 
-Status: **Draft v0.6, for review**
-v0.6 changes direction after the [project critique](#13-history): Cairnward is now a **client-neutral privacy gateway** that existing chat apps and coding agents plug into, plus **its own literature-review workflows**. Earlier versions specified an all-in-one Claude-app clone; decisions that no longer apply are marked *superseded* in §2.
+Status: **Draft v0.7, for review**
+v0.7: **every privacy and security feature is optional**, chosen through presets (Open / Balanced / Strict) with per-environment overrides (§5.0, D55–D58).
+v0.6 changed direction after the [project critique](#13-history): Cairnward is now a **client-neutral privacy gateway** that existing chat apps and coding agents plug into, plus **its own literature-review workflows**. Earlier versions specified an all-in-one Claude-app clone; decisions that no longer apply are marked *superseded* in §2.
 Date: 2026-10-31
 Repo: `c23075/possessed-incantation` (to be renamed `cairnward`)
 Name: **Cairnward**: cairns mark a trail (the audit trail); *ward* means to guard. Command `cairnward`, short alias `cw`. License: **Apache-2.0**.
@@ -26,9 +27,12 @@ Most local AI tools (chat apps, coding agents, research assistants) run on your 
 
 Primary use cases: **coding** (via existing coding agents run through the gateway) and **literature-review research**, equally.
 
+All of these protections are **optional** (§5.0). With everything switched off, Cairnward is a plain model router with virtual models and research workflows; each protection can be switched on globally or per environment.
+
 ### 1.1 Goals
-- G1. Work fully offline by default with open-weight models (Qwen, DeepSeek) on a CPU-only 32 GB machine.
-- G2. **Enforced choke point:** no tool, client or Cairnward component can reach the network except through the egress proxy (OS-enforced).
+- G0. **User choice:** every privacy and security feature can be switched on or off, globally or per environment, through presets or individually; weakening is visible and logged, never silent.
+- G1. Work fully offline with open-weight models (Qwen, DeepSeek) on a CPU-only 32 GB machine.
+- G2. **Enforced choke point (when isolation is on):** no tool, client or Cairnward component can reach the network except through the egress proxy (OS-enforced).
 - G3. Verifiable record: audit log with externally anchored checkpoints.
 - G4. Client-neutral: any OpenAI-compatible chat client or coding agent works; a tested set is documented.
 - G5. Research workflows that suit CPU hardware (batch, resumable, overnight) and never invent citations.
@@ -61,6 +65,10 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D52 | Platforms | **Linux (Debian family) first**; Windows via WSL2 in a later milestone; CI keeps unit tests on Windows | — |
 | D53 | Heavy dependencies | Lean core; Docling, Presidio and other heavy libraries run as **optional workers**; pypdfium2 is the default PDF parser | — |
 | D54 | Approvals | Risk-tiered, batched approvals with an approvals inbox, to avoid approval fatigue | — |
+| D55 | Optional protections | **Every** privacy/security feature can be switched off, including isolation, network blocking, approvals, redaction, vault, audit log, anchoring, crypto-shredding, backup purge rewrite and MCP pinning | [0012](adr/0012-optional-privacy-controls-and-presets.md) |
+| D56 | Defaults | **Preset chosen at first run** (`cairnward setup`): Open, Balanced or Strict; changeable any time; Custom when individual settings differ | 0012 |
+| D57 | Granularity | **Global settings + per-environment overrides**; a virtual model (`cw/<env>:<effort>`) therefore also selects the privacy level | 0012 |
+| D58 | Weakening | Allowed without friction, but **visible** (dashboard badge, `cairnward status`, `cairnward privacy show`) and **logged** (audit record of every change, written before audit itself is switched off) | 0012 |
 | D5, D19 | Model backends | Pluggable: Ollama (default), llama.cpp, any OpenAI-compatible server; per role / environment / effort | [0004](adr/0004-pluggable-backends.md) |
 | D29 | Hosted providers | Denied by default; tested first: Alibaba Model Studio, DeepSeek API, OpenRouter; Claude API later (separate API key) | 0004 |
 | D7, D25 | Literature sources, citations | Local PDFs, Zotero, arXiv/Semantic Scholar/OpenAlex/PubMed/Crossref; CSL styles (APA, IEEE default) | — |
@@ -109,9 +117,11 @@ Current decisions. Superseded decisions are listed at the end with what replaced
         └─────────────────┘                                           └──────────────────┘
 ```
 
-**Rules**
-1. Clients and agents talk only to Cairnward (model endpoint, MCP proxy) and, if allowed, to the egress proxy. The OS enforces this (§3.2).
-2. Every effect (model call, tool call, outbound connection, file write by Cairnward) goes through `policy.check → allow | ask | deny`, with an audit record before and after.
+The diagram shows the **Strict** configuration. Each box below the policy engine, and the sandboxing itself, can be switched off (§5.0); the endpoints, routing, virtual models and research workflows always work.
+
+**Rules** (when the corresponding protections are on)
+1. Clients and agents talk only to Cairnward (model endpoint, MCP proxy) and, if allowed, to the egress proxy. The OS enforces this when isolation is on (§3.2); with isolation off, the proxy settings are advisory and tools can connect directly.
+2. Every effect (model call, tool call, outbound connection, file write by Cairnward) goes through `policy.check → allow | ask | deny`, with an audit record before and after (when audit is on). Settings that are off make the policy engine return `allow` for that category without asking.
 3. `cairnward-egress` is the only process with real network access. It is small, does host allowlisting and connection logging, and is the first component to be rewritten in Rust (D9).
 4. The local model server is reached through a Unix socket or loopback port that is bridged into the sandbox; it never needs internet access after models are downloaded.
 
@@ -200,6 +210,56 @@ Loopback web app (hardened as §3.1), the only UI Cairnward builds: **approvals 
 
 ## 5. Security and privacy
 
+### 5.0 Privacy controls and presets (D55–D58, [ADR-0012](adr/0012-optional-privacy-controls-and-presets.md))
+Every protection in this section and in §3.2/§4.5/§4.8 is a setting. A **preset** sets them all at once; individual settings can then be changed (the preset shows as *Custom*).
+
+**Settings and presets**
+
+| Setting (`[privacy]` key) | Values | Open | Balanced | Strict |
+|---|---|---|---|---|
+| `isolation`: OS sandbox + network namespaces for agents, clients and the core (§3.2) | `on` / `off` | off | on | on |
+| `network`: outbound access for tools and Cairnward (§3.2) | `open` / `ask` (new hosts need approval) / `allowlist` / `off` | open | ask | allowlist (empty by default = off) |
+| `hosted_backends` (§4.1) | `allow` / `ask` / `deny` | allow | ask | deny |
+| `approvals`: risk-tiered prompts (§5.3) | `off` / `high_only` / `tiered` | off | high_only | tiered |
+| `redaction` (§5.4) | `off` / `warn` (log only) / `enforce` (secrets block, PII ask) | off | warn | enforce |
+| `vault`: transcript vault (§4.5) | `off` / `digests` / `full` | off | full | full |
+| `audit`: hash-chained audit log (§5.2) | `off` / `on` | on | on | on |
+| `audit_anchor`: external checkpoints (§5.2) | `off` / `git` | off | off | git |
+| `crypto_shred`: per-conversation keys for reliable deletion (§5.5) | `off` / `on` | off | on | on |
+| `backup_purge`: purge rewrites backups (§4.8) | `off` / `on` / `ask` | off | ask | on |
+| `mcp_pinning`: tool pinning and rug-pull checks (§4.2) | `off` / `on` | off | on | on |
+| `egress_report`: per-conversation report (§4.9) | `off` / `on` | off | on | on |
+
+- **Open** keeps the audit log on because it costs nothing in daily use; it can still be switched off. With every setting off, Cairnward is a plain router: virtual models, backends, research workflows and the dashboard's model/job views keep working.
+- **Opt-in features stay opt-in in every preset:** locking a conversation with a passphrase, encrypting a sync target, TLS interception. Presets never lock or encrypt anything on their own.
+- **Not switchable** (they are functional, not protective): the passphrase dialog when you lock/unlock something; the local-only binding and Host/Origin checks of the dashboard and endpoints (§3.1), because turning them off would expose Cairnward to any web page or network peer rather than reduce friction. *(If you want these switchable too, say so; see §12.)*
+
+**Where settings live**
+```toml
+# cairnward.toml
+[privacy]
+preset = "balanced"          # open | balanced | strict
+approvals = "tiered"         # individual override → shows as "balanced (custom)"
+
+# environments/scratch.toml
+[privacy]
+preset = "open"
+
+# environments/thesis-confidential.toml
+[privacy]
+preset = "strict"
+vault = "digests"            # keep only digests of conversations
+```
+Resolution: environment setting → environment preset → global setting → global preset. Because virtual models carry the environment (`cw/scratch:low`, `cw/thesis-confidential:high`), picking a model in any client also picks its privacy level. Coding-agent runs use the environment given to `cairnward run --env`.
+
+**First run:** `cairnward setup` asks for a preset (with a one-line description of each and what it needs installed: e.g. Strict needs bubblewrap and a private git repo for anchors), then checks prerequisites with `cairnward doctor`. Missing prerequisites for a chosen setting are reported, and the setting shows as *requested but inactive* until fixed.
+
+**Visibility and logging of weakening (D58)**
+- `cairnward privacy show [--env NAME]` prints the effective value of every setting, where it came from (preset, global, environment), and which settings are weaker than Strict.
+- The dashboard header and `cairnward status` show a badge per environment: `Strict`, `Balanced`, `Open`, or `Custom (3 weaker than Strict)`; settings that are off or inactive are listed on hover/expansion.
+- Every settings change is an audit record (`settings.changed`, before → after, who/where). Switching `audit` off writes a final `audit.disabled` record first; switching it back on writes `audit.enabled` with the gap's duration, so gaps are visible in the chain.
+- Dependencies are explained where a combination weakens a setting silently otherwise, e.g. `network = "allowlist"` with `isolation = "off"` shows *advisory only: tools can bypass the proxy*; `audit_anchor = "git"` requires `audit = "on"`; redaction only covers traffic Cairnward terminates.
+
 ### 5.1 Threat model
 See [threat-model.md](threat-model.md) (updated for v0.6). Key changes: third-party clients and agents are now untrusted (boundary B7), enforcement moved to the OS, content redaction is limited to traffic Cairnward terminates, and audit checkpoints are anchored externally.
 
@@ -263,15 +323,16 @@ Full list in [requirements.md](requirements.md).
 | Gateway overhead | ≤ 50 ms added per model request (policy, audit, vault write), excluding model time |
 | Model speed | Provisional until benchmarked: main model first token ≤ 10 s for a 2K-token prompt (warm); warning before requests needing > 60 s of prompt processing |
 | Footprint | Core ≤ 500 MB RAM without optional workers |
-| Isolation | Direct connections from any sandbox fail (`cairnward doctor` and CI tests) |
-| Reliability | No data loss on crash; audit record before every effect; research jobs resume after restart |
-| Privacy | Zero outbound connections in a default install |
+| Isolation | With `isolation = on`: direct connections from any sandbox fail (`cairnward doctor` and CI tests) |
+| Reliability | No data loss on crash; audit record before every effect (when audit is on); research jobs resume after restart |
+| Privacy | Strict preset: zero outbound connections unless allowlisted; Balanced: none without approval; Open: as configured |
+| Optionality | Every protection can be switched off independently and Cairnward still works; with all off, gateway overhead ≤ 10 ms per request |
 | Accessibility | Dashboard WCAG 2.2 AA; single-key shortcuts can be turned off |
 | Portability | Linux first; Windows via WSL2 later; Python 3.12+ |
 
 ## 9. Delivery plan (summary)
 Details in [plan/phase0.md](plan/phase0.md).
-- **M0 — Gateway skeleton:** model endpoint pass-through to Ollama with policy + audit + vault write; `cairnward run` sandbox with no direct network; `cairnward-egress`; one coding agent and one chat client working through it.
+- **M0 — Gateway skeleton:** privacy settings model with presets and per-environment overrides (each protection added later plugs into it); model endpoint pass-through to Ollama with policy + audit + vault write; `cairnward run` sandbox with no direct network; `cairnward-egress`; one coding agent and one chat client working through it.
 - **M1 — Research core:** PDF library, `lit.ask` with page citations, citation check, CSL formatting, research job queue; PaperQA2 spike.
 - **M2 — Security features and dashboard:** approvals inbox, risk tiers, provenance dialog, redaction, egress report, vault browser, locking, audit anchoring, MCP proxy with pinning, all four coding agents and 2–3 clients tested.
 - **M3 — Sync, connectors, orchestration:** backup with purge rewrite, replication, Zotero, academic APIs, Drive mirror, research workflows with sub-agents, hosted backends.
@@ -284,8 +345,9 @@ As v0.5 §9, plus: **isolation tests** (every sandbox type tries direct DNS/TCP/
 As v0.5 §10 (pydantic-validated TOML with JSON Schema, Alembic migrations, OpenAPI for the dashboard/management API, versioned event-log format), plus the **client profile** format for `cairnward run` and `cairnward client add`.
 
 ## 12. Open questions
+0. Should the dashboard/endpoint hardening (loopback-only binding, Host/Origin checks) also be switchable? Currently not, because switching it off exposes Cairnward rather than reducing friction (§5.0).
 1. Third tested chat client: LibreChat or AnythingLLM (decide at M2).
-2. Reuse Anthropic's `sandbox-runtime` (Node.js) directly, or reimplement its approach in Python (decide in T0.6).
+2. Reuse Anthropic's `sandbox-runtime` (Node.js) directly, or reimplement its approach in Python (decide in T0.6, ADR-0013).
 3. PaperQA2 as engine or own pipeline (decide in T1.1).
 4. Repo rename to `cairnward` (owner action, with the default-branch fix).
 5. Drive folders for the first mirror (setup time).
@@ -295,6 +357,7 @@ As v0.5 §10 (pydantic-validated TOML with JSON Schema, Alembic migrations, Open
 - Critique (2026-10-31): scope too large for one person; most chat/coding features already exist (Open WebUI, Jan, opencode, Qwen Code, Aider, Goose, PaperQA2, Zori, ZotLLM); in-process egress control not enforceable; audit log not tamper-evident without external anchors; backups defeated crypto-shredding; heavy dependencies; name taken on PyPI. v0.6 responds to each point (D42–D54).
 
 ## 14. Risks
+- **Weaker configurations look protected:** a user on Open or Custom may assume Strict-level guarantees. Mitigated by the badge, `privacy show`, *advisory only* warnings for ineffective combinations, and audit records of every change.
 - **Client compatibility drift:** clients and agents change their APIs and config often. Mitigated by profiles, compatibility tests, and the generic OpenAI-compatible path.
 - **Approval waits vs client timeouts:** long "ask" waits can time out clients. Mitigated by risk tiers, remembered approvals, and retry-aware approvals.
 - **Content redaction blind spot:** third-party tools' own HTTPS traffic is only host-filtered. Mitigated by deny-by-default network, per-host approval, egress report; documented.
