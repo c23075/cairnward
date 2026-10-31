@@ -347,7 +347,7 @@ List shortcuts only work when the list has focus, never while typing in the mess
 ### 5.2 Tamper-evident audit log
 - Append-only table in SQLite + mirrored JSONL file.
 - Record: `{seq, ts, chat_id, agent_id, parent_agent_id, actor, action, target, policy_decision, params_digest, result_digest, prev_hash, hash}` where `hash = SHA-256(prev_hash ‖ canonical_json(record))`.
-- Full prompts/outputs are stored in the encrypted store and **referenced by digest**, so the log can be shared without exposing content.
+- Full prompts/outputs are stored in the chat store (encrypted if the chat is locked) and **referenced by digest**, so the log can be shared without exposing content.
 - `incant audit verify` recomputes the chain. Checkpoints are signed with a local Ed25519 key, and the user can export a checkpoint (e.g. print or store it elsewhere) to detect a rewritten history.
 - UI: per-chat audit view (`l`), a global audit browser with filters, and export (JSONL/CSV).
 
