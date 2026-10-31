@@ -1,6 +1,6 @@
 # Benchmarks
 
-`scripts/bench_backend.py` measures how fast a model server runs on your machine. The results set Cairn's performance requirements (NFR-P3, NFR-P4 in [requirements.md](../requirements.md)), e.g. when to warn that a prompt will take more than a minute to read.
+`scripts/bench_backend.py` measures how fast a model server runs on your machine. The results set Cairnward's performance requirements (NFR-P3, NFR-P4 in [requirements.md](../requirements.md)), e.g. when to warn that a prompt will take more than a minute to read.
 
 It uses only the Python standard library, sends only generated filler text, and by default talks only to servers on this machine.
 
@@ -33,7 +33,7 @@ Options: `--sizes 512,2048,8192,16384,30000` (prompt sizes in tokens), `--ctx 32
 | TTFT s | Time to first token: how long you wait before the reply starts |
 | prompt tok/s | How fast the model reads input. On CPU this dominates waiting time for long prompts |
 | gen tok/s | How fast the reply is written |
-| Prefix-cache test | How much faster a follow-up turn is when the server reuses the earlier prompt (why Cairn keeps prompts stable, spec §4.4) |
+| Prefix-cache test | How much faster a follow-up turn is when the server reuses the earlier prompt (why stable prompts matter on CPU) |
 
 ## Recording results
 

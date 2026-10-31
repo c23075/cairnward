@@ -1,13 +1,15 @@
 [project]
-name = "cairn"
+name = "cairnward"
 version = "0.0.1"
-description = "Local, privacy-first AI agent for coding and literature review"
+description = "Local privacy gateway for AI clients and agents, with literature-review workflows"
 requires-python = ">=3.12"
-# License not yet chosen (spec §11, open question 2).
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = []
 
 [project.scripts]
-cairn = "cairn.cli:main"
+cairnward = "cairnward.cli:main"
+cw = "cairnward.cli:main"
 
 [dependency-groups]
 dev = [
@@ -24,7 +26,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cairn"]
+packages = ["src/cairnward"]
 
 [tool.ruff]
 line-length = 100
@@ -49,5 +51,5 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 
 [tool.coverage.run]
-source = ["cairn"]
+source = ["cairnward"]
 branch = true

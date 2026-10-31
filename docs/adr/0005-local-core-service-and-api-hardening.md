@@ -1,6 +1,6 @@
 # ADR-0005: Local core service with thin clients; local API hardening
 
-- Status: Accepted
+- Status: Accepted; the thin-client part is superseded by [ADR-0009](0009-gateway-pivot.md) (the API hardening still applies to the dashboard and gateway endpoints)
 - Date: 2026-10-31
 - Spec: §3, §3.1, D2, D34
 

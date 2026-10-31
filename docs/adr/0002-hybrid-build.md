@@ -1,6 +1,6 @@
 # ADR-0002: Hybrid build: own core, reuse open-source parts
 
-- Status: Accepted
+- Status: Superseded by [ADR-0009](0009-gateway-pivot.md)
 - Date: 2026-10-31
 - Spec: §3, D1
 

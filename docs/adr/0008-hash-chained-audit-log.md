@@ -1,6 +1,6 @@
 # ADR-0008: Hash-chained audit log, OpenTelemetry export, Merkle later
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-31 by spec D49: checkpoints are anchored to a private git repo owned by the user
 - Date: 2026-10-31
 - Spec: §5.2, D8, D37
 

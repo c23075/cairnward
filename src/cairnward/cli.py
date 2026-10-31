@@ -1,6 +1,6 @@
 """Command-line entry point.
 
-Only `--version` exists so far; subcommands (`serve`, `status`, `doctor`, `audit`, ...)
+Only `--version` exists so far; subcommands (`serve`, `run`, `doctor`, `audit`, `research`, ...)
 arrive with the Phase 0 tasks in docs/plan/phase0.md.
 """
 
@@ -9,15 +9,15 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-from cairn import __version__
+from cairnward import __version__
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cairn",
-        description="Local, privacy-first AI agent for coding and literature review.",
+        prog="cairnward",
+        description="Local privacy gateway for AI clients and agents, with research workflows.",
     )
-    parser.add_argument("--version", action="version", version=f"cairn {__version__}")
+    parser.add_argument("--version", action="version", version=f"cairnward {__version__}")
     return parser
 
 

@@ -1,149 +1,143 @@
-# Cairn requirements
+# Cairnward requirements
 
-Status: Draft v0.1 (goes with spec v0.5)
+Status: Draft v0.2 (goes with spec v0.6; v0.1 described the all-in-one design and is in git history)
 
-- **IDs** are stable: never reuse or renumber; mark withdrawn requirements as such.
-- **Priority (MoSCoW) for Phase 0:** **M** = Must (Phase 0 isn't done without it), **S** = Should (in Phase 0, may slip to a 0.x release), **C** = Could (Phase 0 if time allows), **W** = Won't in Phase 0 (later phase).
-- **Milestone:** M0–M3 from [plan/phase0.md](plan/phase0.md); P1–P3 = later phases.
-- **Verification:** the test (or test suite) that proves it. Every **M** item must have an automated test before Phase 0 closes.
+- **IDs** are stable: never reuse or renumber. v0.1 IDs that no longer apply are listed at the end as withdrawn.
+- **Priority (MoSCoW) for Phase 0:** **M** Must, **S** Should (may slip to 0.x), **C** Could, **W** Won't in Phase 0.
+- **MS:** milestone M0–M3 from [plan/phase0.md](plan/phase0.md); L = later.
+- **Verification:** the test proving it. Every **M** item needs an automated test before Phase 0 closes.
 
 ---
 
 ## Functional requirements
 
-### Core service and API
+### Gateway: model endpoint and backends
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-API-1 | `cairn serve` starts the core; `cairn status` reports health, backends and sandbox tier | M | M0 | `tests/integration/test_serve.py` |
-| FR-API-2 | API listens on a per-user Unix socket (0600) by default; token file 0600 / per-user ACL | M | M0 | `tests/security/test_socket_perms.py` |
-| FR-API-3 | Web UI port binds loopback only; rejects foreign Host and Origin; CSRF token on non-GET; no CORS | M | M1 | `tests/security/test_local_api.py` (DNS-rebinding, CSRF cases) |
-| FR-API-4 | OpenAPI document committed; CI fails on undocumented changes | M | M0 | CI `openapi-diff` job |
-| FR-API-5 | API fuzzed from the OpenAPI document without 5xx errors | S | M2 | schemathesis job |
+| FR-GW-1 | OpenAI-compatible `/v1/chat/completions` (streaming, tool calls), `/v1/models`, `/v1/embeddings` | M | M0 | integration tests with fake backends; conformance against the OpenAI SDK |
+| FR-GW-2 | Per-client API keys (`cairnward client add`); requests attributed to a client in audit/vault | M | M0 | `test_client_keys.py` |
+| FR-GW-3 | Virtual models `cw/<environment>:<effort>` resolve environment + effort settings | M | M1 | `test_virtual_models.py` |
+| FR-GW-4 | Per-client, per-run and per-environment budgets (tokens, requests, time) | M | M2 | `test_budgets.py` |
+| FR-GW-5 | Context warning: request expected to need > 60 s prompt processing is flagged (dashboard + optional rejection) | S | M2 | unit with benchmark profile |
+| FR-GW-6 | Ollama-compatible endpoint | W | L | — |
+| FR-BACK-1 | Ollama and OpenAI-compatible backend drivers (streaming, tools, embeddings, health) | M | M0 | integration with fake servers; manual against real Ollama + llama-server |
+| FR-BACK-2 | Backends in `backends.toml`; model per role; override order run → client → environment → global | M | M1 | `test_backend_resolution.py` |
+| FR-BACK-3 | Fallback only to local backends, logged | M | M1 | `test_backend_fallback.py` |
+| FR-BACK-4 | Hosted backends denied by default; never for locked conversations unless overridden; ☁ marking | M | M3 | `tests/security/test_hosted_policy.py` |
+| FR-BACK-5 | Tested hosted providers: Alibaba Model Studio, DeepSeek API, OpenRouter | S | M3 | manual, release notes |
+| FR-BACK-6 | Anthropic driver (Claude API key) | W | L | — |
 
-### Model backends
+### Isolation and egress (OS-enforced)
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-BACK-1 | Ollama and OpenAI-compatible drivers: streaming chat, tool calls, embeddings, health | M | M0 | integration tests with fake servers; manual check against real Ollama + llama-server |
-| FR-BACK-2 | Backends defined in `backends.toml`; model per role (main/fast/vision/embed) with override order sub-agent → chat → environment → global | M | M1 | `test_backend_resolution.py` |
-| FR-BACK-3 | Fallback only to other **local** backends, logged | M | M1 | `test_backend_fallback.py` |
-| FR-BACK-4 | Hosted backends denied by default; allowed only via environment policy; never used for locked chats unless overridden per chat; ☁ badge | M | M3 | `tests/security/test_hosted_policy.py` |
-| FR-BACK-5 | Tested providers: Alibaba Model Studio, DeepSeek API, OpenRouter | S | M3 | manual, recorded in release notes |
-| FR-BACK-6 | Anthropic (Claude API) driver | W | P2 | — |
+| FR-ISO-1 | `cairnward run -- <cmd>` runs a command under bubblewrap with a loopback-only network namespace; gateway, MCP and proxy reachable via bridged sockets | M | M0 | `tests/isolation/test_run_sandbox.py` (direct TCP/UDP/DNS fail; gateway works) |
+| FR-ISO-2 | Filesystem policy for runs: workspace rw, agent config rw, secrets dirs hidden, rest read-only | M | M0 | `tests/isolation/test_run_fs.py` |
+| FR-ISO-3 | Cairnward core runs in its own loopback-only namespace; only `cairnward-egress` has network | M | M0 | `tests/isolation/test_core_isolated.py` |
+| FR-ISO-4 | Container templates for server clients on an internal-only network | M | M2 | integration (Podman) |
+| FR-ISO-5 | `cairnward doctor` checks prerequisites and runs isolation self-tests | M | M0 | unit + isolation suite |
+| FR-NET-1 | Network off by default; host allowlist / ask per host; every connection logged (host, bytes, timing, client/run) | M | M0 | `tests/security/test_no_egress_default.py` |
+| FR-NET-2 | Optional TLS interception with local CA, off by default, per environment | C | L | — |
+| FR-EGR-1 | Egress report per conversation, run and client; export | M | M2 | e2e |
 
-### Chats, folders, shortcuts, UI
+### Policy and approvals
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-CHAT-1 | Create, rename, pin, archive, search (FTS) chats | M | M1 | unit + TUI pilot tests |
-| FR-CHAT-2 | Folders (one level); move with `f` | M | M1 | TUI pilot + Playwright |
-| FR-CHAT-3 | `d` deletes with confirm; `u` undoes; 30-day trash; purge | M | M1 | TUI pilot + Playwright |
-| FR-UI-1 | TUI with all spec §4.6 shortcuts | M | M1 | `tests/e2e/tui/test_shortcuts.py` |
-| FR-UI-2 | Web UI with the same screens and shortcuts | M | M1 | `tests/e2e/web/test_shortcuts.spec.ts` |
-| FR-UI-3 | Single-key shortcuts can be turned off; keys rebindable | M | M1 | e2e tests with `single_key=false` |
-| FR-UI-4 | Command palette (`Ctrl+K`), help overlay (`?`) | S | M1 | e2e |
+| FR-POL-1 | `allow/ask/deny` decided outside the model for every effect | M | M0 | unit + coverage test |
+| FR-POL-2 | Risk tiers (low → allow+log, medium → ask once per scope, high → always ask) | M | M2 | `test_risk_tiers.py` |
+| FR-POL-3 | Approvals inbox (dashboard, desktop notification, `cairnward approvals`); batching of similar requests | M | M2 | e2e |
+| FR-POL-4 | User-only actions open a confirmation dialog in Cairnward's UI showing action + provenance; passphrases entered only there | M | M2 | `tests/security/test_user_only_actions.py` + injection corpus |
+| FR-POL-5 | Approvals survive client retries after timeouts | S | M2 | integration |
 
-### Effort, environments, context
+### MCP proxy and tools
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-EFF-1 | Default effort levels low/medium/high mapped per spec §4.2 | M | M1 | `test_effort.py` |
-| FR-EFF-2 | User-defined effort levels from `effort.toml` (all parameters in §4.2) | M | M1 | `test_effort_custom.py` |
-| FR-ENV-1 | Environments from TOML; picker; switching changes tools/network/sandbox; switch is audited | M | M1 | `test_environments.py` |
-| FR-ENV-2 | Built-in templates `coding`, `litreview-offline` (+ `litreview-online`, `scratch`: S) | M | M1 | unit |
-| FR-CTX-1 | Context meter within ±5% of the backend's token count, broken down by category | M | M1 | `test_context_meter.py` against fake + real tokenizer |
-| FR-CTX-2 | Auto-compaction at 80% with originals kept and searchable | M | M2 | integration + eval "compaction keeps key facts" |
+| FR-MCP-1 | MCP proxy (streamable HTTP + stdio shim) aggregating enabled servers per environment | M | M2 | integration |
+| FR-MCP-2 | Permissions = manifest ∩ environment; third-party servers sandboxed | M | M2 | `test_tool_permissions.py` |
+| FR-MCP-3 | Version/hash pinning; tool-definition hashes; change → disabled until re-approved | M | M2 | `tests/security/test_mcp_rugpull.py` |
+| FR-MCP-4 | Skills (SKILL.md) served to clients and used by research workflows | S | M2 | integration |
 
-### Uploads and artifacts
+### Coding agents
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-UP-1 | Upload text/code, PDF, DOCX, CSV, images; hash audited | M | M1 | integration |
-| FR-UP-2 | PDF Q&A answers cite page numbers | M | M2 | eval `evals/pdf_qa` |
-| FR-UP-3 | Images go to the vision model (loaded on demand); clear message if none configured | M | M2 | integration with fake vision backend |
-| FR-ART-1 | Artifacts in a git repo per chat; one commit per agent write | M | M1 | `test_artifacts_git.py` |
-| FR-ART-2 | History, diff, restore (restore = new commit) | M | M2 | e2e |
-| FR-ART-3 | External edits picked up and committed as `user` | S | M2 | integration |
-| FR-ART-4 | HTML/SVG preview in sandboxed iframe on a separate origin, no network | M | M2 | Playwright: preview can't fetch or read parent |
+| FR-AGT-1 | Profiles for Qwen Code, opencode, Aider, Goose + a generic OpenAI-compatible profile | M | M2 (first one in M0) | compatibility tests with fake model server |
+| FR-AGT-2 | Workspace snapshots before/after each run on hidden refs; `runs diff`, `runs revert` | M | M1 | `test_run_snapshots.py` |
+| FR-AGT-3 | All model/tool calls of a run linked to the run in audit and vault | M | M0 | integration |
 
-### Tools, skills, coding
+### Chat clients
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-TOOL-1 | MCP host (stdio); built-in servers `fs`, `shell`, `rag` | M | M2 | integration |
-| FR-TOOL-2 | Tool permissions = manifest ∩ environment | M | M2 | `test_tool_permissions.py` |
-| FR-TOOL-3 | Skills from SKILL.md folders; required permissions enforced | M | M2 | integration |
-| FR-TOOL-4 | MCP pinning: version + hash; tool-definition hashes; change → disabled until re-approved | M | M2 | `tests/security/test_mcp_rugpull.py` |
-| FR-CODE-1 | Agent proposes diffs; user approves per file (per hunk: P1) | M | M2 | e2e on `tests/fixtures/sample_repo` |
-| FR-CODE-2 | Commands run in sandbox tier 1 (Linux) / tier 2 (Windows) with no network | M | M2 | `tests/security/test_sandbox_isolation.py` |
-| FR-CODE-3 | Tier 4 off by default; when on, approval per command, badge, never for sub-agents/workflows | M | M2 | `test_sandbox_tier4_policy.py` |
-| FR-CODE-4 | Sample task "fix the failing test" completes with ≤ 2 approvals | S | M2 | eval `evals/coding_fix_test` |
+| FR-CLI-1 | Tested setup guides + profiles for Open WebUI and Jan | M | M2 | compatibility tests; manual checklist |
+| FR-CLI-2 | Third tested client (LibreChat or AnythingLLM) | S | M2 | same |
 
-### Literature review and citations
+### Transcript vault
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-LIT-1 | Index a local PDF folder (Docling → chunks → embeddings in sqlite-vec) | M | M2 | integration |
-| FR-LIT-2 | arXiv search (opt-in network), cached, audited | M | M3 | integration with recorded responses |
-| FR-LIT-3 | Zotero read via local API | S | M3 | integration with fake Zotero API |
-| FR-LIT-4 | Comparison table + `.bib` from 5 PDFs | M | M3 | eval `evals/litreview_table` |
-| FR-LIT-5 | Semantic Scholar, OpenAlex, PubMed, Crossref | W | P2 | — |
-| FR-CITE-1 | `cite.format` with CSL; APA and IEEE shipped; new `.csl` file adds a style | M | M3 | `test_cite_format.py` (golden outputs) |
-| FR-CITE-2 | `citation-check`: every reference in a synthesis resolves (index/DOI) | M | M3 | eval `evals/citation_existence` (0 invented references) |
+| FR-VLT-1 | Store every request/response through the model endpoint, per-conversation age keys | M | M0 | integration |
+| FR-VLT-2 | Reconstruct conversations from stateless requests by prefix hashing; branches for divergence | M | M1 | Hypothesis property test |
+| FR-VLT-3 | Vault browser: search, folders, pin, export, delete with confirm/undo; shortcuts (`d`, `f`, `/`, `j/k`, `L`, `x`, `l`, `?`); single-key shortcuts can be turned off | M | M2 | Playwright e2e |
+| FR-VLT-4 | Per-environment retention and `vault = "off"` (digests only) | M | M2 | unit |
+| FR-ENC-1 | Lock conversation / artifacts with passphrase (age, key wrapping, recovery key optional) | M | M2 | `test_lock.py` |
+| FR-ENC-2 | Passphrase never in model context, tool args, logs or audit | M | M2 | `tests/security/test_passphrase_leak.py` |
+| FR-ENC-5 | Crypto-shredding on purge | M | M1 | `test_crypto_shred.py` |
 
-### Network, redaction, egress
+### Research workflows
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-NET-1 | All outbound HTTP through the egress proxy; network off by default | M | M0 | `tests/security/test_no_egress_default.py` |
-| FR-NET-2 | Host allowlist / ask per host; approval shows URL + redacted payload | M | M2 | integration |
-| FR-NET-3 | SearXNG web search, opt-in | S | M3 | integration with fake SearXNG |
-| FR-RED-1 | Secret scan blocks; PII scan asks; custom regexes; redactions audited by category + digest | M | M2 | `tests/security/test_redaction.py` |
-| FR-EGR-1 | Per-chat egress report (host, bytes, redactions, decision, approver); export | M | M2 | e2e |
+| FR-RES-1 | PDF library from a local folder (pypdfium2 default; Docling optional worker), chunks, embeddings | M | M1 | integration |
+| FR-RES-2 | `lit.ask`: answers with page citations | M | M1 | eval `evals/pdf_qa` |
+| FR-RES-3 | Research jobs: queue, progress, resumable after restart, schedulable | M | M1 | `test_jobs_resume.py` |
+| FR-RES-4 | Review pipeline: screen → extract → synthesise → comparison table + `.bib` | M | M3 | eval `evals/litreview_table` |
+| FR-RES-5 | Citation check: every reference resolves; every quotation matches PDF text | M | M1 | eval `evals/citation_existence` (zero invented) |
+| FR-RES-6 | CSL formatting; APA and IEEE shipped; `.csl` adds styles | M | M1 | golden tests |
+| FR-RES-7 | Zotero via local API | S | M3 | fake Zotero API |
+| FR-RES-8 | arXiv search (opt-in, cached, audited) | M | M3 | recorded responses |
+| FR-RES-9 | Semantic Scholar, OpenAlex, PubMed, Crossref | S | M3 | recorded responses |
+| FR-RES-10 | Research tools exposed via MCP (`lit.search`, `lit.ask`, `lit.review.start`) | M | M2 | integration |
+| FR-RES-11 | Sub-agent fan-out in workflows with budgets, `max_parallel`, nested audit; YAML workflows | S | M3 | `test_workflow_budgets.py` |
+| FR-RES-12 | PaperQA2 spike with written recommendation | M | M1 | ADR |
+
+### Artifacts
+| ID | Requirement | Pri | MS | Verification |
+|---|---|---|---|---|
+| FR-ART-1 | Git repo per conversation/job/run; one commit per write; restore = new commit | M | M1 | `test_artifacts_git.py` |
+| FR-ART-4 | HTML/SVG previews on a sandboxed origin without network | M | M2 | Playwright |
 
 ### Audit
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-AUD-1 | Every effect has a pre- and post-audit record with actor, decision and digests | M | M0 | `test_audit_coverage.py` (every effect type) |
-| FR-AUD-2 | Hash chain; `cairn audit verify` detects any edited/removed record | M | M0 | `test_audit_tamper.py` (Hypothesis) |
-| FR-AUD-3 | Per-chat audit view, global browser, JSONL/CSV export | M | M2 | e2e |
-| FR-AUD-4 | Signed checkpoints (Ed25519), exportable | S | M2 | unit |
-| FR-AUD-5 | OpenTelemetry GenAI export to local file/collector, off by default | C | M3 | integration |
-| FR-AUD-6 | Merkle checkpoints | W | P3 | — |
+| FR-AUD-1 | Pre- and post-records for every effect with actor (client/agent/run/user), decision, digests | M | M0 | `test_audit_coverage.py` |
+| FR-AUD-2 | Hash chain; `audit verify` detects edits/removals | M | M0 | Hypothesis tamper tests |
+| FR-AUD-3 | Audit browser (per client/run/conversation), export | M | M2 | e2e |
+| FR-AUD-4 | Signed checkpoints anchored hourly + on demand to a private git repo (deploy key scoped to it); `audit verify --anchors` | M | M2 | `test_anchoring.py` with local bare repo |
+| FR-AUD-5 | OpenTelemetry GenAI export (local), off by default | C | M3 | integration |
 
-### Encryption and deletion
+### Redaction
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-ENC-1 | Lock chat / lock artifacts (separately) with passphrase; age format; key wrapping | M | M2 | `test_lock.py` |
-| FR-ENC-2 | Passphrase entered only in client dialog; never in model context, tool args, logs or audit | M | M2 | `tests/security/test_passphrase_leak.py` (scan all stores/logs) |
-| FR-ENC-3 | `encrypt`/`decrypt` are user-initiated only | M | M2 | `tests/security/test_user_only_actions.py` |
-| FR-ENC-4 | Passphrase change re-wraps key only; recovery key optional | S | M2 | unit |
-| FR-ENC-5 | Crypto-shredding: purge destroys the chat key; old DB copy can't be decrypted | M | M1 | `test_crypto_shred.py` |
+| FR-RED-1 | Built-in scanner (secrets, emails, phones, ID numbers, custom regex) on traffic Cairnward terminates; secrets block, PII ask | M | M2 | `tests/security/test_redaction.py` |
+| FR-RED-2 | Presidio as optional worker | S | M3 | integration |
 
-### Policy
+### Sync and backup
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-POL-1 | `allow/ask/deny` decided outside the model for every effect | M | M0 | unit + coverage test |
-| FR-POL-2 | Approval scopes: once / this chat / this environment | M | M1 | unit |
-| FR-POL-3 | `user_initiated_only` actions (spec §5.8) rejected when triggered by non-user content | M | M2 | injection corpus `tests/security/injection/` |
+| FR-SYNC-1 | Modes none/on_demand/auto for every job | M | M3 | `test_sync_modes.py` |
+| FR-SYNC-3 | restic backups of vault, artifacts, research library; retention; restore to date | M | M3 | local restic repo |
+| FR-SYNC-4 | Replication via per-device event logs + git; deterministic merge; fork on concurrent turns | S | M3 | Hypothesis convergence |
+| FR-SYNC-6 | Locked items only written encrypted; cloud warning; "encrypt this sync target" | M | M3 | `tests/security/test_sync_encryption.py` |
+| FR-SYNC-8 | Purge rewrites restic snapshots and prunes; pending state shown; retries | M | M3 | `test_backup_purge.py` (content absent from all snapshots) |
+| FR-SYNC-2 | Drive mirror (read-only) via rclone with preview | S | M3 | rclone local backend |
 
-### Agents and workflows
+### Dashboard
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-AGENT-1 | `spawn_agent` with permission subset, nested audit | M | M3 | integration |
-| FR-AGENT-2 | One YAML workflow (`lit-review`) runs end to end | S | M3 | integration with fake backend |
-| FR-AGENT-3 | Budgets enforced: depth 2, tokens, tool steps, time; `max_parallel` per backend | M | M3 | `test_agent_budgets.py` |
-
-### Connectors and sync
-| ID | Requirement | Pri | MS | Verification |
-|---|---|---|---|---|
-| FR-SYNC-1 | Sync modes `none` (default) / `on_demand` / `auto` (on change, schedule) for every job | M | M3 | `test_sync_modes.py` |
-| FR-SYNC-2 | Drive folder mirror (read-only) via rclone; preview for on-demand runs | S | M3 | integration with rclone local backend |
-| FR-SYNC-3 | `backup` jobs via restic; restore to a date; retention | M | M3 | integration with local restic repo |
-| FR-SYNC-4 | `replicate` jobs: per-device event logs + git artifacts; concurrent turns fork | M | M3 | Hypothesis merge-convergence test; two-install integration test |
-| FR-SYNC-5 | Synced events validated against schema; treated as data | M | M3 | fuzz + unit |
-| FR-SYNC-6 | Locked items synced only encrypted; "encrypt this sync target" option; cloud warning | M | M3 | `tests/security/test_sync_encryption.py` |
-| FR-SYNC-7 | Agent can start (with approval) but not create/change sync jobs | M | M3 | covered by FR-POL-3 suite |
+| FR-DASH-1 | Loopback dashboard with Host/Origin/CSRF protections, login link | M | M2 | `tests/security/test_local_api.py` |
+| FR-DASH-2 | Views: approvals, activity, audit, egress, vault, jobs, artifacts, sync, settings | M | M2 (activity/approvals M0 as CLI) | e2e |
+| FR-DASH-3 | WCAG 2.2 AA | S | M2 | axe-core + manual |
 
 ### Supply chain
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-SUP-1 | `cairn doctor` checks external tools (Ollama, Podman/bwrap, git, restic, rclone) and explains fixes | M | M0 | unit + manual |
-| FR-SUP-2 | Model downloads: GGUF/safetensors only, SHA-256 verified, audited | M | M2 | unit |
-| FR-SUP-3 | Pickle-based model formats rejected | M | M2 | unit |
+| FR-SUP-2 | Model downloads via egress proxy: GGUF/safetensors only, SHA-256 verified, audited | M | M2 | unit |
 
 ---
 
@@ -151,19 +145,22 @@ Status: Draft v0.1 (goes with spec v0.5)
 
 | ID | Requirement | Pri | Verification |
 |---|---|---|---|
-| NFR-P1 | UI reacts to input ≤ 100 ms (TUI and web) | M | e2e timing assertions |
-| NFR-P2 | Core overhead ≤ 50 ms per turn excluding model time | M | benchmark test with fake backend |
-| NFR-P3 | *Provisional:* main model first token ≤ 10 s for 2K-token prompt (warm) on the reference machine; fast model ≤ 3 s | S | `scripts/bench_backend.py` on reference machine |
-| NFR-P4 | Warning before requests expected to need > 60 s of prompt processing (estimate from measured prompt speed) | M | unit with recorded benchmark profile |
-| NFR-P5 | Cairn processes ≤ 1 GB RAM excluding model servers; core starts ≤ 3 s | S | CI measurement |
-| NFR-R1 | No data loss on crash/power cut (WAL, atomic writes); interrupted turns resumable | M | kill-during-write tests |
-| NFR-R2 | Audit record written before every effect | M | FR-AUD-1 test |
-| NFR-S1 | Default install makes zero outbound connections | M | `test_no_egress_default.py` with network blocked |
-| NFR-S2 | Threat model reviewed each phase; every T-xx has a control and test | M | review checklist in PR template |
-| NFR-S3 | Local API resists CSRF and DNS rebinding | M | FR-API-3 tests |
-| NFR-A1 | Web UI meets WCAG 2.2 AA | S | axe-core in Playwright; manual screen-reader pass |
-| NFR-PORT-1 | Runs on Debian 12+, Ubuntu 22.04+, Windows 10/11; Python 3.12+ | M | CI matrix |
-| NFR-OFF-1 | All non-network features work offline | M | e2e suite run with network blocked |
-| NFR-SUP-1 | Hash-locked deps; pip-audit clean; license check; pinned CI actions | M | CI jobs |
-| NFR-SUP-2 | Releases ship SBOM + Sigstore signatures + provenance | S | release workflow |
-| NFR-MAINT-1 | ruff + mypy strict clean; ≥ 80% line coverage on core packages | M | CI |
+| NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time | M | benchmark test with fake backend |
+| NFR-P3 | *Provisional:* main model first token ≤ 10 s for 2K-token prompt (warm) on reference machine | S | `scripts/bench_backend.py` |
+| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | CI measurement |
+| NFR-R1 | No data loss on crash; research jobs resumable | M | kill tests |
+| NFR-R2 | Audit record before every effect | M | FR-AUD-1 |
+| NFR-S1 | Default install makes zero outbound connections | M | isolation suite |
+| NFR-S2 | Threat model reviewed each milestone | M | PR checklist |
+| NFR-S4 | Isolation holds for every sandbox type (direct network attempts fail) | M | isolation suite in CI (Linux) |
+| NFR-A1 | Dashboard WCAG 2.2 AA | S | axe-core |
+| NFR-PORT-1 | Linux (Debian 12+, Ubuntu 22.04+); Python 3.12+; unit tests also pass on Windows | M | CI |
+| NFR-PORT-2 | Windows via WSL2 | W | L |
+| NFR-SUP-1 | Hash-locked deps; pip-audit; license check; pinned CI actions | M | CI |
+| NFR-SUP-2 | SBOM + Sigstore-signed releases | S | release workflow |
+| NFR-MAINT-1 | ruff + mypy strict; ≥ 80% coverage on core packages | M | CI |
+
+---
+
+## Withdrawn (from v0.1)
+FR-API-1–5 → FR-GW-*, FR-DASH-1; FR-CHAT-1–3, FR-UI-1–4 (own chat clients) → FR-VLT-3, FR-CLI-*; FR-EFF-*, FR-ENV-* → FR-GW-3 (definitions unchanged); FR-CTX-1–2 → FR-GW-5 and client `usage` reporting; FR-UP-* (uploads via client) → client feature; FR-CODE-1–4 (own coding flow) → FR-AGT-*; FR-TOOL-1–4 → FR-MCP-*; FR-LIT-*, FR-CITE-* → FR-RES-*; FR-AGENT-* → FR-RES-11; FR-ENC-3 → FR-POL-4; FR-SYNC-5, FR-SYNC-7 → covered by FR-SYNC-4 and FR-POL-4; FR-SUP-1 → FR-ISO-5; FR-SUP-3 → FR-SUP-2; NFR-P1, NFR-P4, NFR-S3, NFR-OFF-1 → NFR-P2, FR-GW-5, FR-DASH-1, NFR-S1.

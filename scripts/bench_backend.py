@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure local model-server speed for Cairn's performance requirements.
+"""Measure local model-server speed for Cairnward's performance requirements.
 
 Standard library only: run it with any Python 3.12+, no install needed.
 

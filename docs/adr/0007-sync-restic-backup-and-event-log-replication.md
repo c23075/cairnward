@@ -1,6 +1,6 @@
 # ADR-0007: Sync: restic for backup, per-device event logs for replication
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-31 by spec D50: purging also rewrites restic snapshots (`restic rewrite` + `prune`)
 - Date: 2026-10-31
 - Spec: §4.12, D27, D30, D40
 

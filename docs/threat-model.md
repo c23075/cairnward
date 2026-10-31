@@ -1,6 +1,6 @@
-# Cairn threat model
+# Cairnward threat model
 
-Status: Draft v0.1 (goes with spec v0.5)
+Status: Draft v0.2 (goes with spec v0.6: gateway design; v0.1 in git history)
 Method: **STRIDE** (security) and **LINDDUN** (privacy) applied to the components and data flows in [spec §3](spec.md#3-architecture), with every control mapped to the **OWASP Top 10 for LLM Applications (2025)**. Each threat has an ID; controls point to spec sections and requirement IDs in [requirements.md](requirements.md).
 
 Review this document whenever a component, data flow or trust boundary changes, and at least once per phase.
@@ -29,29 +29,34 @@ Review this document whenever a component, data flow or trust boundary changes, 
 | B4 | Core ↔ sandbox / MCP servers | Core | Commands, scripts, third-party MCP servers |
 | B5 | Core ↔ network (egress proxy) | Core | Internet hosts, hosted model backends, sync targets |
 | B6 | Core ↔ local disk | Core while running | Anyone with later access to the disk or a backup |
+| B7 | Core ↔ third-party clients and agents | Core | Chat clients and coding agents (Open WebUI, Jan, Qwen Code, opencode, Aider, Goose, ...): their code, updates and own network behaviour |
 
-The model is **not** a trusted component: anything it decides passes through the policy engine (B2).
+The model is **not** a trusted component: anything it decides passes through the policy engine (B2). Since v0.6, third-party clients and agents are **not trusted** either (B7): they run in OS-enforced sandboxes and only reach the network through `cairnward-egress`.
 
 ## 3. STRIDE threats
 
 | ID | STRIDE | Threat | Controls | Spec | Verified by |
 |---|---|---|---|---|---|
-| T-01 | Spoofing | A malicious web page sends requests to the local API (CSRF / DNS rebinding) | Unix socket default; Host allowlist; Origin check; SameSite cookie + CSRF token; no CORS | §3.1 | NFR-S3, FR-API-3 |
-| T-02 | Spoofing | Another local user or process uses the API | Socket/token file mode 0600 (per-user ACL on Windows); single-use login link | §3.1 | FR-API-2 |
-| T-03 | Tampering | Audit records edited or deleted after the fact | Hash chain; signed checkpoints; exportable checkpoints kept elsewhere; `audit verify` | §5.2 | FR-AUD-2 |
-| T-04 | Tampering | MCP server changes its tool descriptions after approval (rug pull) or ships hidden instructions (tool poisoning) | Version + hash pinning; tool-definition hashes; disable on change; description scan; sandboxed servers | §4.9 | FR-TOOL-4 |
-| T-05 | Tampering | Synced events from another device are malformed or malicious | Schema validation; events from other devices are data, never instructions; signed per-device logs (Phase 1) | §4.12.3 | FR-SYNC-5 |
-| T-06 | Repudiation | Unclear whether the user or the agent caused an action | `actor` field + approving user action recorded on every effect; sub-agent nesting | §5.2 | FR-AUD-1 |
-| T-07 | Info disclosure | Prompt injection makes the agent send data to an attacker (e.g. URL with data in the query) | Network off by default; host allowlist; redaction; approval of outbound requests showing the payload; untrusted-content tagging | §5.3–5.4 | NFR-S1, FR-NET-2 |
+| T-01 | Spoofing | A malicious web page sends requests to the local dashboard or gateway (CSRF / DNS rebinding) | Unix socket for CLI; Host allowlist; Origin check; SameSite cookie + CSRF token; no CORS; per-client API keys on the gateway | §3.1 | FR-DASH-1, FR-GW-2 |
+| T-02 | Spoofing | Another local process uses the gateway as if it were a configured client | Per-client API keys; socket/token file mode 0600 | §3.1 | FR-GW-2 |
+| T-03 | Tampering | Audit records edited or deleted after the fact | Hash chain; signed checkpoints **anchored hourly to a private git repo**; `audit verify --anchors`. Residual: records newer than the last anchor can be altered by someone controlling the machine (visible as a missing/late anchor) | §5.2 | FR-AUD-2, FR-AUD-4 |
+| T-04 | Tampering | MCP server changes its tool descriptions after approval (rug pull) or ships hidden instructions (tool poisoning) | Version + hash pinning; tool-definition hashes; disable on change; description scan; sandboxed servers | §4.2 | FR-MCP-3 |
+| T-05 | Tampering | Synced events from another device are malformed or malicious | Schema validation; events from other devices are data, never instructions; signed per-device logs (Phase 1) | §4.8 | FR-SYNC-4 |
+| T-06 | Repudiation | Unclear whether the user, a client, an agent run or a sub-agent caused an action | `actor` (client/run/agent/user) + approving user action recorded on every effect | §5.2 | FR-AUD-1 |
+| T-07 | Info disclosure | Prompt injection, a misbehaving library or a third-party tool sends data out | **OS-enforced** loopback-only namespaces; only `cairnward-egress` has network; host allowlist; redaction on terminated traffic; provenance in approval dialogs | §3.2, §5.3–5.4 | NFR-S1, NFR-S4, FR-NET-1 |
 | T-08 | Info disclosure | Secrets or personal data sent to a hosted model or search engine | Redaction (secrets block, PII ask); hosted backends denied by default; locked chats never sent to hosted backends | §4.1, §5.4 | FR-RED-1, FR-BACK-4 |
 | T-09 | Info disclosure | Disk, laptop or backup stolen | Opt-in chat/artifact locking with age; restic backups always encrypted; full-disk encryption recommended at first run | §5.5 | FR-ENC-1 |
-| T-10 | Info disclosure | "Deleted" chats recovered from SSD remnants or old copies | Crypto-shredding (destroy per-chat key); `secure_delete` + VACUUM for the plaintext index (best effort, stated) | §4.5, §5.5 | FR-ENC-5 |
-| T-11 | Info disclosure | Artifact preview (HTML/SVG) runs scripts that read Cairn data or phone home | Sandboxed iframe on a separate origin; CSP with no network | §4.8 | FR-ART-4 |
-| T-12 | Info disclosure | Sandbox escape or command reads files outside the workspace | Tier 1/2 sandboxes; tier 4 off by default and approval per command; read-only mounts | §4.10.1 | FR-CODE-3 |
-| T-13 | Denial of service | Runaway agent loop, sub-agent explosion or huge prompt locks the machine | Effort budgets (tool steps, tokens, time); sub-agent depth/parallel limits; context-size warnings; cancel at any time | §4.2, §4.14 | FR-AGENT-3 |
-| T-14 | Elevation of privilege | Injected content triggers user-only actions (encrypt everything, add sync target, enable hosted backend) | `user_initiated_only` actions | §5.8 | FR-POL-3 |
-| T-15 | Elevation of privilege | Malicious model file runs code on load | GGUF/safetensors only; checksum verification | §5.7 | FR-SUP-3 |
-| T-16 | Elevation of privilege | Compromised dependency or release | Hash-locked deps; pip-audit; signed releases + SBOM; pinned CI actions | §5.7 | NFR-SUP-1 |
+| T-10 | Info disclosure | "Deleted" conversations recovered from SSD remnants, old copies or backups | Crypto-shredding; **purge rewrites restic snapshots**; `secure_delete` + VACUUM for the plaintext index (best effort, stated) | §4.5, §4.8 | FR-ENC-5, FR-SYNC-8 |
+| T-11 | Info disclosure | Artifact preview (HTML/SVG) runs scripts that read Cairnward data or phone home | Sandboxed iframe on a separate origin; CSP with no network | §4.7 | FR-ART-4 |
+| T-12 | Info disclosure | A coding agent or its commands read files outside the workspace (keys, other projects) | bubblewrap filesystem policy: workspace rw, secrets dirs hidden, rest read-only; workspace snapshots for review/revert | §3.2, §4.3 | FR-ISO-2, FR-AGT-2 |
+| T-13 | Denial of service | Runaway agent loop, sub-agent explosion or huge prompts lock the machine | Per-client/run/environment budgets at the gateway; context warnings; workflow `max_parallel` | §4.1, §4.6 | FR-GW-4, FR-RES-11 |
+| T-14 | Elevation of privilege | Injected content triggers user-only actions (encrypt everything, add sync target, enable hosted backend) | Confirmation dialog **in Cairnward's own UI** (not the client) showing provenance, with untrusted content since the last user message highlighted; passphrases only typed there. Residual: a user may approve without reading (accepted, mitigated by risk tiers keeping these prompts rare) | §5.3 | FR-POL-4 |
+| T-15 | Elevation of privilege | Malicious model file runs code on load | GGUF/safetensors only; checksums; downloads via egress and audited | §5.6 | FR-SUP-2 |
+| T-16 | Elevation of privilege | Compromised dependency or release | Hash-locked deps; pip-audit; signed releases + SBOM; pinned CI actions | §5.6 | NFR-SUP-1 |
+| T-17 | Info disclosure | Third-party tool sends sensitive content over HTTPS to an allowed host; Cairnward can't see content to redact | Network off by default; per-host approval; egress report with bytes per host; optional TLS interception (off). Accepted limitation | §3.2 | FR-NET-1, FR-EGR-1 |
+| T-18 | Info disclosure | Conversation copies persist in a client's own database outside Cairnward's control (no lock, no purge) | Setup guides minimise client history; vault UI states it; clients run in containers whose data volumes the user controls | §4.4, §4.5 | FR-CLI-1 |
+| T-19 | Tampering / EoP | Sandbox misconfiguration silently gives a tool network or file access | `cairnward doctor` isolation self-tests at start and on demand; CI isolation suite | §3.2 | FR-ISO-5, NFR-S4 |
+| T-20 | Spoofing | Compromised or malicious client update (e.g. a chat app adds telemetry) | Client runs sandboxed with network only via egress; new hosts require approval and appear in the egress report | §3.2 | FR-ISO-4, FR-NET-1 |
 
 ## 4. LINDDUN privacy threats
 
@@ -67,7 +72,7 @@ The model is **not** a trusted component: anything it decides passes through the
 
 ## 5. OWASP Top 10 for LLM Applications (2025) mapping
 
-| OWASP | Risk | Main Cairn controls | Threats |
+| OWASP | Risk | Main Cairnward controls | Threats |
 |---|---|---|---|
 | LLM01 | Prompt Injection | Untrusted-content tagging; policy engine outside the model; approvals; `user_initiated_only`; injection test corpus | T-07, T-14 |
 | LLM02 | Sensitive Information Disclosure | Redaction; network off by default; hosted backends denied; egress report | T-07, T-08 |
@@ -80,9 +85,11 @@ The model is **not** a trusted component: anything it decides passes through the
 | LLM09 | Misinformation | `citation-check` (every reference must resolve); page-cited answers for PDFs; evals for invented citations | — |
 | LLM10 | Unbounded Consumption | Effort budgets; time limits; sub-agent limits; context warnings | T-13 |
 
-## 6. Accepted risks (v1)
+## 6. Accepted risks (Phase 0)
 - A compromised OS account or root user can read everything that's unlocked and capture passphrases as they're typed.
-- Prompt injection can't be fully prevented by any known method; Cairn limits its impact instead (approvals, network off, user-only actions).
+- Prompt injection can't be fully prevented by any known method; Cairnward limits its impact instead (approvals, network off, user-only actions).
 - Unlocked chats' search index and embeddings are plaintext in SQLite; deleting them is best effort on SSDs.
-- Tier-4 (unsandboxed) runs, when the user enables them, can read the user's files and use the network.
+- Content of third-party tools' own HTTPS traffic to allowed hosts can't be inspected (T-17).
+- Copies of conversations inside clients' own databases (T-18).
+- Records newer than the last audit anchor can be altered by someone with full control of the machine (T-03).
 - Traffic-analysis of sync timing/size by cloud providers (P-04).

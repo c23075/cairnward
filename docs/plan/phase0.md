@@ -1,111 +1,98 @@
 # Phase 0 plan: milestones and tasks
 
-Status: Draft v0.1 (goes with spec v0.5)
-Approach: **walking skeleton first** (M0: the thinnest path through every layer, deployed and tested), then milestones that each add complete features end to end. Requirement IDs refer to [requirements.md](../requirements.md).
-
-Rules
-- A milestone is done when its **exit criteria** pass in CI on Debian and Windows (model evals: on the reference machine).
-- Tasks are ordered; a task may start when the tasks it depends on are done.
-- Each task is one or a few PRs, each with tests. The size column is a rough guide: S ≈ ≤ 1 day, M ≈ 2–4 days, L ≈ 1–2 weeks of focused work.
+Status: Draft v0.2 (goes with spec v0.6; the v0.1 all-in-one plan is in git history)
+Approach: **walking skeleton first** (M0), then milestones that each add complete features. Requirement IDs refer to [requirements.md](../requirements.md). Sizes: S ≈ ≤ 1 day, M ≈ 2–4 days, L ≈ 1–2 weeks of focused work.
 
 ---
 
-## M0: Walking skeleton
-**Goal:** type a message in the TUI, get a streamed reply from `qwen3:30b` via Ollama, with the call passing through the policy engine and recorded in a verifiable audit log, with the network blocked by default.
+## M0: Gateway skeleton
+**Goal:** a coding agent and a chat client talk to Ollama **through Cairnward**, inside sandboxes with no direct network; every call is policy-checked, audited and stored in the vault.
 
 | # | Task | Reqs | Depends | Size |
 |---|---|---|---|---|
-| T0.1 | Project setup: uv, package layout, ruff, mypy strict, pytest, CI matrix (Debian 12, Ubuntu 24.04, Windows), pip-audit, Dependabot | NFR-MAINT-1, NFR-PORT-1, NFR-SUP-1 | — | S ✅ (Scorecard + license check: add with first runtime deps) |
-| T0.2 | Benchmark script for Ollama/OpenAI-compatible servers; run on reference machine; record results in `docs/bench/` | NFR-P3, NFR-P4 | — | S ✅ (script); run pending |
-| T0.3 | Config loading: pydantic models for `backends.toml`, `cairn.toml`; JSON Schema export; `schema_version` | spec §10 | T0.1 | S |
-| T0.4 | Store: SQLite (WAL) + Alembic baseline migration; chats/messages tables; per-chat age keys (unlocked mode) | FR-ENC-5 (partial), NFR-R1 | T0.3 | M |
-| T0.5 | Audit log: record model, hash chain, `AuditSink` interface, `cairn audit verify` | FR-AUD-1, FR-AUD-2 | T0.4 | M |
-| T0.6 | Policy engine skeleton: `Action` types, `allow/ask/deny`, default rules, wired before every effect | FR-POL-1 | T0.5 | M |
-| T0.7 | Egress proxy skeleton: all outbound HTTP via one client; network off by default; loopback model server exempt by config | FR-NET-1, NFR-S1 | T0.6 | S |
-| T0.8 | Backend drivers: `ollama` + `openai_compat` (streaming chat, health); fake servers for tests | FR-BACK-1 | T0.3 | M |
-| T0.9 | Core daemon: FastAPI over Unix socket (0600), token file, `/v1/health`, `/v1/chats`, streaming over WebSocket; OpenAPI committed + CI diff check | FR-API-1, FR-API-2, FR-API-4 | T0.6, T0.8 | M |
-| T0.10 | Minimal TUI: chat list + chat view + input, streaming | FR-UI-1 (partial) | T0.9 | M |
-| T0.11 | `cairn doctor`: checks Ollama, git, Podman/bwrap, restic, rclone; explains fixes | FR-SUP-1 | T0.1 | S |
-| T0.12 | Minimal web UI shell served on loopback (login link, chat list, chat view) to prove the second client path | FR-UI-2 (partial) | T0.9 | M |
+| T0.1 | Project setup: uv, ruff, mypy strict, pytest, CI (Debian 12, Ubuntu, Windows unit tests), pip-audit, Dependabot | NFR-MAINT-1, NFR-SUP-1 | — | S ✅ |
+| T0.2 | Benchmark script; run on reference machine; commit results to `docs/bench/` | NFR-P3 | — | S ✅ script; run pending (owner) |
+| T0.3 | Rename package to `cairnward`; Apache-2.0 LICENSE | D51 | — | S ✅ |
+| T0.4 | Config: pydantic models for `cairnward.toml`, `backends.toml`, `clients.toml`; JSON Schema export | spec §11 | T0.3 | S |
+| T0.5 | Store: SQLite (WAL) + Alembic baseline; vault tables; per-conversation age keys | FR-VLT-1, FR-ENC-5 (partial) | T0.4 | M |
+| T0.6 | **Sandbox spike:** bubblewrap + loopback-only netns + Unix-socket bridges; decide reuse of `sandbox-runtime` vs own implementation (ADR-0012) | FR-ISO-1 | T0.3 | M |
+| T0.7 | Audit log: hash chain, `AuditSink`, `cairnward audit verify` | FR-AUD-1, FR-AUD-2 | T0.5 | M |
+| T0.8 | Policy engine skeleton (`allow/ask/deny`, default rules, CLI approval prompt) | FR-POL-1 | T0.7 | M |
+| T0.9 | `cairnward-egress`: HTTP(S) CONNECT proxy, host allowlist, connection log; network off by default | FR-NET-1 | T0.8 | M |
+| T0.10 | Backend drivers (`ollama`, `openai_compat`) with fake servers for tests | FR-BACK-1 | T0.4 | M |
+| T0.11 | Gateway endpoint `/v1/chat/completions` (+ streaming, tools), `/v1/models`; per-client API keys; vault write | FR-GW-1, FR-GW-2, FR-VLT-1 | T0.8, T0.10 | M |
+| T0.12 | `cairnward run` (sandbox from T0.6, env/config injection) + first agent profile (whichever of Qwen Code / opencode / Aider / Goose works most simply) | FR-ISO-1, FR-ISO-2, FR-AGT-1 (first), FR-AGT-3 | T0.6, T0.11 | M |
+| T0.13 | Run the core itself in an isolated namespace; only `cairnward-egress` networked | FR-ISO-3 | T0.9, T0.12 | M |
+| T0.14 | `cairnward doctor` with isolation self-tests | FR-ISO-5 | T0.12 | S |
+| T0.15 | Open WebUI (or Jan) connected via internal network or loopback for a first manual check | FR-CLI-1 (partial) | T0.11 | S |
 
 **Exit criteria (M0)**
-- `cairn serve` + TUI: message → streamed reply from real Ollama on the reference machine.
-- The same flow in the web UI shell.
-- `cairn audit verify` passes; editing any audit row by hand makes it fail.
-- With the network blocked, the full test suite passes and the egress log is empty.
-- CI green on Debian 12, Ubuntu 24.04 and Windows.
+- An agent run with `cairnward run` edits a sample repo using `qwen3:30b` via Ollama; its direct network attempts fail; all its model calls are in the audit log and vault.
+- A chat client conversation shows up in the vault.
+- `cairnward audit verify` passes; hand-edited records are detected.
+- Default install: zero outbound connections (isolation suite green in CI on Linux).
 
 ---
 
-## M1: Core experience
-**Goal:** daily-usable chat app with the Claude-app basics.
+## M1: Research core
+**Goal:** ask questions over a PDF library with page citations; run a basic review job overnight; citations verified and formatted.
 
 | # | Task | Reqs | Depends | Size |
 |---|---|---|---|---|
-| T1.1 | Chats: rename, pin, archive, FTS search, auto-title via fast model | FR-CHAT-1 | M0 | M |
-| T1.2 | Folders (one level), move | FR-CHAT-2 | T1.1 | S |
-| T1.3 | Delete with confirm/undo, trash, purge with crypto-shredding | FR-CHAT-3, FR-ENC-5 | T1.1 | M |
-| T1.4 | Shortcut system shared by both clients: keymap file, focus rules, `single_key` option, help overlay | FR-UI-1, FR-UI-2, FR-UI-3, FR-UI-4 | T1.1 | M |
-| T1.5 | Web UI parity for chats, folders, shortcuts; Host/Origin/CSRF hardening | FR-UI-2, FR-API-3, NFR-S3 | T1.4 | L |
-| T1.6 | Backends config: roles, override order, local-only fallback | FR-BACK-2, FR-BACK-3 | M0 | M |
-| T1.7 | Effort levels: defaults + `effort.toml` custom levels; picker + `E` cycle | FR-EFF-1, FR-EFF-2 | T1.6 | M |
-| T1.8 | Environments: TOML, templates, picker, audited switch; approval scopes | FR-ENV-1, FR-ENV-2, FR-POL-2 | T1.6 | M |
-| T1.9 | Context meter with category breakdown; tokenizer from backend or local estimate | FR-CTX-1 | T1.6 | M |
-| T1.10 | Uploads (text/code/PDF/DOCX/CSV/images) into the store; hashes audited | FR-UP-1 | M0 | M |
-| T1.11 | Artifacts: git repo per chat, one commit per write, panel `A` | FR-ART-1 | M0 | M |
+| T1.1 | **PaperQA2 spike** via Cairnward's endpoint on CPU: quality, speed, dependencies; ADR with decision | FR-RES-12 | M0 | M |
+| T1.2 | PDF library (pypdfium2), chunking, embeddings (sqlite-vec) | FR-RES-1 | T1.1 | M |
+| T1.3 | `lit.ask` with page citations | FR-RES-2 | T1.2 | M |
+| T1.4 | Job queue: persistent, resumable, schedulable; progress in CLI | FR-RES-3 | M0 | M |
+| T1.5 | Citation and quotation check | FR-RES-5 | T1.2 | M |
+| T1.6 | CSL formatting (APA, IEEE) | FR-RES-6 | — | S |
+| T1.7 | Virtual models (environment × effort), `effort.toml`, environments | FR-GW-3, FR-BACK-2, FR-BACK-3 | M0 | M |
+| T1.8 | Vault conversation reconstruction (prefix hashing, branches) | FR-VLT-2 | M0 | M |
+| T1.9 | Artifacts git repos; run workspace snapshots, `runs diff/revert` | FR-ART-1, FR-AGT-2 | M0 | M |
+| T1.10 | Crypto-shredding purge | FR-ENC-5 | T1.8 | S |
 
-**Exit criteria (M1)**: all M1 "M" requirements pass their tests on all platforms; a week of the developer's own daily use without data loss.
-
----
-
-## M2: Tools, coding and security features
-**Goal:** the agent can use tools, edit code safely, and every security feature is in place.
-
-| # | Task | Reqs | Depends | Size |
-|---|---|---|---|---|
-| T2.1 | MCP host; built-in `fs`, `rag`; manifests; permission intersection | FR-TOOL-1, FR-TOOL-2 | M1 | L |
-| T2.2 | MCP pinning + tool-definition hashing + re-approval flow | FR-TOOL-4 | T2.1 | M |
-| T2.3 | Sandbox runner: tier 1 (Podman), tier 2b (bwrap), tier 2 (WSL2+bwrap), tier 4 policy; `shell` MCP server | FR-CODE-2, FR-CODE-3 | T2.1 | L |
-| T2.4 | Coding flow: diff proposal, per-file approval, apply via FS gateway; sample-repo eval | FR-CODE-1, FR-CODE-4 | T2.3 | L |
-| T2.5 | Skills loader (SKILL.md); permissions enforced; `test-and-fix` stub | FR-TOOL-3 | T2.1 | M |
-| T2.6 | PDF parsing (Docling, pypdfium2 fallback), chunking, embeddings, sqlite-vec index; PDF Q&A with page citations | FR-LIT-1, FR-UP-2 | T2.1 | L |
-| T2.7 | Vision: on-demand vision model with unload/reload of fast model | FR-UP-3 | T1.10 | M |
-| T2.8 | Auto-compaction | FR-CTX-2 | T1.9 | M |
-| T2.9 | Artifact history/diff/restore; sandboxed preview origin; external edits | FR-ART-2, FR-ART-3, FR-ART-4 | T1.11 | M |
-| T2.10 | Network allowlist/ask; redaction (secret rules + Presidio); egress report panel | FR-NET-2, FR-RED-1, FR-EGR-1 | M1 | L |
-| T2.11 | Lock chat / lock artifacts (age, wrapping, recovery key); passphrase dialog in both clients; `user_initiated_only` actions | FR-ENC-1–4, FR-POL-3 | M1 | L |
-| T2.12 | Audit UI (per chat, global, export); signed checkpoints | FR-AUD-3, FR-AUD-4 | M1 | M |
-| T2.13 | Model download verification; reject pickle formats | FR-SUP-2, FR-SUP-3 | M1 | S |
-| T2.14 | Security suites: injection corpus, rebinding/CSRF, passphrase-leak scan, sandbox isolation; schemathesis | NFR-S2, FR-API-5 | T2.10, T2.11 | M |
-
-**Exit criteria (M2)**: security test suites green; injection corpus triggers no network, writes or user-only actions; coding eval passes on the reference machine.
+**Exit criteria (M1)**: `lit.ask` eval passes with page citations; citation eval shows zero invented references; a review job survives a restart mid-run; picking `cw/coding:low` vs `cw/coding:high` in a client changes model and thinking.
 
 ---
 
-## M3: Research, connectors, sync and orchestration
-**Goal:** literature-review workflow, connectors, sync, multi-agent.
+## M2: Security features, dashboard, clients and agents
+| # | Task | Reqs | Size |
+|---|---|---|---|
+| T2.1 | Dashboard shell with Host/Origin/CSRF protections, login link | FR-DASH-1 | M |
+| T2.2 | Approvals inbox, risk tiers, batching, desktop notifications, retry-aware approvals | FR-POL-2, FR-POL-3, FR-POL-5 | L |
+| T2.3 | User-only action dialog with provenance; injection corpus tests | FR-POL-4 | M |
+| T2.4 | Redaction (built-in scanner) on terminated traffic | FR-RED-1 | M |
+| T2.5 | Egress report, audit browser, activity view | FR-EGR-1, FR-AUD-3, FR-DASH-2 | L |
+| T2.6 | Vault browser with shortcuts; retention; `vault = "off"` | FR-VLT-3, FR-VLT-4 | L |
+| T2.7 | Locking (age wrapping, recovery key), passphrase-leak tests | FR-ENC-1, FR-ENC-2 | M |
+| T2.8 | Audit anchoring to private git repo | FR-AUD-4 | M |
+| T2.9 | MCP proxy, permissions, pinning, sandboxed servers; research tools via MCP | FR-MCP-1–3, FR-RES-10 | L |
+| T2.10 | All four agent profiles + compatibility tests | FR-AGT-1 | M |
+| T2.11 | Client guides + container templates: Open WebUI, Jan, third client | FR-CLI-1, FR-CLI-2, FR-ISO-4 | M |
+| T2.12 | Budgets and context warning | FR-GW-4, FR-GW-5 | M |
+| T2.13 | Model download verification via egress | FR-SUP-2 | S |
+| T2.14 | Artifact previews (sandboxed origin) | FR-ART-4 | S |
 
-| # | Task | Reqs | Depends | Size |
-|---|---|---|---|---|
-| T3.1 | `cite.format` (citeproc-py, CSL: APA, IEEE) + `references` skill | FR-CITE-1 | M2 | M |
-| T3.2 | `citation-check` + evals for invented references | FR-CITE-2 | T3.1 | M |
-| T3.3 | arXiv tool (opt-in, cached, audited); comparison table + `.bib` | FR-LIT-2, FR-LIT-4 | T3.1 | M |
-| T3.4 | Zotero (local API) read | FR-LIT-3 | M2 | S |
-| T3.5 | SearXNG web search + `web.fetch` with untrusted-content tagging | FR-NET-3 | M2 | M |
-| T3.6 | Sync framework: jobs, modes (none/on_demand/auto with debounce + cron), audit, `S`/`Shift+S` | FR-SYNC-1, FR-SYNC-7 | M2 | M |
-| T3.7 | `backup` jobs via restic (local + rclone targets), restore, retention | FR-SYNC-3 | T3.6 | M |
-| T3.8 | `replicate` jobs: event log format (`docs/formats/events.md`), per-device logs, merge, fork on concurrent turns, git artifacts; Hypothesis convergence tests | FR-SYNC-4, FR-SYNC-5 | T3.6 | L |
-| T3.9 | Encrypted sync of locked items; "encrypt this sync target"; cloud warning | FR-SYNC-6 | T3.8, T2.11 | M |
-| T3.10 | Drive folder mirror via rclone with preview | FR-SYNC-2 | T3.6 | M |
-| T3.11 | `spawn_agent`, budgets, nested audit; `lit-review` YAML workflow | FR-AGENT-1–3 | M2 | L |
-| T3.12 | Hosted backends policy, ☁ badge; test Alibaba Model Studio, DeepSeek, OpenRouter | FR-BACK-4, FR-BACK-5 | M2 | M |
-| T3.13 | Optional OpenTelemetry export | FR-AUD-5 | M2 | S |
-| T3.14 | Windows parity pass: tier 2 sandbox, keychain, paths, installer notes | NFR-PORT-1 | all | M |
-
-**Exit criteria (M3 = Phase 0 done)**: every **Must** requirement has a passing automated test; lit-review eval produces a table + `.bib` from 5 PDFs with zero invented citations; two installs (Debian + Windows) replicate chats through a shared folder; threat model reviewed.
+**Exit criteria (M2)**: security suites green (injection corpus, isolation, local API, passphrase leaks, MCP rug-pull); four agents and two clients pass compatibility tests; anchors detect tampering older than the last anchor.
 
 ---
+
+## M3: Sync, sources, workflows, hosted backends
+| # | Task | Reqs | Size |
+|---|---|---|---|
+| T3.1 | Sync framework and modes | FR-SYNC-1 | M |
+| T3.2 | restic backups + **purge rewrite** | FR-SYNC-3, FR-SYNC-8 | M |
+| T3.3 | Replication (event logs + git), encrypted locked items | FR-SYNC-4, FR-SYNC-6 | L |
+| T3.4 | Drive mirror | FR-SYNC-2 | M |
+| T3.5 | Zotero, arXiv, other academic APIs | FR-RES-7–9 | M |
+| T3.6 | Review pipeline + YAML workflows with sub-agent fan-out | FR-RES-4, FR-RES-11 | L |
+| T3.7 | Hosted backends policy; provider tests | FR-BACK-4, FR-BACK-5 | M |
+| T3.8 | Presidio worker; OpenTelemetry export | FR-RED-2, FR-AUD-5 | S |
+
+**Exit criteria (M3 = Phase 0 done)**: every Must requirement has a passing test; a review of 5+ PDFs produces table + `.bib` with zero invented citations; a purged conversation is absent from every backup snapshot; threat model reviewed.
+
+## Later
+Windows via WSL2 (NFR-PORT-2), Ollama-compatible endpoint, Rust `cairnward-egress`, Merkle checkpoints, TLS interception option.
 
 ## Immediate next steps
-1. Run `scripts/bench_backend.py` on the reference machine and commit the JSON result to `docs/bench/` (sets NFR-P3/P4).
-2. T0.3 → T0.9 in order (config, store, audit, policy, egress, drivers, daemon).
+1. Owner: run the benchmark; rename the repo and fix the default branch.
+2. T0.4 → T0.6 (config, store, sandbox spike), then the rest of M0 in order.

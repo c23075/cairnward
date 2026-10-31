@@ -98,7 +98,7 @@ filecache = [
 ]
 
 [[package]]
-name = "cairn"
+name = "cairnward"
 version = "0.0.1"
 source = { editable = "." }
 
