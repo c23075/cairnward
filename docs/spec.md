@@ -1,9 +1,16 @@
 # Spec: Cairn — a local, privacy-first AI agent
 
-Status: **Draft v0.4, for review** (v0.4: syncing chats and artifacts, three sync modes, opt-in encryption for chats and artifacts, D27/D30/D31)
+Status: **Draft v0.5, for review** (v0.5: aligned with industry practice: threat model, local API hardening, age + key wrapping, crypto-shredding, MCP pinning, accessibility, ADRs, numbered requirements, NFRs, testing strategy, API/config contracts, sync rework, supply chain; D32–D41)
 Date: 2026-10-31
 Repo: `c23075/possessed-incantation`
 Name: **Cairn** (stacked stones that mark a trail, i.e. the audit trail). CLI command: `cairn`.
+
+**Companion documents**
+- [`requirements.md`](requirements.md): numbered functional (FR-) and non-functional (NFR-) requirements with MoSCoW priority and verification.
+- [`threat-model.md`](threat-model.md): STRIDE + LINDDUN threat model, mapped to OWASP Top 10 for LLM Applications (2025).
+- [`adr/`](adr/): Architecture Decision Records for the major decisions.
+- [`plan/phase0.md`](plan/phase0.md): Phase 0 milestones (M0–M3) and ordered tasks.
+- [`../scripts/bench_backend.py`](../scripts/bench_backend.py): local speed benchmark that sets the performance NFRs.
 
 ---
 
@@ -13,7 +20,7 @@ A local AI agent for **coding** and **literature-review research**, with a featu
 set similar to the Claude app, that runs on open-weight models on the user's own
 hardware. **Privacy and security come first**: every action the agent takes is
 recorded in a log that shows any later tampering, nothing leaves the machine
-unless explicitly allowed, and data on disk is encrypted.
+unless explicitly allowed, and data on disk is encrypted when the user chooses (with reliable deletion either way).
 
 ### 1.1 Goals
 - G1. Run fully offline by default on open-weight models with performance similar to `qwen3:30b` (Qwen3-30B-A3B) on a CPU or mixed CPU/GPU machine.
@@ -66,6 +73,16 @@ unless explicitly allowed, and data on disk is encrypted.
 | D30 | Chat + artifact sync | **Chats and artifacts can both be synced** (backup / multi-device) to a chosen target: local folder/NAS, Google Drive, or a private git remote |
 | D31 | Encryption scope | **Opt-in** encryption for chats **and** artifacts, chosen separately. Synced copies of encrypted items stay encrypted (encrypted on this machine before upload) |
 | D29 | Hosted providers (tested first) | Alibaba Model Studio, DeepSeek API, OpenRouter; **Claude API later** via a separate Anthropic API key (a Claude Pro subscription doesn't include API access, and logging in with a consumer account in third-party apps isn't supported) |
+| D32 | Decision records | Major decisions get an ADR in `docs/adr/`; this table stays as the index ([ADR-0001](adr/0001-record-architecture-decisions.md)) |
+| D33 | Threat modelling | STRIDE (security) + LINDDUN (privacy), mapped to OWASP Top 10 for LLM Applications 2025 ([threat-model.md](threat-model.md)) |
+| D34 | Local API hardening | Unix socket by default; loopback HTTP for the web UI with Host allowlist, Origin checks, CSRF token, strict CSP ([ADR-0005](adr/0005-local-core-service-and-api-hardening.md)) |
+| D35 | Encryption format | **age** (via pyrage) with a key hierarchy: per-chat key wrapped by passphrase (scrypt) or recovery key ([ADR-0006](adr/0006-encryption-age-key-wrapping-crypto-shredding.md)) |
+| D36 | Deletion | **Crypto-shredding**: every chat store record is encrypted with its own key even when not locked, kept without a passphrase, and deleted on purge. Passphrases stay opt-in (D23/D24) |
+| D37 | Tracing | Audit log stays hash-chained; optional **OpenTelemetry GenAI** export to a local file/collector; Merkle checkpoints in Phase 3 |
+| D38 | MCP trust | Pin MCP server versions + hashes; record a hash of each tool's name/description/schema at approval; any change disables the tool until re-approved |
+| D39 | Accessibility | Single-key shortcuts can be turned off (WCAG 2.1.4); web UI targets **WCAG 2.2 AA** |
+| D40 | Sync design | **restic** for encrypted backups; **per-device append-only event logs** for multi-device chat sync; git for artifacts ([ADR-0007](adr/0007-sync-restic-backup-and-event-log-replication.md)) |
+| D41 | Contracts and supply chain | OpenAPI contract for the core API, pydantic-validated config with JSON Schema, versioned DB migrations; SBOM (CycloneDX), signed releases (Sigstore), OpenSSF Scorecard, pip-audit, GGUF/safetensors-only models |
 
 ---
 
@@ -110,6 +127,18 @@ unless explicitly allowed, and data on disk is encrypted.
 2. Every effect goes through `policy.check(action) → allow | ask | deny` and then `audit.append(...)` **before** it runs, with the result appended **after**.
 3. All outbound HTTP goes through the egress proxy (redaction + host allowlist). MCP servers and sandboxes run with no network, or with network only through that proxy.
 4. The model server is treated as untrusted-but-local: it's only reachable at an address that never leaves the machine (`127.0.0.1` or a Unix socket), and the core warns if it is configured to listen on other network interfaces.
+
+### 3.1 Local API security (D34)
+Local AI servers have been attacked from ordinary web pages (DNS rebinding, cross-site requests to `localhost`). The core API therefore:
+- **Listens on a Unix domain socket by default** (file mode `0600`; AF_UNIX also works on Windows 10 1803+). The TUI and CLI use it.
+- The web UI uses a **loopback HTTP port** (`127.0.0.1` / `::1` only; never `0.0.0.0`) with:
+  - **Host header allowlist** (`localhost`, `127.0.0.1`, `[::1]` + port): requests with any other Host are rejected, which defeats DNS rebinding.
+  - **Origin check** on every state-changing request and on WebSocket upgrades; **no CORS** headers at all.
+  - Session cookie `HttpOnly; SameSite=Strict`, plus a **CSRF token** on every non-GET request.
+  - **Content-Security-Policy** `default-src 'self'`; no inline scripts; artifact previews served from a separate sandboxed origin/iframe with no network.
+  - The one-time login link is printed by `cairn web` (random token, single use, short expiry).
+- API token file (`~/.local/state/cairn/token`, mode `0600`; per-user ACL on Windows).
+- **Contract:** the API is described by an **OpenAPI** document (generated by FastAPI, committed as `api/openapi.json`). Both clients are built and tested against it, and changes that break the contract fail CI. The API is versioned (`/v1`).
 
 ---
 
@@ -267,7 +296,8 @@ The environment can be switched per chat; switching is logged.
 - Chats have: title (auto-generated by the fast model), folder, environment, pinned, archived, timestamps.
 - Folders can be nested (one level in MVP); chats can be moved between folders.
 - Full-text search across chats (SQLite FTS5; locked chats are searchable only while unlocked).
-- Deleting a chat is a **soft delete** with a 30-day trash, then secure purge. Purging removes content but keeps a placeholder entry in the audit log so the hash chain still verifies.
+- Deleting a chat is a **soft delete** with a 30-day trash, then purge. Purging **destroys the chat's key** (crypto-shredding, D36, §5.5), so its encrypted records can't be recovered even from SSD remnants or old backups. The audit log keeps a placeholder entry so the hash chain still verifies.
+- Limitation (stated in the UI): for chats that aren't locked, the full-text search index and embeddings are plaintext in SQLite. Purging deletes them with `PRAGMA secure_delete=ON` and a later `VACUUM`, which is best-effort on SSDs. Locked chats or full-disk encryption give a hard guarantee.
 
 ### 4.6 Keyboard shortcuts (same in TUI and web)
 
@@ -288,6 +318,11 @@ The environment can be switched per chat; switching is logged.
 
 List shortcuts only work when the list has focus, never while typing in the message box. Keys can be rebound in `keybindings.toml`.
 
+**Accessibility (D39)**
+- `keybindings.single_key = true` (default) can be set to `false`, which makes every single-character shortcut require a modifier (`Alt+d`, ...), as WCAG 2.1.4 requires for screen-reader and speech-input users.
+- Web UI targets **WCAG 2.2 AA**: full keyboard operation, visible focus, ARIA roles for the chat list and message log (`role="log"`, polite live region for streaming), contrast ≥ 4.5:1, honours `prefers-reduced-motion`.
+- TUI: no colour-only state (badges also have text: `[LOCKED]`, `[CLOUD]`, `[UNSANDBOXED]`), high-contrast theme.
+
 ### 4.7 Uploads (files and images)
 - Supported: text/code, PDF, DOCX, Markdown, CSV, images (PNG/JPG/WebP).
 - Uploads are copied into the store (encrypted if the chat is locked), and their hash is recorded in the audit log.
@@ -306,6 +341,12 @@ List shortcuts only work when the list has focus, never while typing in the mess
 ### 4.9 Tools, skills, MCP (D15)
 - **Tools** come from MCP servers (stdio). Built-in first-party servers: `fs`, `shell` (sandboxed), `git`, `rag`, `pdf`, `zotero`, `scholar` (arXiv/S2/OpenAlex/PubMed/Crossref), `web` (search + fetch).
 - Each MCP server has a **manifest** declaring the permissions it needs (`fs:read:<path>`, `net:<host>`, `exec`). The policy engine grants only what both the manifest and the environment allow.
+- **MCP trust (D38)**, against tool poisoning (hidden instructions in tool descriptions) and rug pulls (a server changing its tools after approval):
+  - Third-party servers are installed at a **pinned version with a package hash**; upgrades are explicit and show a diff of the tool list.
+  - When a server is approved, Cairn stores a hash of each tool's **name + description + input schema**. If any of these changes at runtime, the tool is **disabled** until the user re-approves it (the diff is shown).
+  - Tool descriptions are shown to the user in full at approval, and are scanned for instruction-like text ("ignore previous", "send", URLs) with a warning.
+  - MCP servers run inside the sandbox tier (§4.10.1) with only their declared permissions; their network goes through the egress proxy.
+  - Tool results are treated as **untrusted content** (tagged), the same as web pages.
 - **Skills** are folders containing `SKILL.md` (frontmatter: name, description, required tools/permissions) plus optional scripts/templates, in the same layout Claude uses so skills can be shared. Skill scripts run in the sandbox.
 - Starter skills: `lit-review` (search → screen → extract → synthesise), `citation-check` (checks that every cited source exists via DOI/Crossref), `code-review`, `test-and-fix`.
 
@@ -355,15 +396,21 @@ kind = "drive_mirror"
 source = "drive:Thesis/Papers"
 mode = "on_demand"
 
-[sync.jobs.backup]                 # outgoing: chats + artifacts
-kind = "workspace"
+[sync.jobs.nightly-backup]         # backup: restic snapshots (§4.12.3)
+kind = "backup"
 include = ["chats", "artifacts"]   # either or both
+target = "rclone:gdrive:Cairn-Backup"   # or "folder:/mnt/nas/cairn-backup" or "sftp:nas:/backup"
+mode = "auto"
+schedule = "0 2 * * *"             # nightly 02:00
+retention = { daily = 7, weekly = 4, monthly = 12 }
+
+[sync.jobs.laptop]                 # replicate: same chats on several machines
+kind = "replicate"
+include = ["chats", "artifacts"]
 scope = ["folder:Thesis", "folder:Coding/*"]   # or "all"
-target = "drive:Cairn-Backup"      # or "folder:/mnt/nas/cairn" or "git:git@github.com:me/cairn-data.git"
+target = "folder:~/Syncthing/cairn"   # or "rclone:gdrive:Cairn-Sync" or "git:git@github.com:me/cairn-data.git"
 mode = "auto"
 on_change = true
-schedule = "0 2 * * *"             # nightly 02:00 as well
-direction = "two_way"              # push | pull | two_way
 ```
 
 Every sync run is audited (job, direction, items, bytes, hashes), and outgoing runs appear in the egress report. Syncing to Drive or a git host counts as outbound network: the host has to be allowed in the environment, and the first run of a new target needs approval.
@@ -372,17 +419,31 @@ Every sync run is audited (job, direction, items, bytes, hashes), and outgoing r
 - **Google Drive:** a sync worker (rclone, MIT, or the Drive API with read-only scope) mirrors **chosen folders** into the local workspace store according to the job's mode. Before applying, on-demand runs show a preview (new/changed/deleted files); automatic runs apply and log. The agent only sees the local mirror. OAuth tokens are stored in the OS keychain (`keyring`).
 - **GitHub/Git:** repos are cloned locally; `git fetch` follows the job's mode. The agent works against the local clone.
 
-#### 4.12.3 Chat and artifact sync (D30)
-Purpose: backup and using the same chats on several machines (e.g. Debian desktop + Windows laptop).
-- **Targets:** local folder / NAS / Syncthing folder (no network needed), Google Drive folder (scope limited to files Cairn created), private git remote.
-- **What syncs:**
-  - **Chats** → one bundle per chat: `chat.json` (metadata: title, folder, environment, effort, pins) + `messages.jsonl` + `attachments/`. Messages have stable IDs, so merging is append-only.
-  - **Artifacts** → each chat's artifact git repo, synced as git history (push/pull to a bare repo on the target), so version history comes along.
-  - **Folders** and settings that aren't secrets (environments, effort levels, skills list). **Never synced:** API keys, OAuth tokens, passphrases, the local audit-log signing key.
-- **Conflicts:** messages are merged by ID. If the same chat got new turns on two machines, the chat is **forked** ("Thesis notes (laptop)") rather than mixed. Artifact conflicts are handled as git merges; if a merge doesn't apply cleanly, the remote version is kept as a branch and the user is asked.
-- **Deletes** sync as tombstones (soft-delete / 30-day trash on every device).
+#### 4.12.3 Chat and artifact sync (D30, D40)
+Two different needs, each handled by a proven tool rather than home-grown merge code ([ADR-0007](adr/0007-sync-restic-backup-and-event-log-replication.md)):
+
+| Need | Job kind | Mechanism | Transport |
+|---|---|---|---|
+| **Backup / restore** | `backup` | **restic** (BSD-2-Clause) snapshots of the Cairn data folder: deduplicated, versioned, `cairn restore --at <date>` | local folder/NAS, SFTP, or Google Drive / other clouds via restic's rclone backend |
+| **Same chats on several machines** | `replicate` | **Per-device append-only event logs** for chats; **git** for artifacts | any shared folder (local/NAS/Syncthing), Google Drive (via rclone), or a private git remote |
+
+**Backup (`backup`)**
+- restic repositories are **always encrypted** (that's how restic works). The repo password is set by the user when they create the job and kept in the OS keychain; this counts as the user opting in. Losing it means losing the backup; setup says so and offers to export it.
+- Retention policy per job (e.g. keep 7 daily, 4 weekly, 12 monthly), `cairn backup check` runs restic's integrity check.
+
+**Replicate (`replicate`)**
+- **Chats** are stored as **events** (chat created, message appended, renamed, moved, effort/environment changed, locked, deleted/tombstone). Each device writes **only its own log files** (`devices/<device-id>/events-<n>.jsonl`) and only reads the others', so two devices never write the same file and file-level sync conflicts can't happen.
+- Each device rebuilds its local state by merging all logs in order (Lamport clock, then device ID). This is event sourcing: the merge is deterministic and every device ends up with the same state.
+- **Concurrent turns:** if two devices append a message to the same parent message, the chat **forks** into two branches ("Thesis notes" and "Thesis notes (laptop)"), shown side by side; nothing is mixed.
+- Messages are never edited in place, only appended; renames/moves use last-writer-wins by the same ordering.
+- **Artifacts** are each chat's git repo, pushed/pulled to a bare repo on the target, so history comes along and conflicts are normal git merges (if a merge doesn't apply cleanly, the remote version is kept as a branch and the user is asked).
+- **Folders** and settings that aren't secrets (environments, effort levels, skills list) are replicated as events too. **Never synced:** API keys, OAuth tokens, passphrases, chat keys of unlocked chats, the local audit-log signing key.
+- Log files are compacted (snapshot + tail) when they grow; compaction is itself an event.
+- If true collaborative editing of a document is needed later, a CRDT library (Automerge, MIT) is the planned approach; it isn't needed for append-only chats.
+
+**Common rules**
 - **Audit across devices:** each machine keeps its own hash-chained audit log; sync records reference the remote device ID, and `cairn audit verify --all-devices` checks every synced device log.
-- **Encryption of synced data (D31):** items the user has encrypted (§5.5) are uploaded **only as encrypted data** (encrypted on this machine first; the target never sees plaintext or keys). Unencrypted items are uploaded as-is. When a job's target is a cloud service (Drive, git host) and its scope contains unencrypted items, setup shows a clear warning, offers "encrypt this sync target" (one passphrase for everything synced there), and shows a ☁ badge on synced chats. Encryption stays opt-in; the warning is a prompt, not a requirement.
+- **Encryption of synced data (D31):** in `replicate` jobs, events and artifacts of items the user has locked (§5.5) are written **only as age-encrypted data** (encrypted on this machine; the target never sees plaintext or keys). Unlocked items are written as plain JSON/git. When the target is a cloud service and the scope contains unlocked items, setup shows a clear warning, offers "encrypt this sync target" (a target passphrase; every event/object written there is encrypted), and shows a ☁ badge on synced chats. Encryption stays opt-in; the warning is a prompt, not a requirement.
 - The agent can *start* a sync (with approval) but cannot create or change sync jobs, targets or modes; only the user can.
 
 ### 4.13 Web search
@@ -400,9 +461,11 @@ Purpose: backup and using the same chats on several machines (e.g. Debian deskto
 
 ## 5. Security and privacy (D4, D8)
 
-### 5.1 Threat model (summary)
-- **Protects against:** data leaving the machine without consent; the agent damaging files outside the workspace; prompt injection from web pages, PDFs or repos causing data to leak or harmful actions; local tampering with the action history going unnoticed; theft of the data directory or disk (locked chats; full-disk encryption recommended for the rest).
-- **Out of scope v1:** a compromised OS/root user; malicious model weights (mitigated only by verifying checksums); side channels.
+### 5.1 Threat model (summary; full version in [threat-model.md](threat-model.md))
+- Method (D33): **STRIDE** per component and data flow for security, **LINDDUN** for privacy, and every control mapped to the **OWASP Top 10 for LLM Applications (2025)** (LLM01 Prompt Injection … LLM10 Unbounded Consumption). Each threat has an ID (`T-xx`), its controls, and the requirement/test that checks it.
+- **Protects against:** data leaving the machine without consent; the agent damaging files outside the workspace; prompt injection from web pages, PDFs, repos or tool output causing data to leak or harmful actions; malicious web pages attacking the local API; poisoned or changed MCP tools; local tampering with the action history going unnoticed; theft of the data directory or disk (locked chats; full-disk encryption recommended for the rest).
+- **Privacy note (LINDDUN):** the audit log itself is sensitive (it records what you did, when). It holds digests and metadata rather than content, has a configurable retention period, and is never synced to cloud targets unless the user includes it.
+- **Out of scope v1:** a compromised OS/root user; malicious model weights (mitigated by GGUF/safetensors-only formats and checksums); side channels.
 
 ### 5.2 Tamper-evident audit log
 - Append-only table in SQLite + mirrored JSONL file.
@@ -410,6 +473,9 @@ Purpose: backup and using the same chats on several machines (e.g. Debian deskto
 - Full prompts/outputs are stored in the chat store (encrypted if the chat is locked) and **referenced by digest**, so the log can be shared without exposing content.
 - `cairn audit verify` recomputes the chain. Checkpoints are signed with a local Ed25519 key, and the user can export a checkpoint (e.g. print or store it elsewhere) to detect a rewritten history.
 - UI: per-chat audit view (`l`), a global audit browser with filters, and export (JSONL/CSV).
+- **Tracing export (D37):** optional export of model and tool calls as **OpenTelemetry** spans using the GenAI semantic conventions (`gen_ai.*` attributes: model, token counts, operation), to a local file or a local collector (e.g. for Grafana/Jaeger). Off by default; content fields are excluded unless the user includes them; a remote collector counts as egress.
+- **Phase 3:** Merkle-tree checkpoints (as used in Certificate Transparency / Sigstore Rekor) for efficient proofs that a record is in the log.
+- Retention: configurable (default: keep forever); purging old entries keeps a signed checkpoint so the remaining chain still verifies.
 
 ### 5.3 Policy engine
 - Decides `allow | ask | deny` from environment rules + tool manifest + action type.
@@ -427,7 +493,13 @@ Purpose: backup and using the same chats on several machines (e.g. Debian deskto
   1. Directly: `cairn lock <chat>`, the chat menu ("Lock chat…"), or a shortcut (`L`).
   2. By explicitly asking the agent ("encrypt this chat", "lock the thesis folder"). The agent calls the `encrypt` tool, which **always** ends in a confirmation dialog in the client, where the user types the passphrase. The passphrase goes from the client to the core's crypto module and **never enters the model context**, tool arguments, logs or the audit record.
   The `encrypt`/`decrypt` tools are marked `user_initiated_only`: the policy engine rejects them unless the message that triggered the call is a user message in the same chat (not tool output, web content, a file or a sub-agent). So prompt injection can't trigger encryption (e.g. a ransomware-style "encrypt everything" request).
-- **Passphrases only for locked chats (D24):** each locked chat (or folder) has its own key, derived from its passphrase with Argon2id. Unlocked chats need no passphrase. Locked chats show 🔒 in the list; opening one asks for its passphrase; it re-locks after a configurable idle time. One passphrase can optionally be reused across several chats.
+- **Key hierarchy (D35, D36)**, using the reviewed **age** format (via pyrage, MIT/Apache-2.0) rather than a custom container:
+  - Every chat has its own random **chat key** (an age X25519 identity). All of the chat's records in the store (messages, attachments) are encrypted with it, **whether or not the chat is locked**.
+  - **Unlocked chat:** the chat key is kept in the local key store without a passphrase, so nothing is asked and opening is instant. This is not protection against someone with access to your disk (that's what locking or full-disk encryption is for); it exists so deletion is reliable: **purging a chat destroys its key** (crypto-shredding).
+  - **Locked chat:** the chat key is **wrapped** (encrypted) with the passphrase using age's scrypt recipient, and optionally also with a recovery key. Changing the passphrase only re-wraps the key; the chat's data isn't re-encrypted.
+  - Locked artifacts use their own artifact key, wrapped the same way.
+  - Synced and backed-up copies of locked items contain only wrapped keys.
+- **Passphrases only for locked chats (D24):** each locked chat (or folder) has its own wrapped key; unlocked chats need no passphrase. Locked chats show 🔒 in the list; opening one asks for its passphrase; it re-locks after a configurable idle time. One passphrase can optionally be reused across several chats.
 - **Chats and artifacts are opt-in separately (D31):**
   - *Lock chat* encrypts messages, attachments, its search-index and embedding rows, and memory items from it.
   - *Lock artifacts* encrypts the chat's artifact repo (stored as an encrypted git bundle while locked, unpacked into a temporary folder while unlocked and re-packed on lock).
@@ -436,16 +508,21 @@ Purpose: backup and using the same chats on several machines (e.g. Debian deskto
 - The audit log stays readable and verifiable without passphrases: locked-chat entries hold only digests and metadata (time, tool, host, bytes), never content.
 - **Removing encryption** (`unlock --permanent`) also requires the passphrase and is user-initiated only.
 - **Lost passphrase = lost data.** The lock dialog says so; an optional recovery key can be exported at lock time.
-- Implementation: per-chat encrypted data with XChaCha20-Poly1305 (libsodium via PyNaCl, Apache-2.0); the main DB stays plain SQLite. Optional global "encrypt everything" mode (SQLCipher) for later (Phase 3).
+- Implementation: age (pyrage) for chat records, attachments, wrapped keys and encrypted sync data; the SQLite database holds metadata, the search index and encrypted blobs. Optional global "encrypt everything" mode (SQLCipher) for later (Phase 3).
 
 ### 5.6 Per-chat egress report
 - Panel (`x`) listing every outbound request for the chat: time, host, tool, bytes in/out, what was redacted, decision, who approved. Exportable.
 - Global "network today" summary in the status bar (e.g. `⇅ 0 hosts` offline badge).
 
-### 5.7 Supply chain
-- `uv` lockfile with hashes; minimal core dependencies; licenses checked in CI (block AGPL/GPL in the core package).
-- Model files verified by checksum on download.
-- MCP servers / skills from third parties are installed **disabled**; enabling one shows the permissions its manifest requests.
+### 5.7 Supply chain (D41)
+- **Dependencies:** `uv` lockfile with hashes; minimal core dependencies; `pip-audit` (known vulnerabilities) and a license check (block AGPL/GPL in the core package) in CI; Dependabot for Python and GitHub Actions updates.
+- **CI hardening:** GitHub Actions pinned to commit SHAs, least-privilege `permissions:`, no secrets in pull-request jobs; **OpenSSF Scorecard** runs weekly.
+- **Releases:** a **CycloneDX SBOM** (software bill of materials) per release; wheels and installers **signed with Sigstore** (keyless, via GitHub OIDC) with build provenance attestations (SLSA build level 2+); `cairn self-verify` checks an install against them.
+- **Models:** only **GGUF** and **safetensors** files are accepted (never pickle-based `.bin`/`.pt`, which can run code when loaded); SHA-256 checked against the source (Hugging Face / Ollama manifest) on download and recorded in the audit log.
+- **MCP servers / skills** from third parties are installed **disabled** and pinned (§4.9); enabling one shows the permissions its manifest requests.
+
+### 5.8 Policy for `encrypt`, sync jobs and other user-only actions
+Actions marked `user_initiated_only` (encrypt/decrypt, creating or changing sync jobs, enabling hosted backends, enabling tier-4 sandbox, approving MCP tools) can only be triggered by a user message in the same chat or by the UI itself, never by tool output, files, web content or sub-agents. This is the main defence against *excessive agency* (OWASP LLM06).
 
 ---
 
@@ -459,7 +536,12 @@ Purpose: backup and using the same chats on several machines (e.g. Debian deskto
 | TUI | Textual | MIT |
 | Web UI | Svelte (served by the core, built offline) | MIT |
 | DB | SQLite, FTS5, sqlite-vec (SQLCipher optional, Phase 3) | Public domain / MIT-Apache / BSD-style |
-| Crypto | PyNaCl (libsodium), argon2-cffi | Apache-2.0 / MIT |
+| Crypto | age format via pyrage | MIT / Apache-2.0 |
+| Config | pydantic models → JSON Schema (`schema_version` in every file) | MIT |
+| DB migrations | Alembic (+ SQLAlchemy Core) | MIT |
+| Backup | restic (external binary) | BSD-2-Clause |
+| Tracing (optional) | OpenTelemetry SDK | Apache-2.0 |
+| Supply chain | cyclonedx-py, Sigstore, pip-audit, OpenSSF Scorecard | Apache-2.0 |
 | Artifact versioning | git (via dulwich or the git CLI) | Apache-2.0/GPL-2.0 (dulwich) / GPL-2.0 (CLI, separate process) |
 | Citations | citeproc-py + CSL styles | BSD / CC BY-SA (styles) |
 | Tools protocol | MCP Python SDK | MIT |
@@ -467,7 +549,7 @@ Purpose: backup and using the same chats on several machines (e.g. Debian deskto
 | Parsing | Docling, pypdfium2 | MIT, Apache-2.0/BSD |
 | Redaction | Presidio + secret rules | MIT |
 | Search | SearXNG (external) | AGPL-3.0 (separate process) |
-| Drive sync | rclone or Google API client | MIT / Apache-2.0 |
+| Drive mirror and cloud sync transport | rclone (external binary) | MIT |
 | Zotero | pyzotero / local API | MIT |
 | Secrets | keyring | MIT |
 
@@ -476,7 +558,7 @@ Purpose: backup and using the same chats on several machines (e.g. Debian deskto
 ## 7. Delivery plan
 
 ### Phase 0 — Skeleton (thin slice of everything, D17)
-Goal: every feature exists end to end in a minimal form.
+Goal: every feature exists end to end in a minimal form. Delivered as a **walking skeleton** (M0) followed by milestones M1–M3 that each add features end to end; see [plan/phase0.md](plan/phase0.md). Requirement IDs and priorities are in [requirements.md](requirements.md); "Must" items define Phase 0 done, "Should" items may slip to a Phase 0.x point release.
 
 | Feature | Thin-slice scope | Acceptance criterion |
 |---|---|---|
@@ -496,12 +578,13 @@ Goal: every feature exists end to end in a minimal form.
 | Lit review | local PDFs + arXiv search | Produces a table + `.bib` from 5 PDFs; arXiv call appears in egress report |
 | Zotero | read collections (local API) | Lists items from a chosen collection |
 | Connectors | git clone/fetch; Drive folder mirror | Mirror a Drive folder read-only; agent reads local copy only |
-| Sync | modes none / on_demand / auto; chat + artifact sync to a local folder and to Drive | Two installs syncing via one folder see each other's chats and artifact history; a locked chat arrives encrypted; a job in mode `none` never runs |
+| Sync | modes none / on_demand / auto; `backup` (restic) and `replicate` (event logs + git) to a local folder and to Drive | Two installs replicating via one folder see each other's chats and artifact history; concurrent turns fork; a locked chat arrives encrypted; a backup restores to a given date; a job in mode `none` never runs |
 | Web search | SearXNG backend, opt-in | Blocked in offline env; allowed + logged in online env |
 | Multi-agent | `spawn_agent` (max_parallel 1) + 1 YAML workflow | Sub-agent appears nested in audit; budget limits enforced |
 | Audit log | hash chain + verify + per-chat view | `cairn audit verify` fails after a record is edited by hand |
 | Redaction | secret rules + Presidio | A fake AWS key in an outbound query is blocked |
-| Encryption | per-chat lock, user-initiated only | A locked chat can't be read without its passphrase; an `encrypt` call triggered from web/tool content is rejected; passphrase never appears in logs or model context |
+| Encryption | per-chat age keys, lock = wrap with passphrase, user-initiated only | A locked chat can't be read without its passphrase; an `encrypt` call triggered from web/tool content is rejected; passphrase never appears in logs or model context; a purged chat can't be decrypted from a copy of the old database |
+| Local API security | Unix socket, Host/Origin/CSRF checks | A request with a foreign Host or Origin header is rejected; a cross-site form post fails |
 | Citations | `cite.format` (CSL) + `references` skill | The same references come out correctly in APA and IEEE; adding a `.csl` file adds a style |
 | Platforms | Debian + Windows | Phase 0 test suite passes on Debian 12 and Windows 11; sandbox tier 1 on Debian and tier 2 on Windows block network and outside-workspace reads |
 | Egress report | per-chat panel | Lists host, bytes and redactions for each request |
@@ -517,17 +600,59 @@ Workflow editor, parallel sub-agents on GPU backends, signed audit checkpoints, 
 
 ---
 
-## 8. Open questions
+## 8. Non-functional requirements (summary)
+Full list with IDs in [requirements.md](requirements.md). Performance targets marked *provisional* will be fixed from `scripts/bench_backend.py` results on the reference machine (32 GB RAM, CPU only, Debian).
+
+| Area | Target |
+|---|---|
+| Responsiveness | UI reacts to input ≤ 100 ms; Cairn adds ≤ 50 ms per turn on top of the model (policy + audit + context assembly) |
+| Model speed (provisional) | First token ≤ 10 s for a 2K-token prompt on the main model (warm); fast model ≤ 3 s; a warning before any request expected to exceed 60 s of prompt processing |
+| Footprint | Cairn processes ≤ 1 GB RAM excluding model servers; core starts ≤ 3 s |
+| Reliability | No data loss on crash or power cut (SQLite WAL, atomic file writes); an audit record is written before every effect; interrupted turns can be resumed |
+| Offline | Every feature that doesn't inherently need the network works with the network unplugged |
+| Accessibility | Web UI WCAG 2.2 AA; single-key shortcuts can be turned off |
+| Portability | Debian 12+, Ubuntu 22.04+, Windows 10/11; Python 3.12+ |
+| Privacy | Zero outbound connections in a default install, verified by a test that runs Cairn with the network blocked and checks the egress log |
+
+## 9. Testing and quality strategy
+
+| Layer | What | Tooling |
+|---|---|---|
+| Static | Lint, formatting, strict typing | ruff, mypy (strict) |
+| Unit | Policy engine, audit chain, crypto wrapping, config validation, event-log merge | pytest, **Hypothesis** (property-based, e.g. "any interleaving of two device logs merges to the same state") |
+| Contract | Core API vs `api/openapi.json`; config files vs JSON Schema | schemathesis (API fuzzing from the OpenAPI document) |
+| Integration | Core with a **fake model server** (scripted replies, tool calls) and real SQLite, sandbox, git | pytest + local fake Ollama/OpenAI server |
+| End to end | TUI and web UI flows, including every shortcut | Textual's pilot test harness; Playwright for the web UI, with axe-core for accessibility |
+| Model evaluations | Golden tasks run against the real local model: tool-call accuracy, diff correctness on sample repos, PDF Q&A with page citations, **citation existence** (no invented references), compaction keeping key facts | small eval sets in `evals/`, run nightly or on demand (too slow for every commit on CPU) |
+| Security | **Prompt-injection corpus** (malicious PDFs, web pages, tool outputs, repo files) must not trigger network, writes or user-only actions; DNS-rebinding/CSRF tests against the local API; redaction tests with fake secrets; `audit verify` tamper tests | pytest suites in `tests/security/` |
+| Fuzzing | File parsers and import paths (PDF, DOCX, event logs, config) | Atheris / Hypothesis |
+| Platforms | Every test layer except model evals runs on Debian 12, Ubuntu 24.04 and Windows | GitHub Actions matrix |
+
+Every Must requirement has at least one automated test; [requirements.md](requirements.md) names it.
+
+## 10. Data and configuration contracts
+- **Config:** every TOML file (`backends`, `effort`, `environments/*`, `sync`, `keybindings`) is validated by a pydantic model on load, with a published JSON Schema (editor autocompletion) and a `schema_version`; older files are migrated automatically with a backup kept.
+- **Database:** schema changes only via versioned **Alembic** migrations; a backup is taken before migrating; downgrades are supported for one version.
+- **API:** OpenAPI document committed and checked in CI (§3.1).
+- **Event log format** (replication) and **artifact commit messages** are versioned formats documented in `docs/formats/`.
+
+## 11. Open questions
 Resolved in v0.2: hardware (D21), artifact versioning (D22), encryption (D23), unlocking (D24), citation styles (D25).
 Resolved in v0.3: name (D26), Drive sync (D27), Windows sandbox (D28), hosted providers (D29).
 Resolved in v0.4: sync modes (D27, revised), chat + artifact sync (D30), encryption scope (D31).
 
-1. **Drive folders:** which folders to set up for the first sync (can be decided at setup time).
+Resolved in v0.5: industry-practice alignment (D32–D41).
 
-## 9. Risks
+1. **Drive folders:** which folders to set up for the first sync (can be decided at setup time).
+2. **Project license:** Apache-2.0 suggested (patent grant; matches Qwen's license); not yet decided.
+3. **Performance targets:** fix the provisional numbers in §8 once `scripts/bench_backend.py` has been run on the reference machine.
+
+## 12. Risks
 - **Syncing unencrypted chats to a cloud target exposes their content to that provider.** Mitigated by mode `none` by default, the setup warning, the "encrypt this sync target" option, ☁ badges and egress reporting.
 - **Hosted backends weaken privacy.** Mitigated by deny-by-default, redaction, the ☁ badge, locked chats never going to hosted backends, and the egress report.
 - **CPU speed:** long prompts and sub-agents are slow. Mitigated by retrieval, compaction, KV-cache reuse, the fast model for routing, and running sub-agents one at a time.
 - **Tool-calling reliability** of 30B-class local models. Mitigated by JSON-schema-constrained output (grammar in llama.cpp), small tool sets per environment, and retry/repair.
 - **Scope:** "thin slice of everything" covers many features. Each item is kept to its Phase 0 acceptance criterion; anything beyond it moves to later phases.
-- **Prompt injection** from PDFs/web pages. Mitigated by tagging untrusted content, requiring approval for network and write actions, and the audit trail.
+- **Prompt injection** from PDFs/web pages/tool output. Mitigated by tagging untrusted content, requiring approval for network and write actions, `user_initiated_only` actions (§5.8), the injection test corpus (§9), and the audit trail. No current technique fully prevents prompt injection, so the design limits what a successful injection can do.
+- **Crypto-shredding gap** for unlocked chats' search index and embeddings (plaintext in SQLite). Stated in the UI; locked chats or full-disk encryption close it.
+- **External binaries** (restic, rclone, Podman, bubblewrap) add install steps, especially on Windows. Mitigated by a `cairn doctor` command that checks and explains what's missing, and by features degrading gracefully (e.g. no restic → backup jobs unavailable, everything else works).
