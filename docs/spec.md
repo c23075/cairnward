@@ -1,6 +1,6 @@
 # Spec: Cairn — a local, privacy-first AI agent
 
-Status: **Draft v0.3, for review** (v0.3 adds name, Drive sync mode, Windows sandbox tiers and hosted providers, D26–D29)
+Status: **Draft v0.4, for review** (v0.4: syncing chats and artifacts, three sync modes, opt-in encryption for chats and artifacts, D27/D30/D31)
 Date: 2026-10-31
 Repo: `c23075/possessed-incantation`
 Name: **Cairn** (stacked stones that mark a trail, i.e. the audit trail). CLI command: `cairn`.
@@ -61,8 +61,10 @@ unless explicitly allowed, and data on disk is encrypted.
 | D24 | Passphrases | **Only for chats the user locks**; everything else opens without a passphrase |
 | D25 | Citation styles | APA + IEEE by default via **CSL style files**; more styles added by dropping in `.csl` files; a `references` skill uses the formatter tool |
 | D26 | Name | **Cairn**, CLI `cairn` |
-| D27 | Drive sync | **On demand only** (`cairn sync drive [folder]` or "Sync now"); no background or scheduled sync |
+| D27 | Sync modes | Every sync job (incoming Drive/git mirrors **and** outgoing chat/artifact sync) has a mode: **none** (default), **on demand**, or **automatic/scheduled** (on change and/or on a schedule) |
 | D28 | Windows sandbox | Default **WSL2 + bubblewrap**; Podman/Docker or Windows Sandbox used when available; **restricted-host mode off unless enabled**, and then every command needs approval |
+| D30 | Chat + artifact sync | **Chats and artifacts can both be synced** (backup / multi-device) to a chosen target: local folder/NAS, Google Drive, or a private git remote |
+| D31 | Encryption scope | **Opt-in** encryption for chats **and** artifacts, chosen separately. Synced copies of encrypted items stay encrypted (encrypted on this machine before upload) |
 | D29 | Hosted providers (tested first) | Alibaba Model Studio, DeepSeek API, OpenRouter; **Claude API later** via a separate Anthropic API key (a Claude Pro subscription doesn't include API access, and logging in with a consumer account in third-party apps isn't supported) |
 
 ---
@@ -280,7 +282,8 @@ The environment can be switched per chat; switching is logged.
 | `E` | Cycle effort | `m` | Model picker |
 | `u` | Upload file/image | `A` | Open artifacts panel |
 | `l` | Audit log for current chat | `x` | Egress report |
-| `L` | Lock / unlock chat | `b` | Backend picker |
+| `L` / `Shift+L` | Lock chat / lock its artifacts | `b` | Backend picker |
+| `S` | Sync now | `Shift+S` | Sync jobs and status |
 | `Ctrl+K` | Command palette | `?` | Help overlay |
 
 List shortcuts only work when the list has focus, never while typing in the message box. Keys can be rebound in `keybindings.toml`.
@@ -337,10 +340,50 @@ Tier 4 rules: every command needs approval (no "allow for this chat"), the UI sh
 - A **`references` skill** wraps the tool: it tells the agent when to collect metadata (DOI → Crossref, Zotero item, BibTeX), how to build the bibliography, in-text citation conventions per style, and to run `citation-check` first. So the answer to "is this a skill?" is: **both**. The formatter is a tool (so output is exact and repeatable), and the skill holds the know-how and the default style. Each environment sets a default style (`citation_style = "apa"`); it can be changed per chat or per request ("use IEEE").
 - Output formats: in-text + reference list in Markdown/DOCX artifacts, plus a `.bib`/CSL-JSON file.
 
-### 4.12 Connectors (D14: sync to local first)
-- **Google Drive:** a sync worker (rclone, MIT, or the Drive API with read-only scope) mirrors **chosen folders** into the local workspace store **only when the user triggers a sync** (D27): `cairn sync drive [folder]`, the "Sync now" button, or by asking the agent (which then asks for approval). The sync shows a preview (new/changed/deleted files) before it applies. The agent only sees the local mirror. OAuth tokens are stored in the OS keychain (`keyring`).
-- **GitHub/Git:** repos are cloned locally; `git fetch` runs as an explicit, audited sync action. The agent works against the local clone.
-- Each sync logs what came in (files, sizes, hashes). Nothing is uploaded unless the user starts a push or upload, which is approved and audited.
+### 4.12 Connectors and sync (D14, D27, D30)
+
+#### 4.12.1 Sync modes (apply to every sync job)
+| Mode | Behaviour |
+|---|---|
+| `none` (default) | Never syncs. The job is configured but inactive |
+| `on_demand` | Only when the user runs `cairn sync [job]`, presses "Sync now" (`S`), or asks the agent (which needs approval) |
+| `auto` | Automatically: `on_change` (debounced, e.g. 30s after the last edit) and/or `schedule` (cron, e.g. hourly or nightly); runs only while the core is running, and missed runs catch up at the next start |
+
+```toml
+[sync.jobs.thesis-papers]          # incoming: Drive → local mirror
+kind = "drive_mirror"
+source = "drive:Thesis/Papers"
+mode = "on_demand"
+
+[sync.jobs.backup]                 # outgoing: chats + artifacts
+kind = "workspace"
+include = ["chats", "artifacts"]   # either or both
+scope = ["folder:Thesis", "folder:Coding/*"]   # or "all"
+target = "drive:Cairn-Backup"      # or "folder:/mnt/nas/cairn" or "git:git@github.com:me/cairn-data.git"
+mode = "auto"
+on_change = true
+schedule = "0 2 * * *"             # nightly 02:00 as well
+direction = "two_way"              # push | pull | two_way
+```
+
+Every sync run is audited (job, direction, items, bytes, hashes), and outgoing runs appear in the egress report. Syncing to Drive or a git host counts as outbound network: the host has to be allowed in the environment, and the first run of a new target needs approval.
+
+#### 4.12.2 Incoming connectors (sync to local first)
+- **Google Drive:** a sync worker (rclone, MIT, or the Drive API with read-only scope) mirrors **chosen folders** into the local workspace store according to the job's mode. Before applying, on-demand runs show a preview (new/changed/deleted files); automatic runs apply and log. The agent only sees the local mirror. OAuth tokens are stored in the OS keychain (`keyring`).
+- **GitHub/Git:** repos are cloned locally; `git fetch` follows the job's mode. The agent works against the local clone.
+
+#### 4.12.3 Chat and artifact sync (D30)
+Purpose: backup and using the same chats on several machines (e.g. Debian desktop + Windows laptop).
+- **Targets:** local folder / NAS / Syncthing folder (no network needed), Google Drive folder (scope limited to files Cairn created), private git remote.
+- **What syncs:**
+  - **Chats** → one bundle per chat: `chat.json` (metadata: title, folder, environment, effort, pins) + `messages.jsonl` + `attachments/`. Messages have stable IDs, so merging is append-only.
+  - **Artifacts** → each chat's artifact git repo, synced as git history (push/pull to a bare repo on the target), so version history comes along.
+  - **Folders** and settings that aren't secrets (environments, effort levels, skills list). **Never synced:** API keys, OAuth tokens, passphrases, the local audit-log signing key.
+- **Conflicts:** messages are merged by ID. If the same chat got new turns on two machines, the chat is **forked** ("Thesis notes (laptop)") rather than mixed. Artifact conflicts are handled as git merges; if a merge doesn't apply cleanly, the remote version is kept as a branch and the user is asked.
+- **Deletes** sync as tombstones (soft-delete / 30-day trash on every device).
+- **Audit across devices:** each machine keeps its own hash-chained audit log; sync records reference the remote device ID, and `cairn audit verify --all-devices` checks every synced device log.
+- **Encryption of synced data (D31):** items the user has encrypted (§5.5) are uploaded **only as encrypted data** (encrypted on this machine first; the target never sees plaintext or keys). Unencrypted items are uploaded as-is. When a job's target is a cloud service (Drive, git host) and its scope contains unencrypted items, setup shows a clear warning, offers "encrypt this sync target" (one passphrase for everything synced there), and shows a ☁ badge on synced chats. Encryption stays opt-in; the warning is a prompt, not a requirement.
+- The agent can *start* a sync (with approval) but cannot create or change sync jobs, targets or modes; only the user can.
 
 ### 4.13 Web search
 - Default backend: self-hosted **SearXNG** (AGPL-3.0, run as a separate container, not bundled into cairn).
@@ -385,7 +428,11 @@ Tier 4 rules: every command needs approval (no "allow for this chat"), the UI sh
   2. By explicitly asking the agent ("encrypt this chat", "lock the thesis folder"). The agent calls the `encrypt` tool, which **always** ends in a confirmation dialog in the client, where the user types the passphrase. The passphrase goes from the client to the core's crypto module and **never enters the model context**, tool arguments, logs or the audit record.
   The `encrypt`/`decrypt` tools are marked `user_initiated_only`: the policy engine rejects them unless the message that triggered the call is a user message in the same chat (not tool output, web content, a file or a sub-agent). So prompt injection can't trigger encryption (e.g. a ransomware-style "encrypt everything" request).
 - **Passphrases only for locked chats (D24):** each locked chat (or folder) has its own key, derived from its passphrase with Argon2id. Unlocked chats need no passphrase. Locked chats show 🔒 in the list; opening one asks for its passphrase; it re-locks after a configurable idle time. One passphrase can optionally be reused across several chats.
-- What is encrypted for a locked chat: messages, attachments, its search-index and embedding rows, memory items from it, and its artifact repo (as an encrypted archive while locked).
+- **Chats and artifacts are opt-in separately (D31):**
+  - *Lock chat* encrypts messages, attachments, its search-index and embedding rows, and memory items from it.
+  - *Lock artifacts* encrypts the chat's artifact repo (stored as an encrypted git bundle while locked, unpacked into a temporary folder while unlocked and re-packed on lock).
+  - Either one can be applied to a single chat, a whole folder (new chats inside inherit it), or a sync target (§4.12.3). `L` locks the chat, `Shift+L` locks its artifacts; the lock dialog offers "both".
+  - Synced copies of locked items are always encrypted before upload; keys and passphrases never leave the machine.
 - The audit log stays readable and verifiable without passphrases: locked-chat entries hold only digests and metadata (time, tool, host, bytes), never content.
 - **Removing encryption** (`unlock --permanent`) also requires the passphrase and is user-initiated only.
 - **Lost passphrase = lost data.** The lock dialog says so; an optional recovery key can be exported at lock time.
@@ -449,6 +496,7 @@ Goal: every feature exists end to end in a minimal form.
 | Lit review | local PDFs + arXiv search | Produces a table + `.bib` from 5 PDFs; arXiv call appears in egress report |
 | Zotero | read collections (local API) | Lists items from a chosen collection |
 | Connectors | git clone/fetch; Drive folder mirror | Mirror a Drive folder read-only; agent reads local copy only |
+| Sync | modes none / on_demand / auto; chat + artifact sync to a local folder and to Drive | Two installs syncing via one folder see each other's chats and artifact history; a locked chat arrives encrypted; a job in mode `none` never runs |
 | Web search | SearXNG backend, opt-in | Blocked in offline env; allowed + logged in online env |
 | Multi-agent | `spawn_agent` (max_parallel 1) + 1 YAML workflow | Sub-agent appears nested in audit; budget limits enforced |
 | Audit log | hash chain + verify + per-chat view | `cairn audit verify` fails after a record is edited by hand |
@@ -472,10 +520,12 @@ Workflow editor, parallel sub-agents on GPU backends, signed audit checkpoints, 
 ## 8. Open questions
 Resolved in v0.2: hardware (D21), artifact versioning (D22), encryption (D23), unlocking (D24), citation styles (D25).
 Resolved in v0.3: name (D26), Drive sync (D27), Windows sandbox (D28), hosted providers (D29).
+Resolved in v0.4: sync modes (D27, revised), chat + artifact sync (D30), encryption scope (D31).
 
 1. **Drive folders:** which folders to set up for the first sync (can be decided at setup time).
 
 ## 9. Risks
+- **Syncing unencrypted chats to a cloud target exposes their content to that provider.** Mitigated by mode `none` by default, the setup warning, the "encrypt this sync target" option, ☁ badges and egress reporting.
 - **Hosted backends weaken privacy.** Mitigated by deny-by-default, redaction, the ☁ badge, locked chats never going to hosted backends, and the egress report.
 - **CPU speed:** long prompts and sub-agents are slow. Mitigated by retrieval, compaction, KV-cache reuse, the fast model for routing, and running sub-agents one at a time.
 - **Tool-calling reliability** of 30B-class local models. Mitigated by JSON-schema-constrained output (grammar in llama.cpp), small tool sets per environment, and retry/repair.
