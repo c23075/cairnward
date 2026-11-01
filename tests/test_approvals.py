@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+import sys
 import threading
 import time
 from pathlib import Path
@@ -214,6 +215,7 @@ async def test_sandbox_ask_refuses_local_addresses_unasked(paths: Paths, host: s
             assert (await task).json() == {"allow": True}
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets; isolated mode is Linux-only")
 def test_remote_approver_over_the_socket(paths: Paths, tmp_path: Path) -> None:
     """The egress process (isolated mode) asks through the core's management socket."""
     import uvicorn
