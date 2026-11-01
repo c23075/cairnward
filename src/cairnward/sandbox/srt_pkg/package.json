@@ -1,0 +1,8 @@
+{
+  "name": "cairnward-sandbox-runtime",
+  "private": true,
+  "description": "Pinned Anthropic sandbox-runtime used by Cairnward (ADR-0013)",
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.81"
+  }
+}

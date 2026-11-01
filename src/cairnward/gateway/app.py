@@ -10,7 +10,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -22,7 +22,7 @@ from cairnward.audit.log import canonical, digest
 from cairnward.backends import BackendError, Backends, ChatRequest, GenerationOptions
 from cairnward.config.loader import Config
 from cairnward.config.models import LOOPBACK_HOSTS
-from cairnward.gateway.clients import ClientKeys
+from cairnward.gateway.clients import ClientKeys, RunKeys
 from cairnward.gateway.models import Resolved, UnknownModel, resolve, virtual_model_ids
 from cairnward.gateway.recorder import record_exchange
 from cairnward.policy.engine import Action, PolicyEngine
@@ -61,6 +61,7 @@ class GatewayDeps:
     backends: Backends
     keys: ClientKeys
     vault: Vault | None = None
+    run_keys: RunKeys = field(default_factory=RunKeys)
 
 
 def _options(resolved: Resolved, req: ChatCompletionRequest) -> GenerationOptions:
@@ -103,9 +104,18 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             return _error(421, f"host '{host}' not accepted; use 127.0.0.1:{port}", "bad_host")
         return await call_next(request)
 
-    def client_of(request: Request) -> str | None:
+    def identity(request: Request) -> tuple[str, str | None] | None:
+        """(client name, run id) for the presented key."""
         auth = request.headers.get("authorization", "")
-        return deps.keys.identify(auth[7:].strip() if auth.lower().startswith("bearer ") else None)
+        key = auth[7:].strip() if auth.lower().startswith("bearer ") else None
+        if run := deps.run_keys.identify(key):
+            return run
+        name = deps.keys.identify(key)
+        return (name, None) if name else None
+
+    def client_of(request: Request) -> str | None:
+        ident = identity(request)
+        return ident[0] if ident else None
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -123,9 +133,10 @@ def create_app(deps: GatewayDeps) -> FastAPI:
     async def chat_completions(
         body: ChatCompletionRequest, request: Request
     ) -> dict[str, Any] | JSONResponse | StreamingResponse:
-        client = client_of(request)
-        if client is None:
+        ident = identity(request)
+        if ident is None:
             return _error(401, "missing or unknown API key (cairnward client add <name>)", "auth")
+        client, run_id = ident
         client_cfg = cfg.clients.clients.get(client)
         default_env = client_cfg.default_environment if client_cfg else None
         try:
@@ -135,7 +146,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
 
         action = Action(
             kind="model.call", target=resolved.backend, environment=resolved.environment,
-            client=client, actor=f"client:{client}",
+            client=client, run_id=run_id, actor=f"agent:{client}" if run_id else f"client:{client}",
             details={"model": resolved.model, "virtual_model": resolved.name,
                      "effort": resolved.effort, "stream": body.stream},
         )  # fmt: skip

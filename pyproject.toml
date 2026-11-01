@@ -28,6 +28,7 @@ dev = [
     "mypy>=1.11",
     "pip-audit>=2.7",
     "pytest-asyncio>=0.24",
+    "openai>=1.40",
 ]
 
 [build-system]
@@ -47,9 +48,13 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "PTH"]
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S310"]
+"tests/**" = ["S101", "S310", "S603", "S607"]
 "scripts/**" = ["S310"]  # urllib with user-supplied URLs is the point of the bench script
 "spikes/**" = ["S310", "S603", "S607"]  # spike probes deliberately open URLs and sockets
+# Starting configured tools (srt, node, npm, the agent the user asked for) is their purpose.
+"src/cairnward/doctor.py" = ["S603", "S607"]
+"src/cairnward/run/runner.py" = ["S603"]
+"src/cairnward/sandbox/srt.py" = ["S603"]
 
 [tool.mypy]
 strict = true

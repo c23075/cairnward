@@ -40,6 +40,9 @@ class Session:
     client: str | None = None
     run_id: str | None = None
     actor: str = "cairnward"
+    # The core's own connections (model calls it already policy-checked under the right
+    # environment): logged, address-checked, not decided twice.
+    trusted_core: bool = False
 
 
 @dataclass
@@ -55,6 +58,11 @@ class Sessions:
 
     def revoke(self, token: str) -> None:
         self._by_token.pop(token, None)
+
+    def revoke_run(self, run_id: str) -> None:
+        for token, s in list(self._by_token.items()):
+            if s.run_id == run_id:
+                del self._by_token[token]
 
     def lookup(self, header: str | None) -> Session | None:
         if not header or not header.lower().startswith("basic "):
@@ -238,7 +246,10 @@ class EgressProxy:
             client=session.client, run_id=session.run_id, actor=session.actor,
             details={"method": method.upper(), "via": "egress"},
         )  # fmt: skip
-        decision = await self._decide(action)
+        if session.trusted_core:
+            decision = Decision(action, "allow", "low", "requested by the core (already checked)")
+        else:
+            decision = await self._decide(action)
         if not decision.allowed:
             await self._deny(writer, decision)
             return

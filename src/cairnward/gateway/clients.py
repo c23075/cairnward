@@ -76,3 +76,25 @@ class ClientKeys:
             if secrets.compare_digest(entry["sha256"], presented):
                 found = name
         return found
+
+
+class RunKeys:
+    """Short-lived gateway keys issued to one `cairnward run` (kept in memory only)."""
+
+    def __init__(self) -> None:
+        self._by_hash: dict[str, tuple[str, str]] = {}  # sha256 -> (client, run_id)
+
+    def issue(self, client: str, run_id: str) -> str:
+        key = PREFIX + "run-" + secrets.token_urlsafe(32)
+        self._by_hash[_hash(key)] = (client, run_id)
+        return key
+
+    def revoke_run(self, run_id: str) -> None:
+        for h, (_, rid) in list(self._by_hash.items()):
+            if rid == run_id:
+                del self._by_hash[h]
+
+    def identify(self, key: str | None) -> tuple[str, str] | None:
+        if not key:
+            return None
+        return self._by_hash.get(_hash(key))

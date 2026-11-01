@@ -50,7 +50,11 @@ class Backends:
         egress_url: str | None = None,
         egress_url_for: Callable[[str | None], str | None] | None = None,
         transport_for: Callable[[str], httpx.AsyncBaseTransport | None] | None = None,
+        proxy_all: str | None = None,
     ):
+        # proxy_all: inside the isolated core every connection, local ones included, goes
+        # through srt's proxy (the sandbox has no other route).
+        self.proxy_all = proxy_all
         self.config = config
         self._egress_for = egress_url_for or (lambda _env: egress_url)
         self._transport_for = transport_for or (lambda _name: None)
@@ -64,7 +68,10 @@ class Backends:
 
     def get(self, name: str, environment: str | None = None) -> Driver:
         b = self.spec(name)
-        proxy = self._egress_for(environment) if b.location != "local" else None
+        if self.proxy_all:
+            proxy: str | None = self.proxy_all
+        else:
+            proxy = self._egress_for(environment) if b.location != "local" else None
         key = (name, proxy)
         if key in self._drivers:
             return self._drivers[key]
