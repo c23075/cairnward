@@ -43,7 +43,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 |---|---|---|---|---|
 | T1.1 | **PaperQA2 spike** via Cairnward's endpoint on CPU: quality, speed, dependencies; ADR with decision | FR-RES-12 | M0 | M ✅ (ADR-0014: own lean pipeline by default, PaperQA2 optional deep engine later; `/v1/embeddings` added) |
 | T1.2 | PDF library (pypdfium2), chunking, embeddings (sqlite-vec) | FR-RES-1 | T1.1 | M ✅ (research.db; ~350-token page-aware chunks; hybrid vector + keyword search; resumable indexing; scanned/broken PDFs flagged; `cairnward library` commands) |
-| T1.3 | `lit.ask` with page citations | FR-RES-2 | T1.2 | M |
+| T1.3 | `lit.ask` with page citations | FR-RES-2 | T1.2 | M ✅ (CLI, management API, MCP tool; citation mapping and checks; `evals/pdf_qa` to run with real models) |
 | T1.4 | Job queue: persistent, resumable, schedulable; progress in CLI | FR-RES-3 | M0 | M |
 | T1.5 | Citation and quotation check | FR-RES-5 | T1.2 | M |
 | T1.6 | CSL formatting (APA, IEEE) | FR-RES-6 | — | S |
@@ -51,7 +51,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T1.8 | Vault conversation reconstruction (prefix hashing, branches) | FR-VLT-2 | M0 | M |
 | T1.9 | Artifacts git repos; run workspace snapshots, `runs diff/revert` | FR-ART-1, FR-AGT-2 | M0 | M ◐ (run snapshots ✅: shadow git store per workspace, `runs list/diff/revert/prune`, conflicts protected, project `.git` untouched; per-conversation artifact repos still to do) |
 | T1.10 | Crypto-shredding purge | FR-ENC-5 | T1.8 | S |
-| T1.11 | Cache-aware scheduling (affinity, keep-alive, idle unload), memory check, waiting-time estimate from benchmark profile | FR-GW-8, FR-GW-10, FR-GW-11 | M0 | M ◐ (✅ per-backend queue with conversation affinity, cached-prefix estimate, waiting-time warnings from `cairnward bench import`, keep-alive; ✗ memory check before loading a model (FR-GW-10)) |
+| T1.11 | Cache-aware scheduling (affinity, keep-alive, idle unload), memory check, waiting-time estimate from benchmark profile | FR-GW-8, FR-GW-10, FR-GW-11 | M0 | M ◐ (✅ per-backend queue with conversation affinity, cached-prefix estimate, waiting-time warnings from `cairnward bench import`, keep-alive; ✅ memory check before loading a model (FR-GW-10, done in M2 prep); idle unload left to the model server's keep_alive) |
 
 **Exit criteria (M1)**: `lit.ask` eval passes with page citations; citation eval shows zero invented references; a review job survives a restart mid-run; picking `cw/coding:low` vs `cw/coding:high` in a client changes model and thinking.
 

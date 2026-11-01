@@ -217,7 +217,7 @@ class PolicyEngine:
             server = self.config.mcp.servers.get(server_name)
             env = self.config.environments.get(action.environment or "")
             if server_name == "cairnward" and env is not None:  # Cairnward's own tools
-                needed = {"lit_search": "research"}.get(tool)
+                needed = {"lit_search": "research", "lit_ask": "research"}.get(tool)
                 if needed and needed in env.tools:
                     return Rule("allow", "low", f"Cairnward's {tool} (read-only, local)")
                 return Rule("deny", "high", f"Cairnward's {tool} isn't enabled here")

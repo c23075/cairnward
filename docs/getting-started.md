@@ -118,6 +118,11 @@ Find passages, with pages:
 ```bash
 uv run cairnward library search thesis "effect of sleep on working memory"
 ```
+Ask a question; the answer cites passages as [n] with file and page, and says so when the papers don't answer it (a few minutes on a CPU; through the running server when there is one):
+```bash
+uv run cairnward library ask thesis "Does longer sleep improve working memory?"
+```
+Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
 ## Important: Ollama can still be reached directly
 Ollama listens on `127.0.0.1:11434`. Agents started with `cairnward run` (sandboxed) can only reach Cairnward's gateway, but **any unsandboxed program on your machine can talk to Ollama directly and bypass Cairnward**. Configure chat apps to use Cairnward's gateway, not Ollama, and turn off their own Ollama connection (see the client guides).

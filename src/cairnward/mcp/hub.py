@@ -57,6 +57,7 @@ class McpHub:
     provenance: ProvenanceTracker | None = None
     vault: Any = None  # for Cairnward's own tools
     backends: Any = None  # for research tools (embeddings through the gateway's drivers)
+    research_ask: Any = None  # async (library, question, **kw) -> research.ask.Answer
     _servers: dict[tuple[str, str], _Server] = field(default_factory=dict)
     _locks: dict[tuple[str, str], asyncio.Lock] = field(default_factory=dict)
     _reported: set[tuple[str, str, str]] = field(default_factory=set)
@@ -266,6 +267,21 @@ class McpHub:
                     }},
                     "annotations": {"readOnlyHint": True},
                 })  # fmt: skip
+                if self.research_ask is not None:
+                    tools.append({
+                        "name": exposed_name(BUILTIN, "lit_ask"),
+                        "description": (
+                            "Answer a question from the user's literature library with page "
+                            "citations, using only passages from the papers. Slow on a CPU "
+                            "(minutes). Returns the answer and its sources; an answer the papers "
+                            "don't support says so."
+                        ),
+                        "inputSchema": {"type": "object", "required": ["question"], "properties": {
+                            "question": {"type": "string"},
+                            "library": {"type": "string", "enum": libraries},
+                        }},
+                        "annotations": {"readOnlyHint": True},
+                    })  # fmt: skip
         if "vault" not in env.tools or self.vault is None:
             return tools
         return [*tools, {
@@ -287,6 +303,8 @@ class McpHub:
         )
         if tool == "lit_search":
             return await self._lit_search(environment, arguments, client=client, run_id=run_id)
+        if tool == "lit_ask":
+            return await self._lit_ask(environment, arguments, client=client, run_id=run_id)
         if tool != "lock_conversation" or conversation is None:
             return _tool_error("Cairnward doesn't know which conversation this is yet: "
                                "lock it with `cairnward vault lock`")  # fmt: skip
@@ -354,6 +372,36 @@ class McpHub:
                 "title": h.title, "file": Path(h.path).name, "pages": h.pages, "text": h.text,
                 "score": round(h.score, 4)} for h in hits]},
         }  # fmt: skip
+
+    async def _lit_ask(self, environment: str, arguments: dict[str, Any], *, client: str,
+                       run_id: str | None) -> dict[str, Any]:  # fmt: skip
+        libraries = self._libraries(environment)
+        name = arguments.get("library") or (libraries[0] if len(libraries) == 1 else None)
+        question = str(arguments.get("question", "")).strip()
+        if name not in libraries or len(question) < 3:
+            return _tool_error(f"give a question and one of the libraries: {', '.join(libraries)}")
+        action = Action(
+            kind="tool.call", target=f"{BUILTIN}/lit_ask", environment=environment,
+            client=client, run_id=run_id,
+            actor=f"agent:{client}" if run_id else f"client:{client}", details={"library": name},
+        )  # fmt: skip
+        decision = await asyncio.to_thread(self.engine.check, action)
+        if not decision.allowed:
+            await asyncio.to_thread(self.engine.audit_deny, decision)
+            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
+        pre = await asyncio.to_thread(self.engine.audit_pre, decision, question)
+        try:
+            answer = await self.research_ask(name, question, actor=f"client:{client}")
+        except Exception as exc:  # library, policy and backend errors alike
+            await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
+                                    details={"error": str(exc)[:300]})  # fmt: skip
+            return _tool_error(f"lit_ask failed: {exc}")
+        if self.provenance is not None:
+            self.provenance.note_tool(client, run_id, f"lit_ask in {name}")
+        await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok",
+                                details={"sources": len(answer.sources)})  # fmt: skip
+        return {"content": [{"type": "text", "text": answer.render()}],
+                "structuredContent": answer.as_dict()}  # fmt: skip
 
     # ------------------------------------------------------------------ skills (prompts)
 

@@ -35,6 +35,7 @@ from cairnward.egress import EgressProxy, Session, Sessions
 from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, control_app
 from cairnward.gateway import ClientKeys, GatewayDeps, create_app
 from cairnward.gateway.clients import RunKeys
+from cairnward.gateway.scheduling import BenchProfile, Scheduler
 from cairnward.mcp.hub import McpHub
 from cairnward.mcp.launch import BridgeLauncher, Launcher, LocalLauncher, RemoteLauncher
 from cairnward.mcp.pins import PinStore
@@ -166,11 +167,17 @@ def _core_parts(
 ) -> tuple[Any, Any, McpHub, Any]:
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     tracker = ProvenanceTracker()
-    hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
-                 provenance=tracker, vault=vault, backends=backends)  # fmt: skip
-    run_keys = RunKeys()
-    from cairnward.gateway.scheduling import BenchProfile
+    scheduler = Scheduler({n: b.max_parallel for n, b in cfg.backends.backends.items()})
 
+    async def research_ask(library: str, question: str, **kw: Any) -> Any:
+        from cairnward.research.ask import run_ask
+
+        return await run_ask(cfg, engine, backends, library, question, scheduler=scheduler, **kw)
+
+    hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
+                 provenance=tracker, vault=vault, backends=backends,
+                 research_ask=research_ask)  # fmt: skip
+    run_keys = RunKeys()
     gateway = create_app(
         GatewayDeps(
             cfg,
@@ -182,6 +189,7 @@ def _core_parts(
             profile=BenchProfile.at(cfg.paths.state_dir),
             mcp=hub,
             provenance=tracker,
+            scheduler=scheduler,
         )
     )
     auth = DashboardAuth()
@@ -198,6 +206,7 @@ def _core_parts(
         mcp=hub,
         vault=vault,
         dashboard=auth,
+        research_ask=research_ask,
     )
     return gateway, management, hub, dashboard
 

@@ -246,6 +246,12 @@ def build_parser() -> argparse.ArgumentParser:
     lq.add_argument("query")
     lq.add_argument("-k", type=int, default=5, help="number of passages (default 5)")
     lq.add_argument("--json", action="store_true")
+    la = lib_sub.add_parser("ask", help="answer a question from the library, citing pages")
+    la.add_argument("name")
+    la.add_argument("question")
+    la.add_argument("-k", type=int, default=8, help="passages to give the model (default 8)")
+    la.add_argument("--effort", help="effort level (default: the environment's)")
+    la.add_argument("--json", action="store_true")
     lr = lib_sub.add_parser("remove", help="delete a library's index (the PDFs stay)")
     lr.add_argument("name")
 
@@ -1043,6 +1049,45 @@ def _embedder(cfg: Config, environment: str) -> tuple[Any, Any, Any]:
     return InProcessEmbedder(cfg, engine, backends, environment=environment), audit, backends
 
 
+def _library_ask(cfg: Config, research: Any, args: argparse.Namespace) -> int:
+    """Through the running server when there is one (its queue keeps research from
+    competing with chats for the CPU); otherwise in this process."""
+    import asyncio
+
+    import httpx
+
+    from cairnward.research.ask import Answer, Source, run_ask
+    from cairnward.run.runner import RunError, management
+
+    research.get(args.name)  # fail early on a wrong name
+    body = {"library": args.name, "question": args.question, "k": args.k, "effort": args.effort}
+    data: dict[str, Any] | None = None
+    try:
+        with management(cfg) as mgmt:
+            print("Asking through the running Cairnward (this can take a few minutes on a CPU)...",
+                  file=sys.stderr)  # fmt: skip
+            resp = mgmt.post("/v1/research/ask", json=body, timeout=3600)
+            if resp.status_code != 200:
+                print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
+                return 1
+            data = resp.json()
+    except (RunError, httpx.ConnectError):
+        embedder, audit, backends = _embedder(cfg, research.get(args.name).environment)
+        try:
+            answer = asyncio.run(run_ask(cfg, embedder.engine, backends, args.name, args.question,
+                                         k=args.k, effort=args.effort, actor="user"))  # fmt: skip
+        finally:
+            audit.close()
+            asyncio.run(backends.aclose())
+        data = answer.as_dict()
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    answer = Answer(**{**data, "sources": [Source(**s) for s in data["sources"]]})
+    sys.stdout.write(answer.render())
+    return 0
+
+
 def _cmd_library(args: argparse.Namespace) -> int:
     import asyncio
 
@@ -1082,6 +1127,8 @@ def _cmd_library(args: argparse.Namespace) -> int:
                 research.remove(args.name)
                 print(f"Removed the index of '{args.name}' (your PDFs are untouched).")
                 return 0
+            if cmd == "ask":
+                return _library_ask(cfg, research, args)
             lib = research.get(args.name)
             embedder, audit, backends = _embedder(cfg, lib.environment)
             try:

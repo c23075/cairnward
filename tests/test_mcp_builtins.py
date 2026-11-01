@@ -67,8 +67,15 @@ async def setup(paths: Paths) -> tuple[httpx.AsyncClient, McpHub, AuditLog, Prov
     audit = AuditLog.open(paths)
     engine = PolicyEngine(cfg, audit=audit)
     tracker = ProvenanceTracker()
+    fake.reply = "Longer sleep went with better working memory [1]."
+
+    async def research_ask(library: str, question: str, **kw: Any) -> Any:
+        from cairnward.research.ask import run_ask
+
+        return await run_ask(cfg, engine, backends, library, question, **kw)
+
     hub = McpHub(cfg, engine, LocalLauncher(cfg, srt=None), PinStore.at(paths.data_dir), audit,
-                 provenance=tracker, backends=backends)  # fmt: skip
+                 provenance=tracker, backends=backends, research_ask=research_ask)  # fmt: skip
     app = FastAPI()
     add_mcp_routes(app, hub, lambda r: ("jan", None), default_environment=lambda c: "lit",
                    run_environment=lambda r: None)  # fmt: skip
@@ -110,8 +117,15 @@ async def test_prompts_resources_and_lit_search(paths: Paths) -> None:
         assert bad["error"]["code"] == -32002
 
         tools = (await rpc(c, "tools/list"))["result"]["tools"]
-        (lit,) = tools
-        assert lit["name"] == "cairnward__lit_search"
+        lit, ask_tool = tools
+        assert (lit["name"], ask_tool["name"]) == ("cairnward__lit_search", "cairnward__lit_ask")
+        answer = await rpc(
+            c,
+            "tools/call",
+            {"name": "cairnward__lit_ask", "arguments": {"question": "Does sleep help?"}},
+        )
+        assert answer["result"]["structuredContent"]["sources"][0]["title"] == "Sleep and Memory"
+        assert "Sources:" in answer["result"]["content"][0]["text"]
         assert lit["inputSchema"]["properties"]["library"]["enum"] == ["thesis"]
         hit = (
             await rpc(
@@ -123,7 +137,8 @@ async def test_prompts_resources_and_lit_search(paths: Paths) -> None:
         assert not hit.get("isError")
         assert hit["structuredContent"]["hits"][0]["title"] == "Sleep and Memory"
         assert "[Sleep and Memory, p. " in hit["content"][0]["text"]
-        assert tracker.current("jan", None)[0] == ("output of lit_search in thesis",)
+        assert tracker.current("jan", None)[0] == ("output of lit_ask in thesis",
+                                                   "output of lit_search in thesis")  # fmt: skip
     finally:
         await c.aclose()
         await hub.aclose()

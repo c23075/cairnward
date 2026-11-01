@@ -79,6 +79,13 @@ class AskIn(BaseModel):
     run_id: str | None = None
 
 
+class AskQuestionIn(BaseModel):
+    library: str
+    question: str = Field(min_length=3, max_length=4000)
+    k: int = Field(default=8, ge=1, le=30)
+    effort: str | None = None
+
+
 class EgressSessionIn(BaseModel):
     environment: str
     purpose: Literal["download"] = "download"
@@ -123,6 +130,7 @@ def management_app(
     mcp: Any = None,
     vault: Any = None,
     dashboard: Any = None,
+    research_ask: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward management", docs_url=None, redoc_url=None)
     runs: dict[str, _Run] = {}
@@ -368,6 +376,21 @@ def management_app(
         if egress is not None:
             egress.revoke_run(body.session)
         return {"ok": True}
+
+    @app.post("/v1/research/ask")
+    async def research_ask_endpoint(body: AskQuestionIn) -> dict[str, Any]:
+        from cairnward.research import EmbeddingDenied, LibraryError
+        from cairnward.research.llm import ModelDenied
+
+        if research_ask is None:
+            raise HTTPException(503, "research isn't available in this process")
+        try:
+            answer = await research_ask(body.library, body.question, k=body.k,
+                                        effort=body.effort, actor="user")  # fmt: skip
+        except (LibraryError, EmbeddingDenied, ModelDenied) as exc:
+            raise HTTPException(400, str(exc)) from None
+        result: dict[str, Any] = answer.as_dict()
+        return result
 
     @app.post("/v1/dashboard/link")
     def dashboard_link() -> dict[str, Any]:
