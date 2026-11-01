@@ -1,0 +1,62 @@
+# Open WebUI with no network of its own (spec §3.2, FR-ISO-4).
+#
+# - open-webui sits on an internal-only network: it can't reach the internet or this
+#   machine's other services.
+# - cairnward-link shares open-webui's network namespace and turns 127.0.0.1:8484 inside
+#   it into Cairnward's gateway Unix socket (mounted from Cairnward's state folder). It's
+#   the only way out, so every model and tool call goes through Cairnward's policy and
+#   audit log. Model calls look local to Open WebUI.
+# - ui publishes the web interface on 127.0.0.1:3000 (loopback only) and does nothing
+#   else.
+#
+# Usage: copy .env.example to .env, fill it in, then: docker compose up -d
+# (rootless Podman: podman compose up -d). Cairnward must be running (cairnward serve).
+name: cairnward-open-webui
+
+services:
+  open-webui:
+    image: ${OPEN_WEBUI_IMAGE:?set OPEN_WEBUI_IMAGE in .env (a version tag or digest you reviewed)}
+    restart: unless-stopped
+    networks: [internal]
+    volumes:
+      - open-webui-data:/app/backend/data
+    environment:
+      OPENAI_API_BASE_URL: http://127.0.0.1:8484/v1
+      OPENAI_API_KEY: ${CAIRNWARD_KEY:?set CAIRNWARD_KEY in .env (cairnward client add open-webui)}
+      ENABLE_OLLAMA_API: "false"
+      # no downloads, update checks or telemetry (there is no route out anyway)
+      OFFLINE_MODE: "true"
+      ANONYMIZED_TELEMETRY: "false"
+      DO_NOT_TRACK: "true"
+      SCARF_NO_ANALYTICS: "true"
+      # document embeddings through Cairnward too, instead of a downloaded local model
+      RAG_EMBEDDING_ENGINE: openai
+      RAG_OPENAI_API_BASE_URL: http://127.0.0.1:8484/v1
+      RAG_OPENAI_API_KEY: ${CAIRNWARD_KEY}
+      RAG_EMBEDDING_MODEL: ${CAIRNWARD_EMBED_MODEL:-cw/chat:embed}
+
+  cairnward-link:
+    image: ${SOCAT_IMAGE:?set SOCAT_IMAGE in .env (a version tag or digest you reviewed)}
+    restart: unless-stopped
+    network_mode: service:open-webui
+    command: ["TCP-LISTEN:8484,bind=127.0.0.1,fork,reuseaddr", "UNIX-CONNECT:/run/cairnward/gateway.sock"]
+    volumes:
+      - ${CAIRNWARD_CLIENT_SOCKETS:?set CAIRNWARD_CLIENT_SOCKETS in .env}:/run/cairnward
+    depends_on: [open-webui]
+
+  ui:
+    image: ${SOCAT_IMAGE}
+    restart: unless-stopped
+    networks: [internal, edge]
+    ports:
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-3000}:8080"
+    command: ["TCP-LISTEN:8080,fork,reuseaddr", "TCP:open-webui:8080"]
+    depends_on: [open-webui]
+
+networks:
+  internal:
+    internal: true
+  edge: {}
+
+volumes:
+  open-webui-data: {}

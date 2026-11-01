@@ -35,7 +35,7 @@ uv run cairnward status
 ```
 
 ## 4. Connect clients and agents
-- Chat apps: [Open WebUI](clients/open-webui.md), [Jan](clients/jan.md).
+- Chat apps: [Open WebUI](clients/open-webui.md), [Jan](clients/jan.md), [LibreChat](clients/librechat.md); server-style apps can run [with no network of their own](clients/containers.md).
 - MCP tools for any client or agent: [MCP through Cairnward](clients/mcp.md).
 - Coding agents: [Aider](clients/aider.md) (recommended on CPU), [Qwen Code](clients/qwen-code.md), [opencode](clients/opencode.md), [Goose](clients/goose.md) (untested), or any OpenAI-compatible agent with `--profile generic`.
 

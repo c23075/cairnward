@@ -1,0 +1,57 @@
+# LibreChat with no network of its own (FR-ISO-4). Put this file next to LibreChat's
+# docker-compose.yml (it's picked up automatically) together with the librechat.yaml
+# from docs/clients/librechat.md, and set the variables in LibreChat's .env:
+#   CAIRNWARD_KEY, CAIRNWARD_CLIENT_SOCKETS, SOCAT_IMAGE (see open-webui/.env.example).
+#
+# Every LibreChat service moves to an internal-only network; cairnward-link gives the
+# api container Cairnward's gateway at 127.0.0.1:8484; ui publishes the web interface
+# on 127.0.0.1:3080 only.
+
+services:
+  api:
+    ports: !reset []
+    networks: !override [internal]
+  mongodb:
+    networks: !override [internal]
+  meilisearch:
+    networks: !override [internal]
+  vectordb:
+    networks: !override [internal]
+  rag_api:
+    networks: !override [internal]
+    environment:
+      EMBEDDINGS_PROVIDER: openai
+      OPENAI_API_KEY: ${CAIRNWARD_KEY}
+      RAG_OPENAI_BASEURL: http://127.0.0.1:8484/v1
+
+  cairnward-link:
+    image: ${SOCAT_IMAGE:?set SOCAT_IMAGE in .env}
+    restart: unless-stopped
+    network_mode: service:api
+    command: ["TCP-LISTEN:8484,bind=127.0.0.1,fork,reuseaddr", "UNIX-CONNECT:/run/cairnward/gateway.sock"]
+    volumes:
+      - ${CAIRNWARD_CLIENT_SOCKETS:?set CAIRNWARD_CLIENT_SOCKETS in .env}:/run/cairnward
+    depends_on: [api]
+
+  cairnward-link-rag:
+    image: ${SOCAT_IMAGE}
+    restart: unless-stopped
+    network_mode: service:rag_api
+    command: ["TCP-LISTEN:8484,bind=127.0.0.1,fork,reuseaddr", "UNIX-CONNECT:/run/cairnward/gateway.sock"]
+    volumes:
+      - ${CAIRNWARD_CLIENT_SOCKETS}:/run/cairnward
+    depends_on: [rag_api]
+
+  ui:
+    image: ${SOCAT_IMAGE}
+    restart: unless-stopped
+    networks: [internal, edge]
+    ports:
+      - "127.0.0.1:${LIBRECHAT_PORT:-3080}:3080"
+    command: ["TCP-LISTEN:3080,fork,reuseaddr", "TCP:api:3080"]
+    depends_on: [api]
+
+networks:
+  internal:
+    internal: true
+  edge: {}

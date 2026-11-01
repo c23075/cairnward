@@ -115,6 +115,13 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
                        json={"model": "cw/coding:low",
                              "messages": [{"role": "user", "content": evil}]})  # fmt: skip
         assert r.status_code == 200, r.text
+        # the client socket for containers reaches the same gateway (FR-ISO-4)
+        csock = paths.state_dir / "clients" / "gateway.sock"
+        assert oct(csock.stat().st_mode)[-3:] == "600"
+        with httpx.Client(transport=httpx.HTTPTransport(uds=str(csock)), timeout=10) as uc:
+            models = uc.get(f"http://127.0.0.1:{gw}/v1/models",
+                            headers={"Authorization": f"Bearer {key}"})  # fmt: skip
+            assert models.status_code == 200 and models.json()["data"]
         # an approval waiting in the inbox (asked as the egress process would)
         asked: list[Any] = []
         sock = paths.state_dir / "cairnward.sock"

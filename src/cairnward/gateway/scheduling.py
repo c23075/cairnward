@@ -87,6 +87,39 @@ class BenchProfile:
         return new_tokens / speed.prompt_tps if speed else None
 
 
+class PromptSizes:
+    """Each agent profile's first-prompt size, as measured in its runs (FR-AGT-1).
+
+    Agents send a large system prompt and tool list first; on a CPU that first prompt
+    decides how long the user waits, and it may not even fit the context."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    @classmethod
+    def at(cls, state_dir: Path) -> PromptSizes:
+        return cls(state_dir / "prompt_sizes.json")
+
+    def all(self) -> dict[str, dict[str, int]]:
+        try:
+            data: dict[str, dict[str, int]] = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data
+
+    def note(self, profile: str, tokens: int) -> None:
+        data = self.all()
+        entry = data.get(profile, {"runs": 0, "max": 0})
+        entry.update(last=tokens, runs=entry["runs"] + 1, max=max(entry["max"], tokens))
+        data[profile] = entry
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+    def get(self, profile: str) -> int | None:
+        entry = self.all().get(profile)
+        return entry["last"] if entry else None
+
+
 # ------------------------------------------------------------------ per-backend queue
 
 

@@ -20,7 +20,7 @@ from cairnward.egress.addresses import literal_address, special_reason
 from cairnward.egress.control import EgressControl
 from cairnward.egress.proxy import Session
 from cairnward.gateway.clients import RunKeys
-from cairnward.gateway.scheduling import Budget
+from cairnward.gateway.scheduling import Budget, PromptSizes
 from cairnward.policy import (
     Action,
     ApprovalInbox,
@@ -108,6 +108,7 @@ class _Run:
     client: str
     started: float
     approved: set[str] = field(default_factory=set)  # hosts allowed when the sandbox asked
+    profile: str = "generic"
 
 
 def management_app(
@@ -160,7 +161,7 @@ def management_app(
                     actor=f"agent:{body.client}",
                 )
             )
-        runs[run_id] = _Run(body.environment, body.client, time.monotonic())
+        runs[run_id] = _Run(body.environment, body.client, time.monotonic(), profile=body.profile)
         if audit:
             audit.append(
                 "run.start",
@@ -207,6 +208,13 @@ def management_app(
                     "changed_files": body.changed_files,
                 },
             )
+            first = next((r for r in audit.records(action="model.call")
+                          if r.run_id == run_id and r.phase == "post"
+                          and r.details.get("prompt_tokens")), None)  # fmt: skip
+            if first is not None:
+                PromptSizes.at(cfg.paths.state_dir).note(
+                    run.profile, int(first.details["prompt_tokens"])
+                )
         return {"ok": True}
 
     # ------------------------------------------------------------------ approvals (M2)

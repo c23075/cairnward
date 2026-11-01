@@ -168,6 +168,33 @@ def plan_run(
     return Plan(command, env, False, None, warnings)
 
 
+def prompt_warnings(cfg: Config, profile: str, environment: str, model: str) -> list[str]:
+    """Flag a profile whose measured first prompt won't fit or will be slow (FR-AGT-1)."""
+    from cairnward.gateway.models import UnknownModel, resolve
+    from cairnward.gateway.scheduling import SLOW_SECONDS, BenchProfile, PromptSizes
+
+    tokens = PromptSizes.at(cfg.paths.state_dir).get(profile)
+    if tokens is None:
+        return []
+    try:
+        resolved = resolve(cfg, model)
+    except UnknownModel:
+        return []
+    out = []
+    ctx = resolved.options.context_tokens
+    if ctx and tokens > ctx:
+        out.append(f"{profile}'s first prompt was {tokens} tokens last time, more than the "
+                   f"{ctx}-token context of {model}: the model will lose the start of it "
+                   f"(raise context_tokens in environments/{environment}.toml)")  # fmt: skip
+    seconds = BenchProfile.at(cfg.paths.state_dir).expected_seconds(resolved.model, tokens)
+    if seconds and seconds > SLOW_SECONDS:
+        out.append(
+            f"{profile}'s first prompt was {tokens} tokens last time: about "
+            f"{seconds / 60:.0f} min before the first answer on {resolved.model}"
+        )
+    return out
+
+
 def run_agent(
     cfg: Config,
     *,
@@ -193,6 +220,8 @@ def run_agent(
     env_cfg = cfg.environments[env_name]
     effort = env_cfg.effort_default or cfg.main.defaults.effort
     model = model or f"cw/{env_name}:{effort}"
+    for w in prompt_warnings(cfg, profile.name, env_name, model):
+        log(f"cairnward: {w}")
     workspace = (workspace or Path.cwd()).resolve()
     srt = None
     if cfg.privacy(env_name).value("isolation") == "on":

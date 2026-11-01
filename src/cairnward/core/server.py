@@ -276,6 +276,8 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 f"(privacy: {cfg.privacy().label}; single process, core not isolated)"
             )
             log("dashboard: run `cairnward dashboard` to open it")
+            gw_host, gw_port = server.gateway_host, server.gateway_port
+            await _client_socket(cfg, lambda: asyncio.open_connection(gw_host, gw_port))
             if sync.changes:
                 log(f"Recorded {len(sync.changes)} settings change(s) in the audit log.")
             try:
@@ -291,10 +293,13 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
 # ------------------------------------------------------------------ isolated: process A
 
 
-async def _forward(local_port: int, uds: Path) -> asyncio.Server:
+Opener = Callable[[], Any]  # returns an awaitable (reader, writer) pair
+
+
+def _relay(open_upstream: Opener) -> Callable[[asyncio.StreamReader, asyncio.StreamWriter], Any]:
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            up_r, up_w = await asyncio.open_unix_connection(str(uds))
+            up_r, up_w = await open_upstream()
         except OSError:
             writer.close()
             return
@@ -315,7 +320,32 @@ async def _forward(local_port: int, uds: Path) -> asyncio.Server:
             with contextlib.suppress(Exception):
                 w.close()
 
-    return await asyncio.start_server(handle, "127.0.0.1", local_port)
+    return handle
+
+
+async def _forward(local_port: int, uds: Path) -> asyncio.Server:
+    """127.0.0.1:<port> -> a Unix socket (the isolated core's gateway or dashboard)."""
+    opener = lambda: asyncio.open_unix_connection(str(uds))  # noqa: E731
+    return await asyncio.start_server(_relay(opener), "127.0.0.1", local_port)
+
+
+def client_socket(cfg: Config) -> Path:
+    """The gateway as a Unix socket for clients in containers (FR-ISO-4): mount this
+    folder into a client's sidecar instead of giving the client a network route."""
+    return cfg.paths.state_dir / "clients" / "gateway.sock"
+
+
+async def _client_socket(cfg: Config, opener: Opener) -> asyncio.Server | None:
+    if sys.platform == "win32":
+        return None
+    path = client_socket(cfg)
+    private_dir(path.parent)
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+    srv = await asyncio.start_unix_server(_relay(opener), str(path))
+    if sys.platform != "win32":
+        path.chmod(0o600)
+    return srv
 
 
 def core_sandbox(cfg: Config) -> SandboxSpec:
@@ -400,6 +430,10 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                 ctl_task = asyncio.create_task(_serve_uds(ctl, socks["egress"]))
                 fwd = await _forward(server.gateway_port, socks["gateway"])
                 fwd_dash = await _forward(server.dashboard_port, socks["dashboard"])
+                gw_sock = str(socks["gateway"])
+                fwd_clients = await _client_socket(
+                    cfg, lambda: asyncio.open_unix_connection(gw_sock)
+                )
                 core = await asyncio.create_subprocess_exec(*cmd, env=env, stdin=subprocess.DEVNULL)
                 log(f"cairnward-egress on 127.0.0.1:{proxy.port} (only networked process)")
                 log(
@@ -417,6 +451,8 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                             await asyncio.wait_for(core.wait(), 10)
                     fwd.close()
                     fwd_dash.close()
+                    if fwd_clients:
+                        fwd_clients.close()
                     ctl.should_exit = True
                     serve_task.cancel()
                     anchors.cancel()

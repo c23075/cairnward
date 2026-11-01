@@ -126,6 +126,9 @@ def test_isolated_serve_and_run(tmp_path: Path) -> None:
             assert web.get(link.split(str(dash), 1)[1]).status_code == 303
             info = web.get("/api/session").json()
             assert info["isolated"] is True and info["privacy"].startswith("Strict")
+        csock = paths.state_dir / "clients" / "gateway.sock"
+        with httpx.Client(transport=httpx.HTTPTransport(uds=str(csock)), timeout=10) as uc:
+            assert uc.get(f"http://127.0.0.1:{gw}/health").json()["status"] == "ok"
         run = subprocess.run(
             [
                 *cw,
