@@ -41,6 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--check", action="store_true", help="only check that the folder is up to date"
     )
 
+    store = sub.add_parser("store", help="local storage (vault and keys)")
+    store_sub = store.add_subparsers(dest="store_command", metavar="ACTION", required=True)
+    store_sub.add_parser("info", help="database files, schema versions and counts")
+
     priv = sub.add_parser("privacy", help="privacy settings")
     priv_sub = priv.add_subparsers(dest="privacy_command", metavar="ACTION", required=True)
     show = priv_sub.add_parser("show", help="effective privacy settings and where they come from")
@@ -90,6 +94,22 @@ def _cmd_config_schema(args: argparse.Namespace) -> int:
         print("Out of date (run `cairnward config schema`): " + ", ".join(stale), file=sys.stderr)
         return 1
     print("Schemas up to date.")
+    return 0
+
+
+def _cmd_store_info(args: argparse.Namespace) -> int:
+    from cairnward.store import Vault
+
+    paths = default_paths(args.config_dir)
+    with Vault.open(paths) as vault:
+        status = vault.schema_status()
+        for name, path in Vault.files(paths).items():
+            size = path.stat().st_size if path.exists() else 0
+            rev, head = status[name]
+            state = "up to date" if rev == head else f"behind (head {head})"
+            print(f"{name:6} {path}  {size / 1024:.0f} KiB  schema {rev} ({state})")
+        for key, value in vault.stats().items():
+            print(f"{key:14} {value}")
     return 0
 
 
@@ -172,6 +192,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             }[args.config_command](args)
         if args.command == "privacy":
             return _cmd_privacy_show(args)
+        if args.command == "store":
+            return _cmd_store_info(args)
     except ConfigError as exc:
         print("Configuration problems:", file=sys.stderr)
         for problem in exc.problems:

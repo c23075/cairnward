@@ -296,7 +296,7 @@ See [threat-model.md](threat-model.md) (updated for v0.6). Key changes: third-pa
 - Defaults: secrets **block**, personal data **ask** (batched; see §5.3).
 
 ### 5.5 Encryption and deletion
-As v0.5 ([ADR-0006](adr/0006-encryption-age-key-wrapping-crypto-shredding.md)): age, per-conversation keys, opt-in passphrase locks (conversations and artifacts separately), crypto-shredding on purge, plus backup rewrite (D50). Stated limits: unlocked conversations' search index is plaintext in SQLite; client-side copies are outside Cairnward's control.
+Implemented in T0.5: conversations live in `vault.db`, their keys in a separate small `keys.db` (both SQLite, WAL, `synchronous=FULL`, `secure_delete=ON`); purging deletes the key first, then the content, then checkpoints both files, leaving a tombstone row. With `crypto_shred = "off"` content is stored as plain text. Deleted keys are overwritten inside the database files; whether the SSD still holds old blocks is outside SQLite's control, so locked conversations or full-disk encryption remain the hard guarantee. As v0.5 ([ADR-0006](adr/0006-encryption-age-key-wrapping-crypto-shredding.md)): age, per-conversation keys, opt-in passphrase locks (conversations and artifacts separately), crypto-shredding on purge, plus backup rewrite (D50). Stated limits: unlocked conversations' search index is plaintext in SQLite; client-side copies are outside Cairnward's control.
 
 ### 5.6 Supply chain
 As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Scorecard, SBOM, Sigstore-signed releases, GGUF/safetensors only, pinned MCP servers.
