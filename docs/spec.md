@@ -328,6 +328,8 @@ Implemented in T0.5: conversations live in `vault.db`, their keys in a separate 
 ### 5.6 Supply chain
 As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Scorecard, SBOM, Sigstore-signed releases, GGUF/safetensors only, pinned MCP servers.
 
+**Implemented (T2.8):** `cairnward models pull <url> --sha256 <hex> [--name] [--env]` downloads one GGUF or safetensors file through cairnward-egress with a short-lived session from the running core (every host, including CDN redirects, is checked against that environment's network policy and can be approved in the inbox), into a private partial file; the file is kept only if its SHA-256 matches and its header is a real GGUF or safetensors header. Recorded as `model.download` in the audit log and in `models/manifest.json`; `cairnward models list` shows verified files. Ollama's own `ollama pull` still downloads directly from its registry, outside Cairnward; importing a verified GGUF into Ollama (`FROM <path>` in a Modelfile) avoids that.
+
 ---
 
 ## 6. Technology choices

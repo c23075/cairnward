@@ -79,6 +79,15 @@ class AskIn(BaseModel):
     run_id: str | None = None
 
 
+class EgressSessionIn(BaseModel):
+    environment: str
+    purpose: Literal["download"] = "download"
+
+
+class EgressEndIn(BaseModel):
+    session: str = Field(max_length=100)
+
+
 class UnlockIn(BaseModel):
     passphrase: str = Field(min_length=1, max_length=1024)
     minutes: float = Field(default=30, gt=0, le=24 * 60)
@@ -332,6 +341,25 @@ def management_app(
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         return {"approved": sorted(body.tools)}
+
+    @app.post("/v1/egress/session")
+    def egress_session(body: EgressSessionIn) -> dict[str, Any]:
+        """A short-lived egress session for a download the user started (FR-SUP-2)."""
+        if egress is None:
+            raise HTTPException(503, "cairnward-egress isn't running")
+        if body.environment not in cfg.environments:
+            raise HTTPException(404, f"unknown environment '{body.environment}'")
+        session_id = f"{body.purpose}-{uuid.uuid4()}"
+        session = Session(environment=body.environment, client=f"cairnward-{body.purpose}",
+                          run_id=session_id, actor="user")  # fmt: skip
+        token = egress.create(session)
+        return {"token": token, "port": server.egress_port, "session": session_id}
+
+    @app.post("/v1/egress/session/end")
+    def egress_session_end(body: EgressEndIn) -> dict[str, bool]:
+        if egress is not None:
+            egress.revoke_run(body.session)
+        return {"ok": True}
 
     @app.post("/v1/dashboard/link")
     def dashboard_link() -> dict[str, Any]:

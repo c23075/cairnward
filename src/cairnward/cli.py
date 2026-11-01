@@ -175,6 +175,15 @@ def build_parser() -> argparse.ArgumentParser:
     v_unlock.add_argument("--permanently", action="store_true", help="remove the lock")
     vlt_sub.add_parser("relock", help="close every unlocked conversation in the server now")
 
+    mdl = sub.add_parser("models", help="model files: verified downloads through egress")
+    mdl_sub = mdl.add_subparsers(dest="models_command", metavar="ACTION", required=True)
+    pull = mdl_sub.add_parser("pull", help="download a GGUF/safetensors file and verify it")
+    pull.add_argument("url")
+    pull.add_argument("--sha256", required=True, help="the publisher's SHA-256 of the file")
+    pull.add_argument("--name", help="file name (default: from the URL)")
+    pull.add_argument("--env", help="whose network policy applies (default environment)")
+    mdl_sub.add_parser("list", help="downloaded, verified model files")
+
     dsh = sub.add_parser("dashboard", help="open the dashboard (a single-use sign-in link)")
     dsh.add_argument("--no-open", action="store_true", help="only print the link")
 
@@ -851,6 +860,76 @@ def httpx_timeout() -> Any:
     return httpx.Timeout(180, connect=10)  # starting a server can take a while (npx, uvx)
 
 
+def _cmd_models(args: argparse.Namespace) -> int:
+    from urllib.parse import urlsplit
+
+    from cairnward import model_files as mf
+    from cairnward.audit import AuditLog
+    from cairnward.run.runner import RunError, management
+
+    cfg = _load(args)
+    dest = mf.models_dir(cfg.paths.data_dir)
+    if args.models_command == "list":
+        items = mf.listed(dest)
+        if not items:
+            print("no verified model files yet (cairnward models pull)")
+        for name, info in items.items():
+            gb = int(info["size"]) / 1024**3
+            print(f"{name}  {gb:.2f} GB  sha256 {str(info['sha256'])[:16]}...")
+            print(f"    {dest / name}")
+        return 0
+    env = args.env or cfg.main.defaults.environment
+    try:
+        mgmt = management(cfg)
+    except RunError as exc:
+        print(f"cairnward: {exc} (downloads go through cairnward-egress)", file=sys.stderr)
+        return 1
+    with mgmt:
+        resp = mgmt.post("/v1/egress/session", json={"environment": env})
+        if resp.status_code != 200:
+            print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
+            return 1
+        sess = resp.json()
+        proxy = f"http://cw:{sess['token']}@127.0.0.1:{sess['port']}"
+        print(
+            f"Downloading through cairnward-egress ('{env}' network policy). If a host needs "
+            "approval, answer in `cairnward approvals` or the dashboard.",
+            file=sys.stderr,
+        )
+        last = [0]
+
+        def progress(done: int, total: int | None) -> None:
+            if done - last[0] >= 256 * 1024**2 or (total and done == total):
+                last[0] = done
+                pct = f" ({done * 100 // total}%)" if total else ""
+                print(f"  {done / 1024**3:.2f} GB{pct}", file=sys.stderr)
+
+        outcome, detail = "ok", ""
+        try:
+            got = mf.download(args.url, args.sha256, dest, name=args.name, proxy=proxy,
+                              progress=progress)  # fmt: skip
+        except mf.DownloadError as exc:
+            outcome, detail, got = "error", str(exc), None
+        finally:
+            mgmt.post("/v1/egress/session/end", json={"session": sess["session"]})
+    with AuditLog.open(cfg.paths) as log:
+        log.append("model.download", actor="user", target=urlsplit(args.url).netloc,
+                   environment=env, outcome=outcome,
+                   details={"file": args.name or urlsplit(args.url).path.rsplit("/", 1)[-1][:200],
+                            "sha256": args.sha256.lower(), "size": got.size if got else None,
+                            "error": detail[:300] or None})  # fmt: skip
+    if got is None:
+        print(f"cairnward: {detail}", file=sys.stderr)
+        return 1
+    print(f"verified and saved: {got.path} ({got.size / 1024**3:.2f} GB)")
+    if got.path.suffix == ".gguf":
+        print(
+            "Use it with llama.cpp (llama-server -m <path>), or in Ollama: write a Modelfile "
+            f"containing 'FROM {got.path}' and run `ollama create <name> -f Modelfile`."
+        )
+    return 0
+
+
 def _cmd_dashboard(args: argparse.Namespace) -> int:
     import webbrowser
 
@@ -1179,6 +1258,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_approvals(args)
         if args.command == "dashboard":
             return _cmd_dashboard(args)
+        if args.command == "models":
+            return _cmd_models(args)
         if args.command == "mcp":
             return _cmd_mcp(args)
         if args.command == "vault":

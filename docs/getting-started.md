@@ -62,6 +62,11 @@ Let Cairnward warn you about slow prompts by importing your benchmark results:
 uv run cairnward bench import bench-qwen3_30b-*.json bench-qwen3_1.7b-*.json
 ```
 
+Download model files through Cairnward, verified against the publisher's SHA-256 (GGUF or safetensors only; Hugging Face downloads also need its CDN hosts allowed):
+```bash
+uv run cairnward models pull https://huggingface.co/<org>/<repo>/resolve/main/<file>.gguf --sha256 <hash>
+```
+
 ## 5. See what happened
 Open the dashboard (approvals, activity, audit, egress, vault, MCP tools, settings) with a one-time sign-in link:
 ```bash
