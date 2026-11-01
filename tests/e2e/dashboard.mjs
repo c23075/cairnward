@@ -57,7 +57,7 @@ async function go(view) {
     && document.querySelector("main h1") && !document.querySelector("main").dataset.loading, view);
   return page.textContent("main h1");
 }
-for (const view of ["activity", "audit", "egress", "mcp", "settings"]) {
+for (const view of ["activity", "audit", "egress", "jobs", "mcp", "settings"]) {
   out[`h1_${view}`] = await go(view);
 }
 // accessibility basics on the settings page and the vault page

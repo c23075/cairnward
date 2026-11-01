@@ -79,6 +79,15 @@ class AskIn(BaseModel):
     run_id: str | None = None
 
 
+class JobIn(BaseModel):
+    kind: Literal["ask", "review"]
+    library: str
+    question: str | None = Field(default=None, max_length=4000)
+    questions: list[str] = Field(default_factory=list, max_length=500)
+    style: Literal["apa", "ieee"] = "apa"
+    not_before: str | None = Field(default=None, description="ISO time (UTC) to start after")
+
+
 class AskQuestionIn(BaseModel):
     library: str
     question: str = Field(min_length=3, max_length=4000)
@@ -131,6 +140,7 @@ def management_app(
     vault: Any = None,
     dashboard: Any = None,
     research_ask: Any = None,
+    jobs: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward management", docs_url=None, redoc_url=None)
     runs: dict[str, _Run] = {}
@@ -391,6 +401,64 @@ def management_app(
             raise HTTPException(400, str(exc)) from None
         result: dict[str, Any] = answer.as_dict()
         return result
+
+    # ------------------------------------------------------------------ research jobs
+
+    def need_jobs() -> Any:
+        if jobs is None:
+            raise HTTPException(503, "research jobs aren't available in this process")
+        return jobs
+
+    @app.post("/v1/jobs")
+    def submit_job(body: JobIn) -> dict[str, Any]:
+        from cairnward.research import LibraryError, Research
+        from cairnward.research.jobs import ask_job, review_job
+
+        runner = need_jobs()
+        try:
+            with Research.open(cfg.paths) as research:
+                docs = research.documents(body.library)
+        except LibraryError as exc:
+            raise HTTPException(404, str(exc)) from None
+        if body.kind == "ask":
+            if not body.questions:
+                raise HTTPException(400, "an ask job needs questions")
+            job = ask_job(body.library, body.questions, not_before=body.not_before)
+        else:
+            if not body.question:
+                raise HTTPException(400, "a review job needs a review question")
+            job = review_job(body.library, body.question, docs, body.style,
+                             not_before=body.not_before)  # fmt: skip
+        if len(job.steps) <= (1 if body.kind == "review" else 0):
+            raise HTTPException(400, "nothing to do: no indexed papers or no questions")
+        runner.submit(job)
+        return job.summary()
+
+    @app.get("/v1/jobs")
+    def list_jobs() -> list[dict[str, Any]]:
+        return [j.summary() for j in need_jobs().store.all()]
+
+    @app.get("/v1/jobs/{job_id}")
+    def show_job(job_id: str) -> dict[str, Any]:
+        try:
+            job = need_jobs().store.load(job_id)
+        except (KeyError, OSError):
+            raise HTTPException(404, "no such job") from None
+        steps = [
+            {"name": s.name, "label": s.params.get("title") or s.params.get("question"),
+             "status": s.status, "seconds": s.seconds, "error": s.error}
+            for s in job.steps
+        ]  # fmt: skip
+        result = need_jobs().store.result_path(job_id)
+        return {**job.summary(), "steps": steps,
+                "result": str(result) if result.exists() else None}  # fmt: skip
+
+    @app.post("/v1/jobs/{job_id}/cancel")
+    def cancel_job(job_id: str) -> dict[str, bool]:
+        try:
+            return {"cancelled": need_jobs().cancel(job_id)}
+        except (KeyError, OSError):
+            raise HTTPException(404, "no such job") from None
 
     @app.post("/v1/dashboard/link")
     def dashboard_link() -> dict[str, Any]:

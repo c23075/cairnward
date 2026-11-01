@@ -164,6 +164,7 @@ def _core_parts(
     backends: Backends,
     isolated: bool,
     launcher: Launcher,
+    log: Log = lambda m: None,
 ) -> tuple[Any, Any, McpHub, Any]:
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     tracker = ProvenanceTracker()
@@ -174,9 +175,24 @@ def _core_parts(
 
         return await run_ask(cfg, engine, backends, library, question, scheduler=scheduler, **kw)
 
+    def chat_for(library: str) -> Any:
+        from cairnward.research import Research
+        from cairnward.research.llm import InProcessChat
+
+        with Research.open(cfg.paths) as research:
+            env = research.get(library).environment
+        return InProcessChat(cfg, engine, backends, environment=env, scheduler=scheduler,
+                             purpose="review")  # fmt: skip
+
+    from cairnward.research import Research
+    from cairnward.research.jobs import JobRunner, JobStore
+
+    jobs = JobRunner(JobStore(cfg.paths.data_dir), research=lambda: Research.open(cfg.paths),
+                     ask=research_ask, chat_for=chat_for, audit=audit, log=log)  # fmt: skip
+
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
                  provenance=tracker, vault=vault, backends=backends,
-                 research_ask=research_ask)  # fmt: skip
+                 research_ask=research_ask, jobs=jobs)  # fmt: skip
     run_keys = RunKeys()
     gateway = create_app(
         GatewayDeps(
@@ -194,7 +210,7 @@ def _core_parts(
     )
     auth = DashboardAuth()
     dashboard = dashboard_app(cfg, auth=auth, audit=audit, vault=vault, inbox=inbox, mcp=hub,
-                              isolated=isolated)  # fmt: skip
+                              isolated=isolated, jobs=jobs)  # fmt: skip
     management = management_app(
         cfg,
         audit=audit,
@@ -207,6 +223,7 @@ def _core_parts(
         vault=vault,
         dashboard=auth,
         research_ask=research_ask,
+        jobs=jobs,
     )
     return gateway, management, hub, dashboard
 
@@ -245,6 +262,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
             backends=backends,
             isolated=False,
             launcher=launcher,
+            log=log,
         )
         gw = uvicorn.Server(
             uvicorn.Config(
@@ -499,6 +517,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             backends=backends,
             isolated=True,
             launcher=RemoteLauncher(str(egress_control)),
+            log=log,
         )
         gw = _uds_server(gateway, socks["gateway"])
         mgmt = _uds_server(management, socks["management"])
@@ -516,6 +535,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
         async def run() -> None:
             dog = asyncio.create_task(watchdog())
             keep = asyncio.create_task(retention_loop(cfg, vault, log))
+            research_jobs = asyncio.create_task(hub.jobs.run_forever())
             try:
                 await asyncio.gather(
                     _serve_uds(gw, socks["gateway"]),
@@ -525,6 +545,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             finally:
                 dog.cancel()
                 keep.cancel()
+                research_jobs.cancel()
                 inbox.close()
                 await hub.aclose()
                 await backends.aclose()

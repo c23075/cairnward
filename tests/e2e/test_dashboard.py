@@ -171,4 +171,5 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
     assert out["rows"] == 1 and out["messageText"].endswith(evil) and out["pwned"] is False
     assert out["locked"] is True
     assert out["h1_settings"] == "Settings" and out["h1_egress"] == "Egress report"
+    assert out["h1_jobs"] == "Research jobs"
     assert out["a11y_settings"] == [] and out["a11y_vault"] == [] and out["a11y_audit"] == []

@@ -58,6 +58,7 @@ class McpHub:
     vault: Any = None  # for Cairnward's own tools
     backends: Any = None  # for research tools (embeddings through the gateway's drivers)
     research_ask: Any = None  # async (library, question, **kw) -> research.ask.Answer
+    jobs: Any = None  # research.jobs.JobRunner
     _servers: dict[tuple[str, str], _Server] = field(default_factory=dict)
     _locks: dict[tuple[str, str], asyncio.Lock] = field(default_factory=dict)
     _reported: set[tuple[str, str, str]] = field(default_factory=set)
@@ -267,6 +268,21 @@ class McpHub:
                     }},
                     "annotations": {"readOnlyHint": True},
                 })  # fmt: skip
+                if self.jobs is not None:
+                    tools.append({
+                        "name": exposed_name(BUILTIN, "lit_review_start"),
+                        "description": (
+                            "Start a literature review job: notes per paper (aim, method, "
+                            "sample, findings, limitations, with pages) and a comparison "
+                            "table with references. Runs in the background for minutes to "
+                            "hours; returns a job id the user can follow in Cairnward."
+                        ),
+                        "inputSchema": {"type": "object", "required": ["question"], "properties": {
+                            "question": {"type": "string", "description": "the review question"},
+                            "library": {"type": "string", "enum": libraries},
+                            "style": {"type": "string", "enum": ["apa", "ieee"], "default": "apa"},
+                        }},
+                    })  # fmt: skip
                 if self.research_ask is not None:
                     tools.append({
                         "name": exposed_name(BUILTIN, "lit_ask"),
@@ -305,6 +321,8 @@ class McpHub:
             return await self._lit_search(environment, arguments, client=client, run_id=run_id)
         if tool == "lit_ask":
             return await self._lit_ask(environment, arguments, client=client, run_id=run_id)
+        if tool == "lit_review_start":
+            return await self._lit_review(environment, arguments, client=client, run_id=run_id)
         if tool != "lock_conversation" or conversation is None:
             return _tool_error("Cairnward doesn't know which conversation this is yet: "
                                "lock it with `cairnward vault lock`")  # fmt: skip
@@ -402,6 +420,36 @@ class McpHub:
                                 details={"sources": len(answer.sources)})  # fmt: skip
         return {"content": [{"type": "text", "text": answer.render()}],
                 "structuredContent": answer.as_dict()}  # fmt: skip
+
+    async def _lit_review(self, environment: str, arguments: dict[str, Any], *, client: str,
+                          run_id: str | None) -> dict[str, Any]:  # fmt: skip
+        from cairnward.research import Research
+        from cairnward.research.jobs import review_job
+
+        libraries = self._libraries(environment)
+        name = arguments.get("library") or (libraries[0] if len(libraries) == 1 else None)
+        question = str(arguments.get("question", "")).strip()
+        style = str(arguments.get("style") or "apa")
+        style = style if style in ("apa", "ieee") else "apa"
+        if name not in libraries or len(question) < 3:
+            return _tool_error(f"give a question and one of the libraries: {', '.join(libraries)}")
+        action = Action(kind="tool.call", target=f"{BUILTIN}/lit_review_start",
+                        environment=environment, client=client, run_id=run_id,
+                        actor=f"agent:{client}" if run_id else f"client:{client}",
+                        details={"library": name})  # fmt: skip
+        decision = await asyncio.to_thread(self.engine.check, action)
+        if not decision.allowed:
+            await asyncio.to_thread(self.engine.audit_deny, decision)
+            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
+        with Research.open(self.cfg.paths) as research:
+            job = review_job(name, question, research.documents(name), style,
+                             actor=f"client:{client}")  # fmt: skip
+        self.jobs.submit(job)
+        text = (f"Review job {job.id} queued: {len(job.steps) - 1} papers. Follow it with "
+                f"`cairnward jobs show {job.id}`; the result will be in `cairnward jobs result "
+                f"{job.id}`.")  # fmt: skip
+        return {"content": [{"type": "text", "text": text}],
+                "structuredContent": job.summary()}  # fmt: skip
 
     # ------------------------------------------------------------------ skills (prompts)
 

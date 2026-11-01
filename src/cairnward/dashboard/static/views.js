@@ -296,6 +296,38 @@ export async function vault(main, params) {
   return () => document.removeEventListener("keydown", keys);
 }
 
+// ------------------------------------------------------------------ research jobs
+
+export async function jobs(main, params) {
+  const id = params.get("id");
+  if (id) {
+    const j = await api(`/api/jobs/${id}`);
+    put(main, h("h1", {}, `Research job ${j.id} (${j.kind})`),
+      h("p", {}, `${j.status} · ${j.done}/${j.total} steps · library ${j.library}`,
+        j.eta_s ? ` · about ${Math.round(j.eta_s / 60)} min left` : ""),
+      h("p", {}, h("a", { href: "#/jobs" }, "All jobs")),
+      ["queued", "running"].includes(j.status) ? h("button", { type: "button", class: "danger", onclick: async () => {
+        await api(`/api/jobs/${j.id}/cancel`, { method: "POST" }); location.reload(); } }, "Cancel") : null,
+      table([
+        { label: "Step", key: "name" }, { label: "", render: r => r.label || "" },
+        { label: "Status", render: r => h("span", { class: r.status === "failed" ? "bad" : r.status === "done" ? "ok" : null }, r.status) },
+        { label: "Time", num: true, render: r => r.seconds ? `${Math.round(r.seconds)} s` : "" },
+        { label: "Error", render: r => r.error || "" },
+      ], j.steps),
+      j.result ? [h("h2", {}, "Result (Markdown)"), h("pre", { class: "message" }, j.result)] : null);
+    return;
+  }
+  put(main, h("h1", {}, "Research jobs"),
+    h("p", { class: "muted" }, "Start one with ", h("code", {}, "cairnward research review <library> --question ..."), " or from a chat client (lit_review_start)."));
+  const rows = await api("/api/jobs");
+  put(main, rows.length ? table([
+    { label: "Job", render: r => h("a", { href: `#/jobs?id=${r.id}` }, r.id) },
+    { label: "Kind", key: "kind" }, { label: "Library", key: "library" },
+    { label: "Status", key: "status" }, { label: "Progress", render: r => `${r.done}/${r.total}` },
+    { label: "Created", render: r => when(r.created) },
+  ], rows) : h("p", {}, "No research jobs yet."));
+}
+
 // ------------------------------------------------------------------ MCP
 
 export async function mcp(main) {

@@ -76,6 +76,10 @@ async def setup(paths: Paths) -> tuple[httpx.AsyncClient, McpHub, AuditLog, Prov
 
     hub = McpHub(cfg, engine, LocalLauncher(cfg, srt=None), PinStore.at(paths.data_dir), audit,
                  provenance=tracker, backends=backends, research_ask=research_ask)  # fmt: skip
+    from cairnward.research.jobs import JobRunner, JobStore
+
+    hub.jobs = JobRunner(JobStore(paths.data_dir), research=lambda: Research.open(paths),
+                         ask=research_ask, chat_for=lambda lib: None)  # fmt: skip
     app = FastAPI()
     add_mcp_routes(app, hub, lambda r: ("jan", None), default_environment=lambda c: "lit",
                    run_environment=lambda r: None)  # fmt: skip
@@ -117,8 +121,20 @@ async def test_prompts_resources_and_lit_search(paths: Paths) -> None:
         assert bad["error"]["code"] == -32002
 
         tools = (await rpc(c, "tools/list"))["result"]["tools"]
-        lit, ask_tool = tools
-        assert (lit["name"], ask_tool["name"]) == ("cairnward__lit_search", "cairnward__lit_ask")
+        assert [t["name"] for t in tools] == [
+            "cairnward__lit_search",
+            "cairnward__lit_review_start",
+            "cairnward__lit_ask",
+        ]
+        lit = tools[0]
+        queued = await rpc(
+            c,
+            "tools/call",
+            {"name": "cairnward__lit_review_start", "arguments": {"question": "Does sleep help?"}},
+        )
+        job_id = queued["result"]["structuredContent"]["id"]
+        assert hub.jobs.store.load(job_id).status == "queued"
+        assert "cairnward jobs show" in queued["result"]["content"][0]["text"]
         answer = await rpc(
             c,
             "tools/call",

@@ -133,6 +133,7 @@ def dashboard_app(
     inbox: Any = None,
     mcp: Any = None,
     isolated: bool = False,
+    jobs: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward dashboard", docs_url=None, redoc_url=None, openapi_url=None)
     port = cfg.main.server.dashboard_port
@@ -432,6 +433,36 @@ def dashboard_app(
         if op in ("delete", "restore", "purge", "lock", "unlock"):
             user_event(f"vault.{op}", conv_id)
         return {"ok": True}
+
+    # ------------------------------------------------------------------ research jobs
+
+    def need_jobs() -> Any:
+        if jobs is None:
+            raise HTTPException(503, "research jobs aren't available in this process")
+        return jobs
+
+    @app.get("/api/jobs")
+    def jobs_list() -> list[dict[str, Any]]:
+        return [j.summary() for j in reversed(need_jobs().store.all())]
+
+    @app.get("/api/jobs/{job_id}")
+    def job_show(job_id: str) -> dict[str, Any]:
+        try:
+            job = need_jobs().store.load(job_id)
+        except (KeyError, OSError):
+            raise HTTPException(404, "no such job") from None
+        result = need_jobs().store.result_path(job_id)
+        return {**job.summary(), "steps": [
+            {"name": st.name, "label": st.params.get("title") or st.params.get("question"),
+             "status": st.status, "seconds": st.seconds, "error": st.error} for st in job.steps],
+            "result": result.read_text(encoding="utf-8") if result.exists() else None}  # fmt: skip
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    def job_cancel(job_id: str) -> dict[str, bool]:
+        try:
+            return {"cancelled": need_jobs().cancel(job_id)}
+        except (KeyError, OSError):
+            raise HTTPException(404, "no such job") from None
 
     # ------------------------------------------------------------------ MCP
 

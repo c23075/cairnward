@@ -175,6 +175,25 @@ def build_parser() -> argparse.ArgumentParser:
     v_unlock.add_argument("--permanently", action="store_true", help="remove the lock")
     vlt_sub.add_parser("relock", help="close every unlocked conversation in the server now")
 
+    rs = sub.add_parser("research", help="research jobs (run in the background by the server)")
+    rs_sub = rs.add_subparsers(dest="research_command", metavar="ACTION", required=True)
+    rv = rs_sub.add_parser("review", help="notes per paper + comparison table + references")
+    rv.add_argument("library")
+    rv.add_argument("--question", required=True, help="the review question")
+    rv.add_argument("--style", choices=["apa", "ieee"], default="apa")
+    rv.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
+    rb = rs_sub.add_parser("ask", help="answer every question in a file (one per line)")
+    rb.add_argument("library")
+    rb.add_argument("file", type=Path)
+    rb.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
+
+    jb = sub.add_parser("jobs", help="research jobs: list, progress, results")
+    jb_sub = jb.add_subparsers(dest="jobs_command", metavar="ACTION")
+    jb_sub.add_parser("list", help="all jobs (default)")
+    for name, text in (("show", "progress of one job"), ("cancel", "stop a job"),
+                       ("result", "print a finished job's result")):  # fmt: skip
+        jb_sub.add_parser(name, help=text).add_argument("id")
+
     cite = sub.add_parser("cite", help="format references (APA 7, IEEE, or a .csl style)")
     cite.add_argument("file", type=Path, help="CSL-JSON (e.g. exported from Zotero)")
     cite.add_argument("--style", default="apa", help="apa (default), ieee, or a .csl file")
@@ -947,6 +966,96 @@ def _cmd_models(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_at(value: str, now: Any = None) -> str:
+    """'23:30' (local, today or tomorrow) or an ISO date-time -> ISO UTC."""
+    from datetime import UTC, datetime, timedelta
+
+    now = now or datetime.now().astimezone()
+    if len(value) <= 5 and ":" in value:
+        hh, mm = (int(x) for x in value.split(":"))
+        at = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if at <= now:
+            at += timedelta(days=1)
+    else:
+        at = datetime.fromisoformat(value)
+        if at.tzinfo is None:
+            at = at.astimezone()
+    return str(at.astimezone(UTC).isoformat(timespec="seconds"))
+
+
+def _cmd_jobs(args: argparse.Namespace) -> int:
+    from cairnward.run.runner import RunError, management
+
+    cfg = _load(args)
+    try:
+        mgmt = management(cfg)
+    except RunError as exc:
+        print(f"cairnward: {exc} (jobs run inside the server)", file=sys.stderr)
+        return 1
+
+    def fail(resp: Any) -> int:
+        print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
+        return 1
+
+    def line(j: dict[str, Any]) -> str:
+        eta = f", about {j['eta_s'] // 60} min left" if j.get("eta_s") else ""
+        when = (
+            f", starts {j['not_before']}" if j.get("not_before") and j["status"] == "queued" else ""
+        )
+        return (f"{j['id']}  {j['kind']:6} {j['status']:9} {j['done']}/{j['total']}  "
+                f"{j['library']}{when}{eta}")  # fmt: skip
+
+    with mgmt:
+        if args.command == "research":
+            start = parse_at(args.at) if args.at else None
+            body: dict[str, Any] = {"library": args.library, "not_before": start}
+            if args.research_command == "review":
+                body |= {"kind": "review", "question": args.question, "style": args.style}
+            else:
+                questions = args.file.read_text(encoding="utf-8").splitlines()
+                body |= {"kind": "ask", "questions": [q for q in questions if q.strip()]}
+            resp = mgmt.post("/v1/jobs", json=body)
+            if resp.status_code != 200:
+                return fail(resp)
+            job = resp.json()
+            print(f"queued: {line(job)}")
+            print(f"follow it with: cairnward jobs show {job['id']}")
+            return 0
+        action = args.jobs_command or "list"
+        if action == "list":
+            jobs = mgmt.get("/v1/jobs").json()
+            if not jobs:
+                print("no research jobs")
+            for j in jobs:
+                print(line(j))
+            return 0
+        if action == "cancel":
+            resp = mgmt.post(f"/v1/jobs/{args.id}/cancel")
+            if resp.status_code != 200:
+                return fail(resp)
+            print("cancelled" if resp.json()["cancelled"] else "already finished")
+            return 0
+        resp = mgmt.get(f"/v1/jobs/{args.id}")
+        if resp.status_code != 200:
+            return fail(resp)
+        job = resp.json()
+        if action == "result":
+            if not job.get("result"):
+                print(f"not finished yet: {line(job)}", file=sys.stderr)
+                return 1
+            sys.stdout.write(Path(job["result"]).read_text(encoding="utf-8"))
+            return 0
+        print(line(job))
+        for st in job["steps"]:
+            mark = {"done": "ok ", "failed": "BAD", "pending": "   "}[st["status"]]
+            took = f" ({st['seconds']:.0f}s)" if st["seconds"] else ""
+            err = f"  {st['error']}" if st["error"] else ""
+            print(f"  [{mark}] {st['name']}: {(st['label'] or '')[:70]}{took}{err}")
+        if job.get("result"):
+            print(f"result: {job['result']}")
+        return 0
+
+
 def _cmd_dashboard(args: argparse.Namespace) -> int:
     import webbrowser
 
@@ -1350,6 +1459,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_dashboard(args)
         if args.command == "models":
             return _cmd_models(args)
+        if args.command in ("research", "jobs"):
+            return _cmd_jobs(args)
         if args.command == "cite":
             from cairnward.research.cite import CiteError, bibliography, load_items
 
