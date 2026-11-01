@@ -93,6 +93,16 @@ class OpenAICompatDriver:
         except httpx.HTTPError as exc:
             raise BackendUnavailable(f"{self.name}: {type(exc).__name__}: {exc}") from exc
 
+    async def embed(self, model: str, inputs: list[str]) -> tuple[list[list[float]], int]:
+        try:
+            resp = await self._client.post("/embeddings", json={"model": model, "input": inputs})
+        except httpx.HTTPError as exc:
+            raise BackendUnavailable(f"{self.name}: {type(exc).__name__}: {exc}") from exc
+        self._raise(resp)
+        data = resp.json()
+        vectors = [d["embedding"] for d in sorted(data["data"], key=lambda d: d["index"])]
+        return vectors, int((data.get("usage") or {}).get("prompt_tokens") or 0)
+
     async def models(self) -> list[str]:
         try:
             resp = await self._client.get("/models")

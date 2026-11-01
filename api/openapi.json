@@ -92,6 +92,35 @@
         "title": "ChatCompletionRequest",
         "type": "object"
       },
+      "EmbeddingRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Input"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "input"
+        ],
+        "title": "EmbeddingRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -210,6 +239,42 @@
           }
         },
         "summary": "Chat Completions"
+      }
+    },
+    "/v1/embeddings": {
+      "post": {
+        "operationId": "embeddings_v1_embeddings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Embeddings"
       }
     },
     "/v1/models": {

@@ -20,6 +20,11 @@ class FakeOllama:
     requests: list[dict[str, Any]] = field(default_factory=list)
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/embed":
+            body = json.loads(request.content)
+            self.requests.append(body)
+            vecs = [[float(len(t) % 7), 1.0, float(i)] for i, t in enumerate(body["input"])]
+            return httpx.Response(200, json={"embeddings": vecs, "prompt_eval_count": 4})
         if request.url.path == "/api/tags":
             return httpx.Response(
                 200, json={"models": [{"name": "qwen3:30b"}, {"name": "qwen3:1.7b"}]}

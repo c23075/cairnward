@@ -26,9 +26,40 @@ class Resolved:
     options: GenerationOptions
 
 
+EMBED = "embed"
+
+
 def virtual_model_ids(cfg: Config) -> list[str]:
     efforts = cfg.effort_levels_ordered()
-    return [f"{PREFIX}{env}:{eff}" for env in sorted(cfg.environments) for eff in efforts]
+    ids = [f"{PREFIX}{env}:{eff}" for env in sorted(cfg.environments) for eff in efforts]
+    if "embed" in cfg.backends.roles:
+        ids += [f"{PREFIX}{env}:{EMBED}" for env in sorted(cfg.environments)]
+    return ids
+
+
+def resolve_embedding(
+    cfg: Config, name: str, *, default_environment: str | None = None
+) -> Resolved:
+    """`cw/<environment>:embed` or `cw/raw/<model>` -> the embedding role's backend."""
+    role_cfg = cfg.backends.roles.get("embed")
+    if role_cfg is None:
+        raise UnknownModel("no embedding model configured ([roles.embed] in backends.toml)")
+    if not name.startswith(PREFIX):
+        raise UnknownModel(f"unknown model '{name}': use cw/<environment>:embed")
+    rest = name[len(PREFIX) :]
+    if rest.startswith("raw/") and rest[4:]:
+        env_name, model = default_environment or cfg.main.defaults.environment, rest[4:]
+    else:
+        env_name, _, kind = rest.partition(":")
+        if kind != EMBED:
+            raise UnknownModel(f"'{name}' is not an embedding model: use cw/<environment>:embed")
+        model = ""
+    env = cfg.environments.get(env_name)
+    if env is None:
+        raise UnknownModel(f"unknown environment '{env_name}' in model '{name}'")
+    model = model or env.models.get("embed") or role_cfg.model
+    backend = env.backend or role_cfg.backend
+    return Resolved(name, env_name, EMBED, backend, model, GenerationOptions())
 
 
 def resolve(cfg: Config, name: str, *, default_environment: str | None = None) -> Resolved:

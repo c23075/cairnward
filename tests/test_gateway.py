@@ -37,6 +37,9 @@ model = "qwen3:30b"
 [roles.fast]
 backend = "local-ollama"
 model = "qwen3:1.7b"
+[roles.embed]
+backend = "local-ollama"
+model = "qwen3-embedding:0.6b"
 """
 
 
@@ -324,3 +327,25 @@ def test_committed_openapi_is_up_to_date() -> None:
 
     committed = Path(__file__).resolve().parents[1] / "api" / "openapi.json"
     assert committed.read_text(encoding="utf-8") == _openapi_text()
+
+
+async def test_embeddings(gw: Callable[..., Any]) -> None:
+    g = await gw()
+    BACK = g.cfg.backends
+    assert "embed" in BACK.roles
+    resp = await g.client.post(
+        "/v1/embeddings", headers=g.auth, json={"model": "cw/coding:embed", "input": ["a", "bb"]}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert [d["index"] for d in data["data"]] == [0, 1] and len(data["data"][0]["embedding"]) == 3
+    assert g.ollama.requests[-1] == {"model": "qwen3-embedding:0.6b", "input": ["a", "bb"]}
+    pre, post = g.audit.records()
+    assert pre.details["operation"] == "embeddings" and post.details["prompt_tokens"] == 4
+    assert g.vault.list_conversations() == []  # embeddings aren't conversations
+    bad = await g.client.post(
+        "/v1/embeddings", headers=g.auth, json={"model": "cw/coding:low", "input": "x"}
+    )
+    assert bad.status_code == 404
+    ids = [m["id"] for m in (await g.client.get("/v1/models", headers=g.auth)).json()["data"]]
+    assert "cw/coding:embed" in ids

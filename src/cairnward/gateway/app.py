@@ -23,13 +23,25 @@ from cairnward.backends import BackendError, Backends, ChatRequest, GenerationOp
 from cairnward.config.loader import Config
 from cairnward.config.models import LOOPBACK_HOSTS
 from cairnward.gateway.clients import ClientKeys, RunKeys
-from cairnward.gateway.models import Resolved, UnknownModel, resolve, virtual_model_ids
+from cairnward.gateway.models import (
+    Resolved,
+    UnknownModel,
+    resolve,
+    resolve_embedding,
+    virtual_model_ids,
+)
 from cairnward.gateway.recorder import record_exchange
 from cairnward.policy.engine import Action, PolicyEngine
 from cairnward.store import Vault
 
 PASSTHROUGH = ("stop", "seed", "response_format", "n", "presence_penalty", "frequency_penalty",
                "logit_bias", "user", "parallel_tool_calls")  # fmt: skip
+
+
+class EmbeddingRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    model: str
+    input: str | list[str]
 
 
 class ChatCompletionRequest(BaseModel):
@@ -128,6 +140,67 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         data = [{"id": mid, "object": "model", "created": 0, "owned_by": "cairnward"}
                 for mid in virtual_model_ids(cfg)]  # fmt: skip
         return {"object": "list", "data": data}
+
+    @app.post("/v1/embeddings", response_model=None)
+    async def embeddings(body: EmbeddingRequest, request: Request) -> dict[str, Any] | JSONResponse:
+        ident = identity(request)
+        if ident is None:
+            return _error(401, "missing or unknown API key (cairnward client add <name>)", "auth")
+        client, run_id = ident
+        client_cfg = cfg.clients.clients.get(client)
+        default_env = client_cfg.default_environment if client_cfg else None
+        try:
+            resolved = resolve_embedding(cfg, body.model, default_environment=default_env)
+        except UnknownModel as exc:
+            return _error(404, str(exc), "invalid_request_error", "model_not_found")
+        inputs = [body.input] if isinstance(body.input, str) else list(body.input)
+        action = Action(
+            kind="model.call",
+            target=resolved.backend,
+            environment=resolved.environment,
+            client=client,
+            run_id=run_id,
+            actor=f"agent:{client}" if run_id else f"client:{client}",
+            details={
+                "model": resolved.model,
+                "virtual_model": resolved.name,
+                "operation": "embeddings",
+                "inputs": len(inputs),
+            },
+        )
+        decision = await asyncio.to_thread(deps.engine.check, action)
+        if not decision.allowed:
+            await asyncio.to_thread(deps.engine.audit_deny, decision)
+            return _error(403, f"denied by cairnward policy: {decision.reason}", "policy_denied")
+        pre_seq = await asyncio.to_thread(deps.engine.audit_pre, decision, canonical(inputs))
+        started = time.monotonic()
+        driver = deps.backends.get(resolved.backend, resolved.environment)
+        try:
+            vectors, tokens = await driver.embed(resolved.model, inputs)
+        except BackendError as exc:
+            await asyncio.to_thread(
+                deps.engine.audit_post,
+                action,
+                pre_seq,
+                outcome="error",
+                details={"error": str(exc)[:300]},
+            )
+            return _error(502, str(exc), "backend_error")
+        await asyncio.to_thread(
+            deps.engine.audit_post,
+            action,
+            pre_seq,
+            outcome="ok",
+            details={"prompt_tokens": tokens, "duration_s": round(time.monotonic() - started, 3)},
+        )
+        return {
+            "object": "list",
+            "model": body.model,
+            "data": [
+                {"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vectors)
+            ],
+            "usage": {"prompt_tokens": tokens, "total_tokens": tokens},
+        }
 
     @app.post("/v1/chat/completions", response_model=None)
     async def chat_completions(
