@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -252,9 +253,14 @@ async def test_slow_request_warning_uses_profile_and_cache(tmp_path: Path) -> No
 
 async def test_concurrent_requests_queue(tmp_path: Path) -> None:
     fake = FakeOllama()
+    spans: list[tuple[float, float]] = []
 
     async def slow(request: httpx.Request) -> httpx.Response:
+        if not request.url.path.endswith("/api/chat"):  # memory checks etc.
+            return fake.handler(request)
+        start = time.monotonic()
         await asyncio.sleep(0.3)
+        spans.append((start, time.monotonic()))
         return fake.handler(request)
 
     client, deps, audit, _ = await make(tmp_path, handler=slow)
@@ -272,7 +278,9 @@ async def test_concurrent_requests_queue(tmp_path: Path) -> None:
     assert all(x.status_code == 200 for x in r)
     posts = [x for x in audit.records() if x.phase == "post"]
     waits = sorted(p.details["queued_s"] for p in posts)
-    assert waits[0] < 0.1 and waits[1] >= 0.15  # the second waited for the first
+    assert waits[0] < waits[1] and waits[1] > 0  # the second waited for the first
+    (_, e1), (s2, _) = sorted(spans)
+    assert s2 >= e1  # the backend never served both at once
     await client.aclose()
     audit.close()
 
