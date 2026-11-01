@@ -58,6 +58,7 @@ ignore = []
 "src/cairnward/run/runner.py" = ["S603"]
 "src/cairnward/sandbox/srt.py" = ["S603"]
 "src/cairnward/run/snapshots.py" = ["S603"]
+"src/cairnward/audit/anchor.py" = ["S603"]  # git and ssh-keygen with fixed arguments
 "evals/**" = ["S101", "S603", "S607"]  # evaluation scripts run agents and tests
 # Vector table names are vec_<integer library id>; no user text reaches SQL strings.
 "src/cairnward/research/library.py" = ["S608"]

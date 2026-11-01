@@ -76,6 +76,30 @@ def _srt_if_wanted(cfg: Config) -> list[str] | None:
         return None
 
 
+async def anchor_loop(cfg: Config, audit: AuditLog, log: Log) -> None:
+    """audit_anchor = "git": push a signed checkpoint every interval (spec §5.2, D49)."""
+    if cfg.privacy().value("audit_anchor") != "git":
+        return
+    from cairnward.audit.anchor import Anchorer, AnchorError
+
+    if not cfg.main.anchor.repo:
+        log('audit_anchor = "git" but no [anchor] repo is set: no checkpoints are pushed')
+        return
+    anchorer = Anchorer(cfg.paths, cfg.main.anchor)
+    while True:
+        try:
+            payload = await asyncio.to_thread(anchorer.anchor, audit)
+            if payload:
+                audit.append("audit.anchor", actor="cairnward", outcome="ok",
+                             target=cfg.main.anchor.repo,
+                             details={"seq": payload["seq"], "hash": payload["hash"]})  # fmt: skip
+        except (AnchorError, OSError) as exc:
+            audit.append("audit.anchor", actor="cairnward", outcome="error",
+                         details={"error": str(exc)[:300]})  # fmt: skip
+            log(f"audit anchoring failed: {exc}")
+        await asyncio.sleep(cfg.main.anchor.interval_minutes * 60)
+
+
 def private_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     if sys.platform != "win32":
@@ -191,7 +215,11 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
         mgmt = _uds_server(management, socks["management"])
 
         async def run() -> None:
-            tasks = [gw.serve(), _serve_uds(mgmt, socks["management"])]
+            tasks = [
+                gw.serve(),
+                _serve_uds(mgmt, socks["management"]),
+                anchor_loop(cfg, audit, log),
+            ]
             if with_egress:
                 proxy = EgressProxy(cfg, PolicyEngine(cfg, approver=inbox, audit=audit), sessions)
                 await proxy.start()
@@ -330,6 +358,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                     f"(privacy: {cfg.privacy().label}; core isolated, pid {core.pid})"
                 )
                 serve_task = asyncio.create_task(proxy.serve_forever())
+                anchors = asyncio.create_task(anchor_loop(cfg, audit, log))
                 try:
                     return await core.wait()
                 finally:
@@ -340,6 +369,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                     fwd.close()
                     ctl.should_exit = True
                     serve_task.cancel()
+                    anchors.cancel()
                     await bridge.aclose()
                     await proxy.close()
                     with contextlib.suppress(asyncio.CancelledError, Exception):

@@ -359,6 +359,12 @@ class AuditLog:
             row = conn.execute(query).first()
         return _row_to_record(row) if row else None
 
+    def at(self, seq: int) -> AuditRecord | None:
+        query = select(audit_records).where(audit_records.c.seq == seq)
+        with self._engine.connect() as conn:
+            row = conn.execute(query).first()
+        return _row_to_record(row) if row else None
+
     def head(self) -> tuple[int, str]:
         rec = self.latest()
         return (rec.seq, rec.hash) if rec else (0, GENESIS)

@@ -78,6 +78,14 @@ uv run cairnward audit egress --since 24h
 ```
 Filter with `--run`, `--client`, `--env`, `--conversation`; export with `--json` or `--csv`. `audit log` takes the same filters.
 
+Anchor the audit log to a private git repo you own, so later edits on this machine are detectable (on in Strict; follow the printed steps):
+```bash
+uv run cairnward audit anchor --setup
+```
+```bash
+uv run cairnward audit verify --anchors
+```
+
 ## 6. A literature library
 Pull the embedding model once:
 ```bash

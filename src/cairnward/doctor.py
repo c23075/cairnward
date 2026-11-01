@@ -329,7 +329,31 @@ def check_data(cfg: Config) -> list[Check]:
                 "" if res.ok else "cairnward audit verify  (shows what changed)",
             )
         )
+    out.append(check_anchoring(cfg))
     return out
+
+
+def check_anchoring(cfg: Config) -> Check:
+    if cfg.privacy().value("audit_anchor") != "git":
+        return Check("audit anchoring", "skip", 'audit_anchor is "off"')
+    from cairnward.audit.anchor import Anchorer
+
+    anchorer = Anchorer(cfg.paths, cfg.main.anchor)
+    if not cfg.main.anchor.repo or not anchorer.install_file.exists():
+        return Check("audit anchoring", "warn", 'audit_anchor = "git" but it isn\'t set up',
+                     "cairnward audit anchor --setup")  # fmt: skip
+    if not (cfg.paths.data_dir / "audit.db").exists():
+        return Check("audit anchoring", "ok", f"to {cfg.main.anchor.repo}")
+    from cairnward.audit import AuditLog
+
+    with AuditLog.open(cfg.paths) as log:
+        last = log.latest("audit.anchor")
+    if last is None or last.outcome != "ok":
+        detail = "no checkpoint pushed yet" if last is None else "the last attempt failed"
+        return Check("audit anchoring", "warn", detail, "cairnward audit anchor")
+    return Check(
+        "audit anchoring", "ok", f"last checkpoint {last.ts[:19]} to {cfg.main.anchor.repo}"
+    )
 
 
 def check_disk_encryption() -> Check:

@@ -125,6 +125,16 @@ class RedactionConfig(_Strict):
         return value
 
 
+class AnchorConfig(_Strict):
+    """External audit checkpoints (spec §5.2, D49): used when audit_anchor = "git"."""
+
+    repo: str | None = Field(
+        default=None, description="a private git repo you own, e.g. git@github.com:you/anchors.git"
+    )
+    branch: str = Field(default="main", pattern=r"^[A-Za-z0-9._/-]{1,100}$")
+    interval_minutes: int = Field(default=60, ge=5, le=1440)
+
+
 class MainConfig(_Strict):
     """cairnward.toml"""
 
@@ -134,6 +144,7 @@ class MainConfig(_Strict):
     privacy: PrivacyOverrides = PrivacyOverrides()
     defaults: Defaults = Defaults()
     redaction: RedactionConfig = RedactionConfig()
+    anchor: AnchorConfig = AnchorConfig()
 
 
 # --------------------------------------------------------------------------- backends.toml

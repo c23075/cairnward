@@ -55,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit_sub.add_parser(
         "head", help="print the latest record as SEQ:HASH (note it somewhere safe)"
     )
+    verify.add_argument(
+        "--anchors", action="store_true", help="also check against the anchors repo ([anchor])"
+    )
+    anch = audit_sub.add_parser("anchor", help="sign and push a checkpoint to your anchors repo")
+    anch.add_argument("--setup", action="store_true", help="create the keys and show what to do")
     log_cmd = audit_sub.add_parser("log", help="show records")
     log_cmd.add_argument("--last", type=int, default=20, help="number of records (default 20)")
     log_cmd.add_argument("--action", help="only this action, e.g. settings.changed")
@@ -319,6 +324,8 @@ def _cmd_audit(args: argparse.Namespace) -> int:
             seq, h = log.head()
             print(f"{seq}:{h}")
             return 0
+        if args.audit_command == "anchor":
+            return _audit_anchor(args, log)
         if args.audit_command == "verify":
             res = log.verify(_parse_expect(args.expect))
             for note in res.notes:
@@ -326,7 +333,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
             if res.ok:
                 print(f"OK: {res.records} records, chain and mirror intact.")
                 print(f"Head {res.head_seq}:{res.head_hash}")
-                return 0
+                return _audit_verify_anchors(args, log) if args.anchors else 0
             print(
                 f"FAILED: {len(res.problems)} problem(s) in {res.records} records", file=sys.stderr
             )
@@ -367,6 +374,60 @@ def _cmd_audit(args: argparse.Namespace) -> int:
             scope = f" [{r.environment}]" if r.environment else ""
             print(f"{r.seq:>6} {r.ts} {r.actor:16} {r.action:20} {where}{scope}")
     return 0
+
+
+def _audit_anchor(args: argparse.Namespace, log: Any) -> int:
+    from cairnward.audit.anchor import Anchorer, AnchorError
+
+    cfg = _load(args)
+    anchorer = Anchorer(cfg.paths, cfg.main.anchor)
+    try:
+        if args.setup:
+            keys = anchorer.setup()
+            print(
+                "1. Create a PRIVATE repository you own (e.g. github.com/<you>/cairnward-anchors)."
+            )
+            print("2. Add this as a deploy key WITH write access (that repo only):")
+            print(f"   {keys['deploy']}")
+            print("3. Put the repo in cairnward.toml:")
+            print('   [anchor]\n   repo = "git@github.com:<you>/cairnward-anchors.git"')
+            print('   and set audit_anchor = "git" under [privacy] (Strict has it on).')
+            print("4. Run `cairnward audit anchor` once to check it works.")
+            print(f"Signing key (also stored in the repo): {keys['sign']}")
+            return 0
+        payload = anchorer.anchor(log)
+    except AnchorError as exc:
+        log.append("audit.anchor", actor="user", outcome="error",
+                   details={"error": str(exc)[:300]})  # fmt: skip
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    if payload is None:
+        print("nothing to anchor yet" if log.head()[0] == 0
+              else "already anchored: no new records since the last checkpoint")  # fmt: skip
+        return 0
+    log.append("audit.anchor", actor="user", outcome="ok", target=cfg.main.anchor.repo,
+               details={"seq": payload["seq"], "hash": payload["hash"]})  # fmt: skip
+    print(f"anchored seq {payload['seq']} ({payload['hash'][:16]}...) to {cfg.main.anchor.repo}")
+    return 0
+
+
+def _audit_verify_anchors(args: argparse.Namespace, log: Any) -> int:
+    from cairnward.audit.anchor import Anchorer, AnchorError
+
+    cfg = _load(args)
+    try:
+        res = Anchorer(cfg.paths, cfg.main.anchor).verify(log)
+    except AnchorError as exc:
+        print(f"anchors: {exc}", file=sys.stderr)
+        return 1
+    if res.ok:
+        print(f"anchors OK: {res.anchors} checkpoint(s), last seq {res.last_seq} at {res.last_ts}; "
+              f"{res.unanchored} record(s) since then")  # fmt: skip
+        return 0
+    print(f"anchors FAILED: {len(res.problems)} problem(s)", file=sys.stderr)
+    for problem in res.problems:
+        print(f"  - {problem}", file=sys.stderr)
+    return 1
 
 
 def _cmd_policy_explain(args: argparse.Namespace) -> int:

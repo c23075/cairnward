@@ -1,5 +1,39 @@
 {
   "$defs": {
+    "AnchorConfig": {
+      "additionalProperties": false,
+      "description": "External audit checkpoints (spec \u00a75.2, D49): used when audit_anchor = \"git\".",
+      "properties": {
+        "branch": {
+          "default": "main",
+          "pattern": "^[A-Za-z0-9._/-]{1,100}$",
+          "title": "Branch",
+          "type": "string"
+        },
+        "interval_minutes": {
+          "default": 60,
+          "maximum": 1440,
+          "minimum": 5,
+          "title": "Interval Minutes",
+          "type": "integer"
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "a private git repo you own, e.g. git@github.com:you/anchors.git",
+          "title": "Repo"
+        }
+      },
+      "title": "AnchorConfig",
+      "type": "object"
+    },
     "CustomPattern": {
       "additionalProperties": false,
       "properties": {
@@ -407,6 +441,14 @@
   "additionalProperties": false,
   "description": "cairnward.toml",
   "properties": {
+    "anchor": {
+      "$ref": "#/$defs/AnchorConfig",
+      "default": {
+        "branch": "main",
+        "interval_minutes": 60,
+        "repo": null
+      }
+    },
     "defaults": {
       "$ref": "#/$defs/Defaults",
       "default": {
