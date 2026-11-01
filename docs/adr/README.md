@@ -18,5 +18,6 @@ ADRs are never edited after acceptance except to change their status; a changed 
 | [0010](0010-os-level-egress-enforcement.md) | Enforce egress at the OS level | Accepted |
 | [0011](0011-transcript-vault.md) | Transcript vault for conversations from any client | Accepted |
 | [0012](0012-optional-privacy-controls-and-presets.md) | Optional privacy controls with presets and per-environment overrides | Accepted |
+| [0013](0013-reuse-sandbox-runtime-for-isolation.md) | Reuse Anthropic's sandbox-runtime for OS-level isolation | Accepted |
 
 Template: copy [`template.md`](template.md).

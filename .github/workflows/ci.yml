@@ -67,3 +67,39 @@ jobs:
         run: |
           uv export --format requirements-txt --all-groups --no-emit-project -o requirements-audit.txt
           uvx pip-audit -r requirements-audit.txt --disable-pip --require-hashes --strict
+
+  isolation-spike:
+    # T0.6: sandbox-runtime + bubblewrap isolation checks (docs/adr/0013).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install bubblewrap and socat
+        run: sudo apt-get update -q && sudo apt-get install -y -q bubblewrap socat
+      - name: Allow unprivileged user namespaces (Ubuntu 24.04 restricts them via AppArmor)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install pinned sandbox-runtime
+        working-directory: spikes/t06-sandbox
+        run: npm ci --no-audit --no-fund
+      - name: Audit sandbox-runtime dependencies
+        working-directory: spikes/t06-sandbox
+        # Known, accepted: GHSA-mrhx-c7xc-m3w5 (zod), see docs/adr/0013. Any other high/critical fails.
+        run: |
+          npm audit --omit=dev --json > audit.json || true
+          node -e '
+            const a = require("./audit.json");
+            const accepted = new Set(["GHSA-mrhx-c7xc-m3w5"]);
+            const bad = [];
+            for (const v of Object.values(a.vulnerabilities || {}))
+              for (const via of v.via) if (typeof via === "object" && ["high","critical"].includes(via.severity)
+                  && !accepted.has((via.url || "").split("/").pop())) bad.push(via.url);
+            if (bad.length) { console.error("New advisories:", bad); process.exit(1); }
+            console.log("npm audit: only accepted advisories");'
+      - name: Isolation checks
+        run: spikes/t06-sandbox/run_spike.sh
+      - name: Chaining to the egress proxy
+        run: spikes/t06-sandbox/run_chain.sh

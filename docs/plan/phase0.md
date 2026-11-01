@@ -16,7 +16,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T0.4 | Config: pydantic models for `cairnward.toml`, `backends.toml`, `clients.toml`; JSON Schema export | spec §11 | T0.3 | S |
 | T0.4b | Privacy settings model: `[privacy]` table, presets, environment overrides, `privacy show`, settings-change audit hooks; CI matrix over presets | FR-PRIV-1, FR-PRIV-2, FR-PRIV-4, FR-PRIV-6 | T0.4 | M |
 | T0.5 | Store: SQLite (WAL) + Alembic baseline; vault tables; per-conversation age keys | FR-VLT-1, FR-ENC-5 (partial) | T0.4 | M |
-| T0.6 | **Sandbox spike:** bubblewrap + loopback-only netns + Unix-socket bridges; decide reuse of `sandbox-runtime` vs own implementation (ADR-0013) | FR-ISO-1 | T0.3 | M |
+| T0.6 | **Sandbox spike:** bubblewrap + loopback-only netns + Unix-socket bridges; decide reuse of `sandbox-runtime` vs own implementation (ADR-0013) | FR-ISO-1 | T0.3 | M ✅ reuse srt; 13/13 checks + chaining pass; CI job `isolation-spike` |
 | T0.7 | Audit log: hash chain, `AuditSink`, `cairnward audit verify` | FR-AUD-1, FR-AUD-2 | T0.5 | M |
 | T0.8 | Policy engine skeleton (`allow/ask/deny`, default rules, CLI approval prompt) | FR-POL-1 | T0.7 | M |
 | T0.9 | `cairnward-egress`: HTTP(S) CONNECT proxy, host allowlist, connection log; network off by default | FR-NET-1 | T0.8 | M |

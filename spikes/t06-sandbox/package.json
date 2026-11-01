@@ -1,0 +1,8 @@
+{
+  "name": "cairnward-t06-sandbox-spike",
+  "private": true,
+  "description": "Pinned sandbox-runtime for the T0.6 spike",
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.81"
+  }
+}

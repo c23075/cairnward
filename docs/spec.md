@@ -136,13 +136,15 @@ The diagram shows the **Strict** configuration. Each box below the policy engine
 Unchanged from v0.5 ([ADR-0005](adr/0005-local-core-service-and-api-hardening.md)): Unix socket for the CLI, loopback-only HTTP for the dashboard with Host allowlist, Origin checks, CSRF tokens, `SameSite=Strict` cookies, strict CSP, no CORS, single-use login links. The model endpoint and MCP proxy accept per-client **API keys** issued by Cairnward (`cairnward client add open-webui`), so the audit log knows which client made each request and each client can have its own policy.
 
 ### 3.2 OS-level egress enforcement (D45, [ADR-0010](adr/0010-os-level-egress-enforcement.md))
-Linux mechanism (same approach as Anthropic's open-source `sandbox-runtime`; reusing it directly is evaluated in task T0.6):
+Linux mechanism: Anthropic's open-source **sandbox-runtime** (`srt`, pinned) wraps bubblewrap, seccomp and filtering proxies; `cairnward-egress` is its parent proxy ([ADR-0013](adr/0013-reuse-sandbox-runtime-for-isolation.md); spike results in `spikes/t06-sandbox/`). Requires Node.js ≥ 22.12 when isolation is on. Details:
 - **Agents and CLI tools** (`cairnward run -- qwen`) run under **bubblewrap** with a **new network namespace that has only a loopback interface**. Inside it, Cairnward's model endpoint, MCP proxy and HTTP(S) proxy are reachable through Unix sockets bridged to loopback ports. `HTTP_PROXY`/`HTTPS_PROXY` point at the bridge. Anything that ignores the proxy settings simply has no route out.
 - Filesystem: the workspace is mounted read-write; the agent's own config directory read-write; everything else read-only or hidden (`~/.ssh`, `~/.aws`, browser profiles, other projects are hidden by default).
 - **Server-style clients** (Open WebUI, LibreChat) run in **Podman/Docker containers on an internal network** whose only member besides the client is Cairnward. Templates (`compose` files) are provided.
 - **Cairnward itself** runs its core in the same kind of namespace, so its own libraries (e.g. Docling or Presidio fetching models) can't bypass the proxy. Model and data downloads go through `cairnward-egress` like everything else and are audited.
 - **What the proxy can see:** host names (from CONNECT / SNI), bytes and timing for all connections. **Content** is visible only for traffic Cairnward originates or terminates itself (model calls, MCP tool calls, research API calls), so **content redaction applies to those**. For third-party tools' own HTTPS connections, policy is host-level allow/ask/deny only. TLS interception with a local CA is possible but off by default and not recommended (it weakens security for the tool).
-- `cairnward doctor` verifies isolation by attempting direct connections from inside each sandbox and expecting failure.
+- **Environment hygiene:** agents start with a clean environment plus only what their profile needs; `no_proxy`/`NO_PROXY` are cleared inside the sandbox (srt sets them to loopback, which would make clients bypass the proxy and fail to reach the gateway).
+- **Allow-list generation:** srt refuses catch-all allow-lists, so Cairnward generates srt's allow-list from the effective policy (gateway address + allowlisted + approved hosts) and updates it live via srt's `--control-fd` when the user approves a host.
+- `cairnward doctor` verifies isolation by attempting direct connections from inside each sandbox and expecting failure, independently of srt.
 
 ---
 
@@ -307,7 +309,7 @@ As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Sc
 |---|---|---|
 | Core | Python 3.12+, FastAPI/Uvicorn, pydantic | MIT / BSD |
 | Egress proxy | Python first (`cairnward-egress`), Rust later | — |
-| Sandbox | bubblewrap (+ Unix-socket bridges; evaluate `sandbox-runtime`), Podman/Docker for server clients | LGPL-2.0+ / Apache-2.0 |
+| Sandbox | sandbox-runtime (`srt`, pinned; bubblewrap + seccomp + proxies; needs Node.js ≥ 22.12), Podman/Docker for server clients | Apache-2.0 / LGPL-2.0+ |
 | Store | SQLite (WAL, FTS5, sqlite-vec), Alembic migrations | Public domain / MIT |
 | Crypto | age via pyrage | MIT / Apache-2.0 |
 | MCP | MCP Python SDK | MIT |
@@ -373,7 +375,7 @@ As v0.5 §10 (pydantic-validated TOML with JSON Schema, Alembic migrations, Open
 0a. Optional: does enabling Ollama flash attention (without KV quantisation) reduce the slowdown in generation speed with context on this CPU? If so, `cairnward doctor` recommends it.
 0. Should the dashboard/endpoint hardening (loopback-only binding, Host/Origin checks) also be switchable? Currently not, because switching it off exposes Cairnward rather than reducing friction (§5.0).
 1. Third tested chat client: LibreChat or AnythingLLM (decide at M2).
-2. Reuse Anthropic's `sandbox-runtime` (Node.js) directly, or reimplement its approach in Python (decide in T0.6, ADR-0013).
+2. ~~Reuse `sandbox-runtime` or reimplement?~~ Decided in T0.6: reuse it ([ADR-0013](adr/0013-reuse-sandbox-runtime-for-isolation.md)).
 3. PaperQA2 as engine or own pipeline (decide in T1.1).
 4. Repo rename to `cairnward` (owner action, with the default-branch fix).
 5. Drive folders for the first mirror (setup time).
