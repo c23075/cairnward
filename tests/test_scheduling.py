@@ -18,18 +18,33 @@ from tests.fakes.backends import FakeOllama
 # ------------------------------------------------------------------ queue and affinity
 
 
+async def _queued(s: Scheduler, backend: str, n: int) -> None:
+    """Wait until n requests are waiting (deterministic: no reliance on timer resolution)."""
+    for _ in range(1000):
+        if s.queued(backend) >= n:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(f"expected {n} waiting requests, have {s.queued(backend)}")
+
+
 async def test_fifo_queue_with_one_slot() -> None:
     s = Scheduler()
     order: list[str] = []
+    release = asyncio.Event()
 
-    async def job(name: str, key: str, hold: float) -> None:
+    async def job(name: str, key: str, gate: asyncio.Event | None = None) -> None:
         async with s.slot("b", key):
             order.append(name)
-            await asyncio.sleep(hold)
+            if gate:
+                await gate.wait()
 
-    first = asyncio.create_task(job("a", "k1", 0.05))
-    await asyncio.sleep(0.01)
-    rest = [asyncio.create_task(job(n, k, 0)) for n, k in (("b", "k2"), ("c", "k3"))]
+    first = asyncio.create_task(job("a", "k1", release))
+    await asyncio.sleep(0)
+    rest = []
+    for n, (name, key) in enumerate((("b", "k2"), ("c", "k3")), start=1):
+        rest.append(asyncio.create_task(job(name, key)))
+        await _queued(s, "b", n)
+    release.set()
     await asyncio.gather(first, *rest)
     assert order == ["a", "b", "c"]
 
@@ -37,23 +52,25 @@ async def test_fifo_queue_with_one_slot() -> None:
 async def test_warm_conversation_goes_first_but_cannot_starve_others() -> None:
     s = Scheduler()
     order: list[str] = []
+    release = asyncio.Event()
 
-    async def job(name: str, key: str) -> None:
+    async def job(name: str, key: str, gate: asyncio.Event | None = None) -> None:
         async with s.slot("b", key):
             order.append(name)
-            await asyncio.sleep(0.01)
+            if gate:
+                await gate.wait()
 
-    first = asyncio.create_task(job("warm-1", "warm"))
-    await asyncio.sleep(0.002)
+    first = asyncio.create_task(job("warm-1", "warm", release))
+    await asyncio.sleep(0)
     tasks = [asyncio.create_task(job("cold-1", "cold"))]
-    await asyncio.sleep(0.002)
+    await _queued(s, "b", 1)
     for i in range(2, 6):
         tasks.append(asyncio.create_task(job(f"warm-{i}", "warm")))
-        await asyncio.sleep(0.001)
+        await _queued(s, "b", i)
+    release.set()
     await asyncio.gather(first, *tasks)
     # warm requests jump ahead (cache is warm), but only 3 in a row; then the cold one runs
-    assert order.index("cold-1") == 3
-    assert order[:3] == ["warm-1", "warm-2", "warm-3"]
+    assert order[:4] == ["warm-1", "warm-2", "warm-3", "cold-1"]
 
 
 async def test_cancelled_waiter_does_not_leak_the_slot() -> None:
@@ -237,7 +254,7 @@ async def test_concurrent_requests_queue(tmp_path: Path) -> None:
     fake = FakeOllama()
 
     async def slow(request: httpx.Request) -> httpx.Response:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
         return fake.handler(request)
 
     client, deps, audit, _ = await make(tmp_path, handler=slow)
@@ -254,6 +271,7 @@ async def test_concurrent_requests_queue(tmp_path: Path) -> None:
     r = await asyncio.gather(req("a"), req("b"))
     assert all(x.status_code == 200 for x in r)
     posts = [x for x in audit.records() if x.phase == "post"]
-    assert max(p.details["queued_s"] for p in posts) >= 0.08  # one waited for the other
+    waits = sorted(p.details["queued_s"] for p in posts)
+    assert waits[0] < 0.1 and waits[1] >= 0.15  # the second waited for the first
     await client.aclose()
     audit.close()

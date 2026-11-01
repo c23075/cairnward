@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -210,7 +211,8 @@ def test_profiles_point_agents_at_the_gateway(tmp_path: Path) -> None:
     assert cfg["model"] == f"cairnward/{model}" and cfg["small_model"] == f"cairnward/{fast}"
     assert cfg["provider"]["cairnward"]["options"] == {"baseURL": base, "apiKey": key}
     assert cfg["autoupdate"] is False and cfg["share"] == "disabled"
-    assert Path(env["OPENCODE_CONFIG"]).stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":
+        assert Path(env["OPENCODE_CONFIG"]).stat().st_mode & 0o777 == 0o600
 
 
 def test_profile_config_written_in_plan(paths: Paths, tmp_path: Path) -> None:
