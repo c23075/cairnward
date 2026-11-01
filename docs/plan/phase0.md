@@ -55,6 +55,8 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 
 **Exit criteria (M1)**: `lit.ask` eval passes with page citations; citation eval shows zero invented references; a review job survives a restart mid-run; picking `cw/coding:low` vs `cw/coding:high` in a client changes model and thinking.
 
+**M1 status (2026-11-01):** all tasks T1.1–T1.11 are implemented and tested. Exit criteria: a review job surviving a restart mid-run is tested (`tests/test_jobs_resume.py`); effort levels changing model and thinking are tested in the gateway tests; the `lit.ask` and citation criteria are measured by `evals/pdf_qa`, which needs the real models and is to be run on the reference machine (owner-side), with results recorded in `docs/bench/`.
+
 ---
 
 ## M2: Security features, dashboard, clients and agents
