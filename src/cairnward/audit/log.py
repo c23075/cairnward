@@ -381,6 +381,8 @@ class AuditLog:
                 problems.append(f"record {row.seq}: unreadable (details are not valid JSON)")
                 prev, expected_seq = row.hash, row.seq + 1
                 continue
+            if row.details != canonical(r.details):
+                problems.append(f"record {r.seq}: stored details were edited (not in written form)")
             records.append(r)
             by_seq[r.seq] = r
             if r.seq != expected_seq:

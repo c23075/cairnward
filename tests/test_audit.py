@@ -142,6 +142,14 @@ def test_deleted_record_detected(log: AuditLog) -> None:
     assert "record 2: missing" in problems and "does not link" in problems
 
 
+@pytest.mark.parametrize("suffix", [" ", "\n", "\t"])
+def test_whitespace_added_to_stored_details_detected(log: AuditLog, suffix: str) -> None:
+    """Found by the property test: JSON ignores trailing whitespace, verify must not."""
+    fill(log)
+    sql(log, "UPDATE records SET details = details || :s WHERE seq = 2", s=suffix)
+    assert any("record 2: stored details were edited" in p for p in log.verify().problems)
+
+
 def test_edited_mirror_detected(log: AuditLog) -> None:
     fill(log)
     lines = log.mirror.read_text().splitlines()

@@ -43,6 +43,9 @@ Reuse srt, pinned to an exact version with a lockfile (integrity hashes), and up
 - **Ask mode (`network = "ask"`):** start with the CLI (option 2), where unknown hosts are refused by srt and surfaced from srt's debug output as "blocked; approve?" in the inbox. Move to the library shim (option 3) with an `askCallback` that queries Cairnward's approvals API, if the CLI path proves too coarse. Also evaluate `srt proxy` with an external decider (docs/srt-proxy.md in the srt repo) for the egress side in T0.9.
 - **Environment:** `cairnward run` starts the agent with a clean environment plus only what its profile needs, and clears `no_proxy`.
 
+## Follow-up (T0.9, 2026-11-01)
+Verified with the real `cairnward egress`: srt passes the credentials in its parent `HTTPS_PROXY` URL through, so connections arrive with the session token and are attributed to the right environment/client/run. A host on srt's list but not allowed by Cairnward's policy is refused and audited by Cairnward; a host refused by srt never reaches Cairnward.
+
 ## Consequences
 - **Node.js ≥ 22.12 is required when `isolation = on`.** Debian 13 ships Node 20, so users install Node 22 (NodeSource packages, nvm/fnm, or the official tarball). `cairnward doctor` checks this; with isolation off, Node isn't needed.
 - Linux prerequisites checked by `cairnward doctor`: bubblewrap, socat, ripgrep (srt uses it to find git hooks/config to protect), unprivileged user namespaces (and `kernel.apparmor_restrict_unprivileged_userns=0` on Ubuntu 24.04+), non-root user preferred.

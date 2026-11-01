@@ -55,6 +55,7 @@ class ServerConfig(_Strict):
     gateway_port: int = Field(default=8484, ge=1, le=65535)
     dashboard_host: str = Field(default="127.0.0.1", description="loopback only")
     dashboard_port: int = Field(default=8485, ge=1, le=65535)
+    egress_port: int = Field(default=8486, ge=1, le=65535, description="cairnward-egress proxy")
 
     @field_validator("gateway_host", "dashboard_host")
     @classmethod
@@ -69,9 +70,19 @@ class ServerConfig(_Strict):
 
     @model_validator(mode="after")
     def _distinct_ports(self) -> ServerConfig:
-        if self.gateway_port == self.dashboard_port:
-            raise ValueError("gateway_port and dashboard_port must differ")
+        ports = [self.gateway_port, self.dashboard_port, self.egress_port]
+        if len(set(ports)) != len(ports):
+            raise ValueError("gateway_port, dashboard_port and egress_port must all differ")
         return self
+
+
+class EgressConfig(_Strict):
+    max_connections: int = Field(default=64, ge=1, le=4096)
+    connect_timeout_s: int = Field(default=15, ge=1, le=300)
+    idle_timeout_s: int = Field(default=300, ge=5, le=86400)
+    approval_timeout_s: int = Field(
+        default=120, ge=1, le=3600, description="an unanswered approval becomes a deny"
+    )
 
 
 class Defaults(_Strict):
@@ -84,6 +95,7 @@ class MainConfig(_Strict):
 
     schema_version: Literal[1] = SCHEMA_VERSION
     server: ServerConfig = ServerConfig()
+    egress: EgressConfig = EgressConfig()
     privacy: PrivacyOverrides = PrivacyOverrides()
     defaults: Defaults = Defaults()
 

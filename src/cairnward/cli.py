@@ -72,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--by", choices=["user", "model"], default="model", help="who starts it (default: model)"
     )
 
+    egress = sub.add_parser("egress", help="run cairnward-egress, the outbound proxy (foreground)")
+    egress.add_argument("--env", help="environment for the printed session (default: default env)")
+    egress.add_argument("--client", help="client name to attribute traffic to")
+    egress.add_argument("--port", type=int, help="port (default: [server] egress_port)")
+
     store = sub.add_parser("store", help="local storage (vault and keys)")
     store_sub = store.add_subparsers(dest="store_command", metavar="ACTION", required=True)
     store_sub.add_parser("info", help="database files, schema versions and counts")
@@ -233,6 +238,44 @@ def _cmd_policy_explain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_egress(args: argparse.Namespace) -> int:
+    import asyncio
+
+    from cairnward.audit import AuditLog, enabled_for, record_settings
+    from cairnward.egress import EgressProxy, Session, Sessions
+    from cairnward.policy import DenyApprover, PolicyEngine, TerminalApprover
+
+    cfg = _load(args)
+    env = args.env or cfg.main.defaults.environment
+    if env not in cfg.environments:
+        print(f"Unknown environment '{env}'", file=sys.stderr)
+        return 2
+    approver = TerminalApprover() if sys.stdin.isatty() else DenyApprover()
+    with AuditLog.open(cfg.paths, enabled_for(cfg)) as log:
+        record_settings(cfg, log)
+        engine = PolicyEngine(cfg, approver=approver, audit=log)
+        sessions = Sessions()
+        token = sessions.create(Session(environment=env, client=args.client, actor="user"))
+        proxy = EgressProxy(cfg, engine, sessions, port=args.port)
+
+        async def run() -> None:
+            port = await proxy.start()
+            print(f"cairnward-egress listening on 127.0.0.1:{port} "
+                  f"(environment '{env}', {cfg.privacy(env).label})", file=sys.stderr)  # fmt: skip
+            print("Use this proxy setting (keep the token private):", file=sys.stderr)
+            print(f"  export HTTPS_PROXY=http://cw:{token}@127.0.0.1:{port}", file=sys.stderr)
+            print(f"  export HTTP_PROXY=http://cw:{token}@127.0.0.1:{port}", file=sys.stderr)
+            if not sys.stdin.isatty():
+                print("No terminal: requests that need approval are denied.", file=sys.stderr)
+            await proxy.serve_forever()
+
+        try:
+            asyncio.run(run())
+        except KeyboardInterrupt:
+            print("\nstopped", file=sys.stderr)
+    return 0
+
+
 def _privacy_dict(eff: EffectivePrivacy) -> dict[str, object]:
     return {
         "environment": eff.environment,
@@ -318,6 +361,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_audit(args)
         if args.command == "policy":
             return _cmd_policy_explain(args)
+        if args.command == "egress":
+            return _cmd_egress(args)
     except ConfigError as exc:
         print("Configuration problems:", file=sys.stderr)
         for problem in exc.problems:

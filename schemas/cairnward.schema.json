@@ -17,6 +17,42 @@
       "title": "Defaults",
       "type": "object"
     },
+    "EgressConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "approval_timeout_s": {
+          "default": 120,
+          "description": "an unanswered approval becomes a deny",
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Approval Timeout S",
+          "type": "integer"
+        },
+        "connect_timeout_s": {
+          "default": 15,
+          "maximum": 300,
+          "minimum": 1,
+          "title": "Connect Timeout S",
+          "type": "integer"
+        },
+        "idle_timeout_s": {
+          "default": 300,
+          "maximum": 86400,
+          "minimum": 5,
+          "title": "Idle Timeout S",
+          "type": "integer"
+        },
+        "max_connections": {
+          "default": 64,
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Max Connections",
+          "type": "integer"
+        }
+      },
+      "title": "EgressConfig",
+      "type": "object"
+    },
     "PrivacyOverrides": {
       "additionalProperties": false,
       "description": "A `[privacy]` table: an optional preset plus optional individual settings.",
@@ -274,6 +310,14 @@
           "title": "Dashboard Port",
           "type": "integer"
         },
+        "egress_port": {
+          "default": 8486,
+          "description": "cairnward-egress proxy",
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Egress Port",
+          "type": "integer"
+        },
         "gateway_host": {
           "default": "127.0.0.1",
           "description": "loopback only",
@@ -318,6 +362,15 @@
         "environment": "coding"
       }
     },
+    "egress": {
+      "$ref": "#/$defs/EgressConfig",
+      "default": {
+        "approval_timeout_s": 120,
+        "connect_timeout_s": 15,
+        "idle_timeout_s": 300,
+        "max_connections": 64
+      }
+    },
     "privacy": {
       "$ref": "#/$defs/PrivacyOverrides",
       "default": {
@@ -348,6 +401,7 @@
       "default": {
         "dashboard_host": "127.0.0.1",
         "dashboard_port": 8485,
+        "egress_port": 8486,
         "gateway_host": "127.0.0.1",
         "gateway_port": 8484,
         "socket_path": null

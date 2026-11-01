@@ -139,7 +139,7 @@ class PolicyEngine:
 
     # ------------------------------------------------------------------ rules
 
-    def _privacy(self, action: Action) -> EffectivePrivacy:
+    def privacy_for(self, action: Action) -> EffectivePrivacy:
         env = action.environment if action.environment in self.config.environments else None
         return self.config.privacy(env)
 
@@ -163,7 +163,7 @@ class PolicyEngine:
         )
 
     def rule_for(self, action: Action) -> Rule:
-        eff = self._privacy(action)
+        eff = self.privacy_for(action)
         kind, target = action.kind, action.target
 
         if kind in USER_ONLY:
@@ -224,7 +224,7 @@ class PolicyEngine:
 
     def check(self, action: Action, *, dry_run: bool = False) -> Decision:
         """Decide; asks the approver when needed (unless dry_run)."""
-        eff = self._privacy(action)
+        eff = self.privacy_for(action)
         rule = self.rule_for(action)
         advisory = eff.value("isolation") == "off" and action.kind in ("net.connect", "fs.write")
 
@@ -260,17 +260,11 @@ class PolicyEngine:
             "deny", reason=f"{rule.reason}: not approved", asked=True, approved_by=answer.by
         )
 
-    # ------------------------------------------------------------------ guard
+    # ------------------------------------------------------------------ audit helpers
 
-    @contextmanager
-    def guard(self, action: Action, *, params: bytes | str | None = None) -> Iterator[Effect]:
-        """Check, record the decision, and run the block only if allowed.
-
-        Denied: one audit event (`decision = deny`), then PolicyDenied.
-        Allowed: pre record (with decision and how it was approved), the block, post record.
-        """
-        decision = self.check(action)
-        details = {
+    def _details(self, decision: Decision) -> dict[str, Any]:
+        action = decision.action
+        return {
             "risk": decision.risk,
             "reason": decision.reason,
             "asked": decision.asked,
@@ -281,18 +275,70 @@ class PolicyEngine:
             "provenance": list(action.provenance),
             **action.details,
         }
-        common: dict[str, Any] = dict(
+
+    @staticmethod
+    def _common(action: Action) -> dict[str, Any]:
+        return dict(
             actor=action.actor, target=action.target, environment=action.environment,
             client=action.client, run_id=action.run_id, conversation_id=action.conversation_id,
         )  # fmt: skip
+
+    def audit_deny(self, decision: Decision) -> None:
+        """One `deny` event for a refused action."""
+        if self.audit:
+            action = decision.action
+            self.audit.append(
+                action.kind, phase="event", decision="deny",
+                details=self._details(decision), **self._common(action),
+            )  # fmt: skip
+
+    def audit_pre(self, decision: Decision, params: bytes | str | None = None) -> int | None:
+        """The `pre` record of an allowed action; returns its seq for `audit_post`."""
+        if not self.audit:
+            return None
+        from cairnward.audit.log import digest
+
+        rec = self.audit.append(
+            decision.action.kind, phase="pre", decision="allow",
+            params_digest=digest(params) if params is not None else None,
+            details=self._details(decision), **self._common(decision.action),
+        )  # fmt: skip
+        return rec.seq if rec else None
+
+    def audit_post(
+        self,
+        action: Action,
+        pre_seq: int | None,
+        *,
+        outcome: str,
+        result_digest: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        if self.audit:
+            self.audit.append(action.kind, phase="post", outcome=outcome, pre_seq=pre_seq,
+                              result_digest=result_digest, details=details or {},
+                              **self._common(action))  # fmt: skip
+
+    # ------------------------------------------------------------------ guard
+
+    @contextmanager
+    def guard(self, action: Action, *, params: bytes | str | None = None) -> Iterator[Effect]:
+        """Check, record the decision, and run the block only if allowed.
+
+        Denied: one audit event (`decision = deny`), then PolicyDenied.
+        Allowed: pre record (with decision and how it was approved), the block, post record.
+        """
+        decision = self.check(action)
         if not decision.allowed:
-            if self.audit:
-                self.audit.append(action.kind, phase="event", decision="deny", details=details,
-                                  **common)  # fmt: skip
+            self.audit_deny(decision)
             raise PolicyDenied(decision)
-        if self.audit is None:
-            yield Effect()
-            return
-        with self.audit.effect(action.kind, decision="allow", params=params, details=details,
-                               **common) as eff:  # fmt: skip
+        pre_seq = self.audit_pre(decision, params)
+        eff = Effect()
+        try:
             yield eff
+        except BaseException as exc:
+            self.audit_post(action, pre_seq, outcome="error",
+                            details={**eff.details, "error": type(exc).__name__})  # fmt: skip
+            raise
+        self.audit_post(action, pre_seq, outcome="ok", result_digest=eff.result_digest,
+                        details=eff.details)  # fmt: skip

@@ -212,6 +212,8 @@ location = "hosted"
 def test_server_ports_and_loopback() -> None:
     with pytest.raises(ValueError):
         ServerConfig(gateway_port=9000, dashboard_port=9000)
+    with pytest.raises(ValueError):
+        ServerConfig(egress_port=8484)
     assert ServerConfig(dashboard_host="::1").dashboard_host == "::1"
 
 
