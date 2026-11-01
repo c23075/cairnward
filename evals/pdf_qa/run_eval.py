@@ -6,7 +6,8 @@ so it uses your configured models), and scores each answer:
 - cited: at least one source, and the expected file AND page among them;
 - content: the expected keywords appear in the answer;
 - honest: unanswerable questions get "I can't answer this from these sources";
-- invented: citations to passages that weren't given (must be zero).
+- invented: citations to passages that weren't given, and quotations not found in the
+  papers (must be zero; this is also the citation-existence check, FR-RES-5).
 
 Usage (after `cairnward serve`, with the litreview-offline models pulled):
     uv run python evals/pdf_qa/run_eval.py [--env litreview-offline] [--keep]
@@ -62,8 +63,12 @@ def cw(*args: str) -> subprocess.CompletedProcess[str]:
 
 def score(q: dict[str, Any], a: dict[str, Any]) -> dict[str, Any]:
     exp = q["expect"]
-    res: dict[str, Any] = {"id": q["id"], "invented": len(a.get("invalid_citations", [])),
-                           "seconds": round(a.get("seconds", 0), 1)}  # fmt: skip
+    res: dict[str, Any] = {
+        "id": q["id"],
+        # invented citations and quotations not found in the papers (FR-RES-5)
+        "invented": len(a.get("invalid_citations", [])) + len(a.get("quote_problems", [])),
+        "seconds": round(a.get("seconds", 0), 1),
+    }
     if exp.get("unanswerable"):
         res["honest"] = bool(a.get("cannot_answer"))
         res["pass"] = res["honest"] and not res["invented"]

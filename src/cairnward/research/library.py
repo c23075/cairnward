@@ -192,6 +192,22 @@ class Research:
                 )
             )
 
+    def chunk_rows(self, name: str, document_ids: list[int] | None = None) -> list[Any]:
+        """(document_id, title, path, page_start, page_end, text) of a library's searchable
+        chunks, in reading order (for quotation checks)."""
+        lib = self.get(name)
+        query = (
+            select(chunks.c.document_id, documents.c.title, documents.c.path,
+                   chunks.c.page_start, chunks.c.page_end, chunks.c.text)
+            .join(documents, documents.c.id == chunks.c.document_id)
+            .where(documents.c.library_id == lib.id, documents.c.status == "indexed")
+            .order_by(chunks.c.document_id, chunks.c.seq)
+        )  # fmt: skip
+        if document_ids is not None:
+            query = query.where(chunks.c.document_id.in_(document_ids))
+        with self._db.connect() as conn:
+            return list(conn.execute(query))
+
     # ------------------------------------------------------------------ vectors
 
     @staticmethod

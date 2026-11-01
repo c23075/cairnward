@@ -252,6 +252,10 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("-k", type=int, default=8, help="passages to give the model (default 8)")
     la.add_argument("--effort", help="effort level (default: the environment's)")
     la.add_argument("--json", action="store_true")
+    lk = lib_sub.add_parser("check", help="check a draft's quotations and references")
+    lk.add_argument("name")
+    lk.add_argument("draft", type=Path, help="a Markdown or text file")
+    lk.add_argument("--json", action="store_true")
     lr = lib_sub.add_parser("remove", help="delete a library's index (the PDFs stay)")
     lr.add_argument("name")
 
@@ -1129,6 +1133,32 @@ def _cmd_library(args: argparse.Namespace) -> int:
                 return 0
             if cmd == "ask":
                 return _library_ask(cfg, research, args)
+            if cmd == "check":
+                from cairnward.research.check import check_draft
+
+                draft_report = check_draft(
+                    research, args.name, args.draft.read_text(encoding="utf-8")
+                )
+                if args.json:
+                    print(json.dumps(draft_report.as_dict(), indent=2))
+                    return 1 if draft_report.problems else 0
+                for q in draft_report.quotes:
+                    mark = "ok " if q.ok else "BAD"
+                    print(
+                        f'[{mark}] quote "{q.quote[:70]}" '
+                        + (f"-> {q.where}" if q.where else "not found in the library")
+                    )
+                for r in draft_report.references:
+                    mark = {"in_library": "ok ", "doi_unverified": "doi", "not_found": "BAD"}[
+                        r.status
+                    ]
+                    print(
+                        f"[{mark}] reference {r.entry[:70]}" + (f" -> {r.match}" if r.match else "")
+                    )
+                if not draft_report.quotes and not draft_report.references:
+                    print("no quotations or References section found")
+                print(f"{draft_report.problems} problem(s)")
+                return 1 if draft_report.problems else 0
             lib = research.get(args.name)
             embedder, audit, backends = _embedder(cfg, lib.environment)
             try:

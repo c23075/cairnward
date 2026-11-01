@@ -122,6 +122,10 @@ Ask a question; the answer cites passages as [n] with file and page, and says so
 ```bash
 uv run cairnward library ask thesis "Does longer sleep improve working memory?"
 ```
+Check a draft's quotations and references against the library:
+```bash
+uv run cairnward library check thesis draft.md
+```
 Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
 ## Important: Ollama can still be reached directly

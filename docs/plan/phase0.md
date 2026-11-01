@@ -45,7 +45,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T1.2 | PDF library (pypdfium2), chunking, embeddings (sqlite-vec) | FR-RES-1 | T1.1 | M ✅ (research.db; ~350-token page-aware chunks; hybrid vector + keyword search; resumable indexing; scanned/broken PDFs flagged; `cairnward library` commands) |
 | T1.3 | `lit.ask` with page citations | FR-RES-2 | T1.2 | M ✅ (CLI, management API, MCP tool; citation mapping and checks; `evals/pdf_qa` to run with real models) |
 | T1.4 | Job queue: persistent, resumable, schedulable; progress in CLI | FR-RES-3 | M0 | M |
-| T1.5 | Citation and quotation check | FR-RES-5 | T1.2 | M |
+| T1.5 | Citation and quotation check | FR-RES-5 | T1.2 | M ✅ (answers and drafts; references by title, DOIs form-checked offline) |
 | T1.6 | CSL formatting (APA, IEEE) | FR-RES-6 | — | S |
 | T1.7 | Virtual models (environment × effort), `effort.toml`, environments | FR-GW-3, FR-BACK-2, FR-BACK-3 | M0 | M |
 | T1.8 | Vault conversation reconstruction (prefix hashing, branches) | FR-VLT-2 | M0 | M |

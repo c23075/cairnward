@@ -55,6 +55,7 @@ class Answer:
     sources: list[Source] = field(default_factory=list)  # cited passages, in citation order
     passages: int = 0  # passages given to the model
     invalid_citations: list[int] = field(default_factory=list)
+    quote_problems: list[str] = field(default_factory=list)  # FR-RES-5
     cannot_answer: bool = False
     uncited: bool = False
     model: str = ""
@@ -73,6 +74,8 @@ class Answer:
         if self.invalid_citations:
             lines.append("Note: removed citations to passages that weren't given: "
                          + ", ".join(f"[{n}]" for n in self.invalid_citations))  # fmt: skip
+        for problem in self.quote_problems:
+            lines.append(f"Check: {problem}")
         if self.uncited and not self.cannot_answer:
             lines.append("Warning: the answer cites no passage; don't rely on it.")
         return "\n".join(lines).rstrip() + "\n"
@@ -152,7 +155,24 @@ async def ask(
         text = re.sub(rf"\[{n}\]", "[?]", text)
     answer.text = text
     answer.uncited = not answer.sources
+    answer.quote_problems = quote_problems(research, library, text, hits)
     return answer
+
+
+def quote_problems(research: Research, library: str, text: str, hits: list[Hit]) -> list[str]:
+    from cairnward.research.check import check_answer_quotes
+
+    if '"' not in text and "\u201c" not in text:
+        return []
+    rows = research.chunk_rows(library, sorted({h.document_id for h in hits}))
+    out = []
+    for q in check_answer_quotes(text, hits, rows):
+        short = q.quote if len(q.quote) <= 80 else q.quote[:77] + "..."
+        if q.status == "same_paper":
+            out.append(f'"{short}" is in {q.where}, not in the passage cited')
+        elif q.status == "not_found":
+            out.append(f'"{short}" was not found in the papers')
+    return out
 
 
 async def run_ask(
