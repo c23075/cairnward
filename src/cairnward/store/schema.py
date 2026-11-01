@@ -2,6 +2,7 @@
 
 vault.db  conversations, messages, folders. Content and titles are encrypted per
           conversation (age) unless crypto-shredding is switched off.
+audit.db  the hash-chained audit log (metadata and digests only, never content).
 keys.db   one key per conversation. Kept separate and small so a purged key can be
           deleted and the file compacted quickly (crypto-shredding, ADR-0006).
 
@@ -26,6 +27,7 @@ from sqlalchemy import (
 
 VAULT_METADATA = MetaData()
 KEYS_METADATA = MetaData()
+AUDIT_METADATA = MetaData()
 
 folders = Table(
     "folders",
@@ -85,4 +87,29 @@ conversation_keys = Table(
     Column("kind", String(8), nullable=False),  # "plain" now; "wrapped" when locked (M2)
     Column("key", LargeBinary, nullable=False),
     Column("created_at", String(32), nullable=False),
+)
+
+audit_records = Table(
+    "records",
+    AUDIT_METADATA,
+    Column("seq", Integer, primary_key=True, autoincrement=False),
+    Column("ts", String(32), nullable=False),
+    Column("actor", Text, nullable=False),  # user | client:<name> | agent:<name> | cairnward
+    Column("action", Text, nullable=False),  # e.g. model.call, tool.call, net.connect
+    Column("phase", String(8), nullable=False),  # pre | post | event
+    Column("target", Text),
+    Column("decision", String(8)),  # allow | ask | deny | None
+    Column("outcome", String(8)),  # ok | error | None (post records)
+    Column("environment", Text),
+    Column("client", Text),
+    Column("run_id", Text),
+    Column("conversation_id", Text),
+    Column("pre_seq", Integer),  # post records point at their pre record
+    Column("params_digest", String(64)),
+    Column("result_digest", String(64)),
+    Column("details", Text, nullable=False),  # canonical JSON, metadata only
+    Column("prev_hash", String(64), nullable=False),
+    Column("hash", String(64), nullable=False, unique=True),
+    Index("ix_records_action", "action"),
+    Index("ix_records_conversation", "conversation_id"),
 )

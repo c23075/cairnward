@@ -41,6 +41,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--check", action="store_true", help="only check that the folder is up to date"
     )
 
+    audit = sub.add_parser("audit", help="the hash-chained audit log")
+    audit_sub = audit.add_subparsers(dest="audit_command", metavar="ACTION", required=True)
+    verify = audit_sub.add_parser("verify", help="check the chain and the mirror file")
+    verify.add_argument(
+        "--expect",
+        action="append",
+        default=[],
+        metavar="SEQ:HASH",
+        help="a head you noted earlier (from `audit head`); repeatable",
+    )
+    audit_sub.add_parser(
+        "head", help="print the latest record as SEQ:HASH (note it somewhere safe)"
+    )
+    log_cmd = audit_sub.add_parser("log", help="show records")
+    log_cmd.add_argument("--last", type=int, default=20, help="number of records (default 20)")
+    log_cmd.add_argument("--action", help="only this action, e.g. settings.changed")
+    log_cmd.add_argument("--conversation", help="only records for this conversation")
+    log_cmd.add_argument("--json", action="store_true", help="one JSON record per line")
+
     store = sub.add_parser("store", help="local storage (vault and keys)")
     store_sub = store.add_subparsers(dest="store_command", metavar="ACTION", required=True)
     store_sub.add_parser("info", help="database files, schema versions and counts")
@@ -77,6 +96,19 @@ def _cmd_config_check(args: argparse.Namespace) -> int:
     print(f"Environments: {', '.join(sorted(cfg.environments))}")
     print(f"Clients:      {', '.join(cfg.clients.clients) or '(none)'}")
     print(f"Privacy:      {cfg.privacy().label} (global)")
+
+    from cairnward.audit import AuditLog, enabled_for, record_settings
+
+    with AuditLog.open(cfg.paths, enabled_for(cfg)) as log:
+        sync = record_settings(cfg, log)
+    if sync.first_snapshot:
+        print("Audit:        first settings snapshot recorded")
+    if sync.enabled_after_gap_s is not None:
+        print(f"Audit:        re-enabled after {sync.enabled_after_gap_s:.0f} s off (recorded)")
+    if sync.changes:
+        print(f"Audit:        {len(sync.changes)} settings change(s) recorded")
+    if sync.disabled:
+        print("Audit:        audit = off: recorded 'audit.disabled'; nothing more will be logged")
     return 0
 
 
@@ -110,6 +142,51 @@ def _cmd_store_info(args: argparse.Namespace) -> int:
             print(f"{name:6} {path}  {size / 1024:.0f} KiB  schema {rev} ({state})")
         for key, value in vault.stats().items():
             print(f"{key:14} {value}")
+    return 0
+
+
+def _parse_expect(values: list[str]) -> list[tuple[int, str]]:
+    out = []
+    for v in values:
+        seq, _, h = v.partition(":")
+        if not seq.isdigit() or len(h) != 64:
+            raise SystemExit(f"--expect needs SEQ:HASH as printed by `audit head` (got {v!r})")
+        out.append((int(seq), h))
+    return out
+
+
+def _cmd_audit(args: argparse.Namespace) -> int:
+    from cairnward.audit import AuditLog
+
+    paths = default_paths(args.config_dir)
+    with AuditLog.open(paths) as log:
+        if args.audit_command == "head":
+            seq, h = log.head()
+            print(f"{seq}:{h}")
+            return 0
+        if args.audit_command == "verify":
+            res = log.verify(_parse_expect(args.expect))
+            for note in res.notes:
+                print(f"note: {note}")
+            if res.ok:
+                print(f"OK: {res.records} records, chain and mirror intact.")
+                print(f"Head {res.head_seq}:{res.head_hash}")
+                return 0
+            print(
+                f"FAILED: {len(res.problems)} problem(s) in {res.records} records", file=sys.stderr
+            )
+            for p in res.problems:
+                print(f"  - {p}", file=sys.stderr)
+            return 1
+        records = log.records(action=args.action, conversation_id=args.conversation, last=args.last)
+        for r in records:
+            if args.json:
+                print(r.to_json_line())
+                continue
+            bits = [r.phase, r.decision or "", r.outcome or "", r.target or ""]
+            where = " ".join(b for b in bits if b)
+            scope = f" [{r.environment}]" if r.environment else ""
+            print(f"{r.seq:>6} {r.ts} {r.actor:16} {r.action:20} {where}{scope}")
     return 0
 
 
@@ -194,6 +271,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_privacy_show(args)
         if args.command == "store":
             return _cmd_store_info(args)
+        if args.command == "audit":
+            return _cmd_audit(args)
     except ConfigError as exc:
         print("Configuration problems:", file=sys.stderr)
         for problem in exc.problems:

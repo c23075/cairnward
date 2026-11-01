@@ -11,11 +11,15 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, MetaData, create_engine, event, text
 
-from cairnward.store.schema import KEYS_METADATA, VAULT_METADATA
+from cairnward.store.schema import AUDIT_METADATA, KEYS_METADATA, VAULT_METADATA
 
-DbName = Literal["vault", "keys"]
+DbName = Literal["vault", "keys", "audit"]
 MIGRATIONS = Path(__file__).parent / "migrations"
-METADATA: dict[DbName, MetaData] = {"vault": VAULT_METADATA, "keys": KEYS_METADATA}
+METADATA: dict[DbName, MetaData] = {
+    "vault": VAULT_METADATA,
+    "keys": KEYS_METADATA,
+    "audit": AUDIT_METADATA,
+}
 
 # WAL for concurrency; FULL sync so a power cut can't lose committed data (NFR-R1);
 # secure_delete overwrites deleted rows in the file (crypto-shredding, best effort on SSDs).

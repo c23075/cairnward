@@ -14,10 +14,10 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T0.2 | Benchmark script; run on reference machine; record results in `docs/bench/` | NFR-P3 | — | S ✅ (results 2026-11-01; optional flash-attention test pending) |
 | T0.3 | Rename package to `cairnward`; Apache-2.0 LICENSE | D51 | — | S ✅ |
 | T0.4 | Config: pydantic models for `cairnward.toml`, `backends.toml`, `clients.toml`; JSON Schema export | spec §11 | T0.3 | S ✅ |
-| T0.4b | Privacy settings model: `[privacy]` table, presets, environment overrides, `privacy show`, settings-change audit hooks; CI matrix over presets | FR-PRIV-1, FR-PRIV-2, FR-PRIV-4, FR-PRIV-6 | T0.4 | M (partial ✅: settings, presets, overrides, `privacy show`; audit hooks wait for T0.7, CI preset matrix for features that exist) |
+| T0.4b | Privacy settings model: `[privacy]` table, presets, environment overrides, `privacy show`, settings-change audit hooks; CI matrix over presets | FR-PRIV-1, FR-PRIV-2, FR-PRIV-4, FR-PRIV-6 | T0.4 | M (✅ settings, presets, overrides, `privacy show`, settings-change audit records; CI preset matrix once features exist) |
 | T0.5 | Store: SQLite (WAL) + Alembic baseline; vault tables; per-conversation age keys | FR-VLT-1, FR-ENC-5 (partial) | T0.4 | M ✅ (vault.db + keys.db; trash/purge with crypto-shredding; `store info`) |
 | T0.6 | **Sandbox spike:** bubblewrap + loopback-only netns + Unix-socket bridges; decide reuse of `sandbox-runtime` vs own implementation (ADR-0013) | FR-ISO-1 | T0.3 | M ✅ reuse srt; 13/13 checks + chaining pass; CI job `isolation-spike` |
-| T0.7 | Audit log: hash chain, `AuditSink`, `cairnward audit verify` | FR-AUD-1, FR-AUD-2 | T0.5 | M |
+| T0.7 | Audit log: hash chain, `AuditSink`, `cairnward audit verify` | FR-AUD-1, FR-AUD-2 | T0.5 | M ✅ (audit.db + audit.jsonl mirror; pre/post `effect()` API; `audit verify/head/log`; settings-change records incl. `audit.disabled`/`enabled`) |
 | T0.8 | Policy engine skeleton (`allow/ask/deny`, default rules, CLI approval prompt) | FR-POL-1 | T0.7 | M |
 | T0.9 | `cairnward-egress`: HTTP(S) CONNECT proxy, host allowlist, connection log; network off by default | FR-NET-1 | T0.8 | M |
 | T0.10 | Backend drivers (`ollama`, `openai_compat`) with fake servers for tests | FR-BACK-1 | T0.4 | M |
