@@ -1,6 +1,6 @@
 # Cairnward requirements
 
-Status: Draft v0.3 (goes with spec v0.7: all protections optional; v0.1 described the all-in-one design and is in git history)
+Status: Draft v0.4 (goes with spec v0.8; v0.3 went with spec v0.7: all protections optional; v0.1 described the all-in-one design and is in git history)
 
 All security requirements below describe what each protection does **when it is switched on**; FR-PRIV-* require that each can be switched off.
 
@@ -32,6 +32,11 @@ All security requirements below describe what each protection does **when it is 
 | FR-GW-4 | Per-client, per-run and per-environment budgets (tokens, requests, time) | M | M2 | `test_budgets.py` |
 | FR-GW-5 | Context warning: request expected to need > 60 s prompt processing is flagged (dashboard + optional rejection) | S | M2 | unit with benchmark profile |
 | FR-GW-6 | Ollama-compatible endpoint | W | L | — |
+| FR-GW-7 | Gateway never modifies a conversation's prompt prefix (additions go at the end) | M | M0 | `test_prefix_stability.py` (byte-identical prefixes across turns) |
+| FR-GW-8 | Conversation affinity, keep-alive while active, unload after idle | M | M1 | integration with fake backend tracking cache hits |
+| FR-GW-9 | KV-cache save/restore per conversation with llama.cpp slots | S | M2 | integration with llama-server |
+| FR-GW-10 | Memory check before loading a model (size + context vs available RAM); warn or queue | M | M1 | unit with mocked meminfo |
+| FR-GW-11 | Waiting-time estimate from stored benchmark profile; `cairnward bench` imports/re-runs the profile | M | M1 | unit |
 | FR-BACK-1 | Ollama and OpenAI-compatible backend drivers (streaming, tools, embeddings, health) | M | M0 | integration with fake servers; manual against real Ollama + llama-server |
 | FR-BACK-2 | Backends in `backends.toml`; model per role; override order run → client → environment → global | M | M1 | `test_backend_resolution.py` |
 | FR-BACK-3 | Fallback only to local backends, logged | M | M1 | `test_backend_fallback.py` |
@@ -71,7 +76,7 @@ All security requirements below describe what each protection does **when it is 
 ### Coding agents
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-AGT-1 | Profiles for Qwen Code, opencode, Aider, Goose + a generic OpenAI-compatible profile | M | M2 (first one in M0) | compatibility tests with fake model server |
+| FR-AGT-1 | Profiles for Aider (first, M0), Qwen Code, opencode, Goose + a generic OpenAI-compatible profile; each profile records its typical prompt size and is flagged when it exceeds the virtual model's context or the 60 s threshold | M | M2 (Aider in M0) | compatibility tests with fake model server |
 | FR-AGT-2 | Workspace snapshots before/after each run on hidden refs; `runs diff`, `runs revert` | M | M1 | `test_run_snapshots.py` |
 | FR-AGT-3 | All model/tool calls of a run linked to the run in audit and vault | M | M0 | integration |
 
@@ -98,7 +103,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-RES-1 | PDF library from a local folder (pypdfium2 default; Docling optional worker), chunks, embeddings | M | M1 | integration |
 | FR-RES-2 | `lit.ask`: answers with page citations | M | M1 | eval `evals/pdf_qa` |
 | FR-RES-3 | Research jobs: queue, progress, resumable after restart, schedulable | M | M1 | `test_jobs_resume.py` |
-| FR-RES-4 | Review pipeline: screen → extract → synthesise → comparison table + `.bib` | M | M3 | eval `evals/litreview_table` |
+| FR-RES-4 | Review pipeline: screen (fast model, abstracts) → extract (main model, full text) → synthesise → comparison table + `.bib`; work grouped by model; estimated finish time | M | M3 | eval `evals/litreview_table` |
 | FR-RES-5 | Citation check: every reference resolves; every quotation matches PDF text | M | M1 | eval `evals/citation_existence` (zero invented) |
 | FR-RES-6 | CSL formatting; APA and IEEE shipped; `.csl` adds styles | M | M1 | golden tests |
 | FR-RES-7 | Zotero via local API | S | M3 | fake Zotero API |
@@ -158,7 +163,8 @@ All security requirements below describe what each protection does **when it is 
 | ID | Requirement | Pri | Verification |
 |---|---|---|---|
 | NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | benchmark test with fake backend |
-| NFR-P3 | *Provisional:* main model first token ≤ 10 s for 2K-token prompt (warm) on reference machine | S | `scripts/bench_backend.py` |
+| NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | benchmark `--cache-test` through the gateway |
+| NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | benchmark through the gateway |
 | NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | CI measurement |
 | NFR-R1 | No data loss on crash; research jobs resumable | M | kill tests |
 | NFR-R2 | Audit record before every effect | M | FR-AUD-1 |

@@ -11,7 +11,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | # | Task | Reqs | Depends | Size |
 |---|---|---|---|---|
 | T0.1 | Project setup: uv, ruff, mypy strict, pytest, CI (Debian 12, Ubuntu, Windows unit tests), pip-audit, Dependabot | NFR-MAINT-1, NFR-SUP-1 | — | S ✅ |
-| T0.2 | Benchmark script; run on reference machine; commit results to `docs/bench/` | NFR-P3 | — | S ✅ script; run pending (owner) |
+| T0.2 | Benchmark script; run on reference machine; record results in `docs/bench/` | NFR-P3 | — | S ✅ (results 2026-11-01; KV A/B and `qwen3:4b` pending) |
 | T0.3 | Rename package to `cairnward`; Apache-2.0 LICENSE | D51 | — | S ✅ |
 | T0.4 | Config: pydantic models for `cairnward.toml`, `backends.toml`, `clients.toml`; JSON Schema export | spec §11 | T0.3 | S |
 | T0.4b | Privacy settings model: `[privacy]` table, presets, environment overrides, `privacy show`, settings-change audit hooks; CI matrix over presets | FR-PRIV-1, FR-PRIV-2, FR-PRIV-4, FR-PRIV-6 | T0.4 | M |
@@ -21,8 +21,8 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T0.8 | Policy engine skeleton (`allow/ask/deny`, default rules, CLI approval prompt) | FR-POL-1 | T0.7 | M |
 | T0.9 | `cairnward-egress`: HTTP(S) CONNECT proxy, host allowlist, connection log; network off by default | FR-NET-1 | T0.8 | M |
 | T0.10 | Backend drivers (`ollama`, `openai_compat`) with fake servers for tests | FR-BACK-1 | T0.4 | M |
-| T0.11 | Gateway endpoint `/v1/chat/completions` (+ streaming, tools), `/v1/models`; per-client API keys; vault write | FR-GW-1, FR-GW-2, FR-VLT-1 | T0.8, T0.10 | M |
-| T0.12 | `cairnward run` (sandbox from T0.6, env/config injection) + first agent profile (whichever of Qwen Code / opencode / Aider / Goose works most simply) | FR-ISO-1, FR-ISO-2, FR-AGT-1 (first), FR-AGT-3 | T0.6, T0.11 | M |
+| T0.11 | Gateway endpoint `/v1/chat/completions` (+ streaming, tools), `/v1/models`; per-client API keys; vault write; prompt prefixes never modified | FR-GW-1, FR-GW-2, FR-GW-7, FR-VLT-1 | T0.8, T0.10 | M |
+| T0.12 | `cairnward run` (sandbox from T0.6, env/config injection) + first agent profile (**Aider**: leanest prompts, best fit for CPU) | FR-ISO-1, FR-ISO-2, FR-AGT-1 (first), FR-AGT-3 | T0.6, T0.11 | M |
 | T0.13 | Run the core itself in an isolated namespace; only `cairnward-egress` networked | FR-ISO-3 | T0.9, T0.12 | M |
 | T0.14 | `cairnward doctor` with isolation self-tests; `cairnward setup` first-run preset choice | FR-ISO-5, FR-PRIV-3, FR-PRIV-5 | T0.12, T0.4b | M |
 | T0.15 | Open WebUI (or Jan) connected via internal network or loopback for a first manual check | FR-CLI-1 (partial) | T0.11 | S |
@@ -51,6 +51,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T1.8 | Vault conversation reconstruction (prefix hashing, branches) | FR-VLT-2 | M0 | M |
 | T1.9 | Artifacts git repos; run workspace snapshots, `runs diff/revert` | FR-ART-1, FR-AGT-2 | M0 | M |
 | T1.10 | Crypto-shredding purge | FR-ENC-5 | T1.8 | S |
+| T1.11 | Cache-aware scheduling (affinity, keep-alive, idle unload), memory check, waiting-time estimate from benchmark profile | FR-GW-8, FR-GW-10, FR-GW-11 | M0 | M |
 
 **Exit criteria (M1)**: `lit.ask` eval passes with page citations; citation eval shows zero invented references; a review job survives a restart mid-run; picking `cw/coding:low` vs `cw/coding:high` in a client changes model and thinking.
 
@@ -70,7 +71,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T2.9 | MCP proxy, permissions, pinning, sandboxed servers; research tools via MCP | FR-MCP-1–3, FR-RES-10 | L |
 | T2.10 | All four agent profiles + compatibility tests | FR-AGT-1 | M |
 | T2.11 | Client guides + container templates: Open WebUI, Jan, third client | FR-CLI-1, FR-CLI-2, FR-ISO-4 | M |
-| T2.12 | Budgets and context warning | FR-GW-4, FR-GW-5 | M |
+| T2.12 | Budgets and context warning; llama.cpp KV save/restore | FR-GW-4, FR-GW-5, FR-GW-9 | M |
 | T2.13 | Model download verification via egress | FR-SUP-2 | S |
 | T2.14 | Artifact previews (sandboxed origin) | FR-ART-4 | S |
 

@@ -1,6 +1,7 @@
 # Spec: Cairnward — a local privacy gateway and research agent
 
-Status: **Draft v0.7, for review**
+Status: **Draft v0.8, for review**
+v0.8: defaults and performance targets set from the reference-machine benchmark ([results](bench/results-2026-11-01-ryzen3-3200g.md)): 8K default context, 1.7B fast model, cache-aware scheduling, tiered research pipeline (D59–D64).
 v0.7: **every privacy and security feature is optional**, chosen through presets (Open / Balanced / Strict) with per-environment overrides (§5.0, D55–D58).
 v0.6 changed direction after the [project critique](#13-history): Cairnward is now a **client-neutral privacy gateway** that existing chat apps and coding agents plug into, plus **its own literature-review workflows**. Earlier versions specified an all-in-one Claude-app clone; decisions that no longer apply are marked *superseded* in §2.
 Date: 2026-10-31
@@ -69,6 +70,12 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D56 | Defaults | **Preset chosen at first run** (`cairnward setup`): Open, Balanced or Strict; changeable any time; Custom when individual settings differ | 0012 |
 | D57 | Granularity | **Global settings + per-environment overrides**; a virtual model (`cw/<env>:<effort>`) therefore also selects the privacy level | 0012 |
 | D58 | Weakening | Allowed without friction, but **visible** (dashboard badge, `cairnward status`, `cairnward privacy show`) and **logged** (audit record of every change, written before audit itself is switched off) | 0012 |
+| D59 | Reference machine | Ryzen 3 3200G (4 cores), 29.3 GB usable RAM, no GPU, Debian 13. Main model reads prompts at ~20 tok/s, writes at 2–11 tok/s; 1.7B model reads at ~50 tok/s | — |
+| D60 | Default context | **8K** tokens (16K allowed with a warning; 32K only on machines with more RAM/speed) | — |
+| D61 | Default models | Main: `qwen3:30b` (30B-A3B MoE); **fast: `qwen3:1.7b`** (2.3 GB, loads in 2 s, reads 2.5× faster); `qwen3:4b` to be measured | — |
+| D62 | Cache-aware gateway | Never alter a conversation's prompt prefix; keep the main model loaded while in use; **conversation affinity** so follow-up turns reuse the cache (measured 18.6× faster); save/restore caches per conversation where the backend supports it (llama.cpp slots) | — |
+| D63 | Tiered research pipeline | Fast model screens titles/abstracts; main model reads only included papers; full-text reading is an overnight job (~5–8 papers/hour) | — |
+| D64 | Coding agents on this hardware | Lean agents first (**Aider**); heavy-prompt agents (Qwen Code, opencode, Goose) supported but flagged as slow on CPU (first turn of a ~10K-token prompt ≈ 8 min) | — |
 | D5, D19 | Model backends | Pluggable: Ollama (default), llama.cpp, any OpenAI-compatible server; per role / environment / effort | [0004](adr/0004-pluggable-backends.md) |
 | D29 | Hosted providers | Denied by default; tested first: Alibaba Model Studio, DeepSeek API, OpenRouter; Claude API later (separate API key) | 0004 |
 | D7, D25 | Literature sources, citations | Local PDFs, Zotero, arXiv/Semantic Scholar/OpenAlex/PubMed/Crossref; CSL styles (APA, IEEE default) | — |
@@ -149,14 +156,20 @@ Linux mechanism (same approach as Anthropic's open-source `sandbox-runtime`; reu
 
 | Virtual model | Resolves to |
 |---|---|
-| `cw/coding:low` | fast model (Qwen3-4B class), no thinking, low limits |
-| `cw/coding:high` | main model (Qwen3-30B-A3B class), thinking on, larger budgets |
+| `cw/coding:low` | fast model (`qwen3:1.7b`), no thinking, low limits |
+| `cw/coding:high` | main model (`qwen3:30b`), thinking on, larger budgets |
 | `cw/litreview-offline:medium` | main model, research tools allowed, network off |
 | `cw/raw/qwen3:30b` | pass-through to a specific model with the environment `default` |
 
 Picking a virtual model in any client selects effort (thinking mode and budget, sampling, context size, per-request token/time limits) and environment (allowed tools, network policy, redaction, backend). Effort levels and environments remain user-definable TOML (`effort.toml`, `environments/*.toml`; schemas as in v0.5).
-- Model defaults are re-checked against current releases at each milestone (Qwen 3.5 models are now available in Ollama). Default roles: main ≈ Qwen3-30B-A3B or its successor, fast ≈ 4B class, vision ≈ small Qwen-VL on demand, embeddings ≈ Qwen3-Embedding-0.6B.
-- **Context reporting:** every response carries standard `usage` counts (shown by most clients), and the dashboard's live view shows context used vs limit per conversation, with a warning before a request that is expected to need more than 60 s of prompt processing (from benchmark data).
+- Model defaults (D61) are re-checked against current releases at each milestone (Qwen 3.5 models are now available in Ollama) by re-running the benchmark. Default roles: main `qwen3:30b` (or its successor), fast `qwen3:1.7b`, vision a small Qwen-VL model on demand, embeddings Qwen3-Embedding-0.6B.
+- **Cache-aware scheduling (D62).** On CPU, reading the prompt is most of the wait, and re-reading an unchanged conversation start is avoidable:
+  - The gateway **never modifies the start of a prompt** (no injected timestamps, no reordering of system prompt or tools); anything it must add goes at the end.
+  - **Conversation affinity:** requests from the same conversation are kept together; a request from a different conversation is queued briefly (configurable, default 0 s for interactive clients) rather than evicting a warm cache mid-session.
+  - **Keep-alive:** the main model stays loaded while a session is active and is unloaded after an idle period (default 10 min) to give the desktop its memory back.
+  - **Cache save/restore:** with the llama.cpp backend, each conversation's KV cache is saved to disk on eviction and restored when it resumes (llama-server slot save/restore), so returning to a long conversation takes seconds instead of minutes. Ollama doesn't expose this; the dashboard recommends llama.cpp for heavy users.
+  - **Memory check:** before loading a model, the gateway compares its size plus context against available RAM; if loading would push the system into swap it warns (and, in Balanced/Strict presets, queues instead of loading). `cairnward doctor` reports which combinations of models and context fit.
+- **Context reporting:** every response carries standard `usage` counts (shown by most clients), and the dashboard's live view shows context used vs limit per conversation. Expected waiting time is estimated from the stored benchmark profile (new, uncached prompt tokens ÷ measured reading speed); requests expected to take more than 60 s before the first token (≈ 1,300 new tokens on the reference machine's main model) are flagged.
 
 ### 4.2 MCP proxy and tools
 - Clients connect to one MCP endpoint (streamable HTTP, or `cairnward mcp` as a stdio shim). Cairnward aggregates the MCP servers enabled for the client's environment and applies policy, audit and redaction to every call.
@@ -186,9 +199,10 @@ Picking a virtual model in any client selects effort (thinking mode and budget, 
 
 ### 4.6 Research workflows (D7, D25, G5)
 - **Jobs**, not chat turns: `cairnward research review --question "..." --library thesis --style apa` queues a job; the dashboard shows progress; jobs are **resumable** after a restart and can be scheduled ("run overnight"). On CPU, a review of tens of papers is expected to take hours; that's the design point.
-- Pipeline: library (local PDF folder, Zotero via local API) and optional search (arXiv, Semantic Scholar, OpenAlex, PubMed, Crossref, network opt-in) → dedupe → screen (criteria) → extract per paper (claims, methods, datasets, limitations) → synthesise → **citation check** (every reference must resolve to an indexed paper or DOI; every quotation must match the PDF text) → format (CSL: APA, IEEE; `.csl` files add styles).
+- Pipeline: library (local PDF folder, Zotero via local API) and optional search (arXiv, Semantic Scholar, OpenAlex, PubMed, Crossref, network opt-in) → dedupe → screen (criteria; **titles and abstracts with the fast model**, D63) → extract per paper (claims, methods, datasets, limitations) → synthesise → **citation check** (every reference must resolve to an indexed paper or DOI; every quotation must match the PDF text) → format (CSL: APA, IEEE; `.csl` files add styles).
 - Outputs: comparison table, synthesis draft, `.bib`/CSL-JSON, written to a git-versioned artifacts folder.
 - Interactive use: the same capabilities are exposed as MCP tools (`lit.search`, `lit.ask` with page-cited answers, `lit.review.start`), so any chat client can use them.
+- **Throughput on the reference machine (D63):** screening an abstract (~300 tokens) with the fast model takes ~10 s; reading a full paper (~8–10K tokens) with the main model takes ~6–8 min plus a few minutes of writing notes, so **about 5–8 papers per hour, 40–60 per night**. Jobs are planned with these numbers and show an estimated finish time. Work is grouped by model (all embeddings, then all screening, then all full-text reading) so models aren't loaded and unloaded repeatedly.
 - **Engine:** PaperQA2 (Apache-2.0) is evaluated as the question-answering engine in a spike (task T1.1), configured to call Cairnward's model endpoint; if it doesn't fit (dependencies, CPU speed, control), Cairnward's own pipeline is used. Other prior art studied: Zori, ZotLLM (citation and quote checking), STORM, GPT Researcher.
 - **Multi-agent orchestration** lives here: workflow steps can fan out per paper as sub-agents (queued, `max_parallel` per backend, 1 on local CPU) with budgets and nested audit records. Workflows are YAML.
 
@@ -308,8 +322,14 @@ As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Sc
 ---
 
 ## 7. Hardware and platforms
-- Reference machine: **32 GB RAM, CPU only, Debian**. Memory budget as in v0.5 §4.0 (main ≈ 19 GB, fast ≈ 2.6 GB, embeddings ≈ 0.6 GB, vision on demand, ~5 GB for OS/Cairnward/client).
-- CPU realities shape the design: interactive coding with a 30B-class model on CPU is slow per step, so per-run budgets and the context warning matter; research runs as batch jobs.
+- Memory budget at 8K context: main 18.2 GB, fast 2.3 GB, embeddings ~0.6 GB, vision on demand (unloads the fast model), leaving ~8 GB for the OS, Cairnward, a client and light desktop use.
+- Measured on the reference machine (D59; [results](bench/results-2026-11-01-ryzen3-3200g.md)): Ryzen 3 3200G, 4 cores, 29.3 GB usable RAM, no GPU, Debian 13.
+  - `qwen3:30b`: reads ~20 tok/s, writes 11 → 2 tok/s as context grows to 4K; 18.2 GB at 8K context; loads in ~74 s.
+  - `qwen3:1.7b`: reads ~50 tok/s, writes 17 → 6.5 tok/s; 2.3 GB; loads in ~2 s.
+  - Follow-up turns with an unchanged prompt start: 18.6× faster (11.7 s vs 217 s at 4K).
+  - Main + fast model fit together at 8K context only when heavy desktop apps are closed (~9 GB left).
+- Consequences: 8K default context (D60); first turns of long prompts take minutes, follow-ups seconds (D62); heavy coding agents are slow (D64); research runs as overnight batch jobs (D63).
+- **Upgrade paths** (documented for users, not required): an 8-core AM4 CPU (e.g. Ryzen 7 5700X, if the motherboard BIOS supports it) for roughly 2–3× faster prompt reading; a GPU with ≥ 12 GB VRAM for many times faster reading using llama.cpp's MoE offload (experts on CPU, rest on GPU); 64 GB RAM for larger contexts and keeping more models loaded (not faster).
 - Performance targets are fixed from `scripts/bench_backend.py` results (§8).
 - **Linux first** (Debian 12+, Ubuntu 22.04+, Mint, Pop!_OS). **Windows later via WSL2** (Cairnward and sandboxed agents run inside WSL2; Windows-native clients connect to it over loopback). CI runs unit tests on Windows throughout so nothing becomes harder to port.
 
@@ -321,7 +341,10 @@ Full list in [requirements.md](requirements.md).
 | Area | Target |
 |---|---|
 | Gateway overhead | ≤ 50 ms added per model request (policy, audit, vault write), excluding model time |
-| Model speed | Provisional until benchmarked: main model first token ≤ 10 s for a 2K-token prompt (warm); warning before requests needing > 60 s of prompt processing |
+| Model speed (measured, reference machine) | Baseline, not a target Cairnward controls: main model ~20 tok/s reading, 2–11 tok/s writing; fast model ~50 / 6.5–17 tok/s |
+| Cache reuse | Follow-up turn in an unchanged conversation: ≥ 10× faster first token than a cold turn (measured 18.6×); the gateway must never break this |
+| Responsiveness | Fast-model virtual models start answering a 512-token prompt in ≤ 15 s (measured 10 s); main model ≤ 30 s (measured 21 s) |
+| Waiting-time warning | Requests expected to need > 60 s before the first token are flagged, using the stored benchmark profile |
 | Footprint | Core ≤ 500 MB RAM without optional workers |
 | Isolation | With `isolation = on`: direct connections from any sandbox fail (`cairnward doctor` and CI tests) |
 | Reliability | No data loss on crash; audit record before every effect (when audit is on); research jobs resume after restart |
@@ -345,6 +368,8 @@ As v0.5 §9, plus: **isolation tests** (every sandbox type tries direct DNS/TCP/
 As v0.5 §10 (pydantic-validated TOML with JSON Schema, Alembic migrations, OpenAPI for the dashboard/management API, versioned event-log format), plus the **client profile** format for `cairnward run` and `cairnward client add`.
 
 ## 12. Open questions
+0a. Is the steep drop in generation speed with context (11 → 2 tok/s at 4K) caused by the flash-attention/`q8_0` KV settings? A/B test pending; result decides the default Ollama settings `cairnward doctor` recommends.
+0b. Measure `qwen3:4b` to decide between 1.7B and 4B as the fast model.
 0. Should the dashboard/endpoint hardening (loopback-only binding, Host/Origin checks) also be switchable? Currently not, because switching it off exposes Cairnward rather than reducing friction (§5.0).
 1. Third tested chat client: LibreChat or AnythingLLM (decide at M2).
 2. Reuse Anthropic's `sandbox-runtime` (Node.js) directly, or reimplement its approach in Python (decide in T0.6, ADR-0013).
@@ -362,6 +387,6 @@ As v0.5 §10 (pydantic-validated TOML with JSON Schema, Alembic migrations, Open
 - **Approval waits vs client timeouts:** long "ask" waits can time out clients. Mitigated by risk tiers, remembered approvals, and retry-aware approvals.
 - **Content redaction blind spot:** third-party tools' own HTTPS traffic is only host-filtered. Mitigated by deny-by-default network, per-host approval, egress report; documented.
 - **Vault duplicates client data:** two copies of conversations (vault + client). Mitigated by setup guides minimising client history and by the vault being lockable/purgeable.
-- **CPU speed** for interactive coding. Mitigated by fast-model virtual models, budgets, context warnings; research designed as batch work.
+- **CPU speed** (measured ~20 tok/s prompt reading on the main model): interactive coding with heavy agents is slow. Mitigated by cache-aware scheduling, 1.7B fast model, Aider-first recommendation, waiting-time warnings, optional hosted/LAN backends, and research designed as batch work.
 - **Prompt injection:** limited impact by sandboxing, deny-by-default network, provenance dialogs, and audit; not fully preventable.
 - **Sandbox bugs** (bubblewrap/namespace misconfiguration) would silently weaken the main guarantee. Mitigated by `cairnward doctor` isolation self-tests and CI isolation tests.
