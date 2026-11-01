@@ -22,6 +22,7 @@ import httpx
 from cairnward.config.loader import Config, ConfigError, load_config
 from cairnward.config.paths import Paths
 from cairnward.sandbox import MIN_NODE_TEXT, SandboxSpec, locate, node_version, wrap
+from cairnward.sysinfo import meminfo
 
 Status = Literal["ok", "warn", "fail", "skip"]
 GB = 1024**3
@@ -39,14 +40,7 @@ class Check:
 
 
 def _meminfo() -> dict[str, int]:
-    try:
-        out = {}
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            key, _, rest = line.partition(":")
-            out[key] = int(rest.split()[0]) * 1024
-        return out
-    except (OSError, ValueError, IndexError):
-        return {}
+    return meminfo()
 
 
 def _port_free(port: int) -> bool:

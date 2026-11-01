@@ -113,6 +113,11 @@ class Backend(_Strict):
     )
     max_parallel: int = Field(default=1, ge=1, le=64)
     timeout_s: int = Field(default=900, ge=1)
+    slot_cache: bool = Field(
+        default=False,
+        description="llama.cpp only: save/restore each conversation's KV cache when switching "
+        "conversations (start llama-server with --slot-save-path; needs max_parallel = 1)",
+    )
 
     @field_validator("api_key")
     @classmethod
@@ -144,6 +149,10 @@ class Backend(_Strict):
                 raise ValueError(f"location 'lan' requires a private address (got '{host}')")
         if self.location == "hosted" and parsed.scheme != "https":
             raise ValueError("hosted backends must use https")
+        if self.slot_cache and (self.driver != "openai_compat" or self.max_parallel != 1):
+            raise ValueError(
+                "slot_cache needs driver = 'openai_compat' (llama-server) and max_parallel = 1"
+            )
         return self
 
 

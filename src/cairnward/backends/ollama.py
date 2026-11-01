@@ -106,6 +106,8 @@ class OllamaDriver:
     ):
         self.name = name
         self.proxy = proxy  # None = direct (local backends)
+        self._tags: dict[str, int] = {}
+        self._tags_at = -1e9
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(timeout_s, connect=15),
@@ -229,6 +231,21 @@ class OllamaDriver:
         self._raise(resp)
         data = resp.json()
         return data["embeddings"], int(data.get("prompt_eval_count") or 0)
+
+    async def memory_view(self) -> tuple[dict[str, int], dict[str, int]]:
+        """(loaded models -> bytes in memory, installed models -> file size)."""
+        try:
+            ps = await self._client.get("/api/ps", timeout=5)
+            if time.monotonic() - self._tags_at > 60:
+                tags = await self._client.get("/api/tags", timeout=5)
+                self._tags = {
+                    m["name"]: int(m.get("size", 0)) for m in tags.json().get("models", [])
+                }
+                self._tags_at = time.monotonic()
+            loaded = {m["name"]: int(m.get("size", 0)) for m in ps.json().get("models", [])}
+        except (httpx.HTTPError, ValueError, KeyError):
+            return {}, {}
+        return loaded, dict(self._tags)
 
     async def models(self) -> list[str]:
         try:

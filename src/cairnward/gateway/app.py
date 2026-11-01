@@ -37,9 +37,11 @@ from cairnward.gateway.scheduling import (
     Scheduler,
     conversation_key,
     estimate_tokens,
+    memory_warning,
 )
 from cairnward.policy.engine import Action, PolicyEngine
 from cairnward.store import Vault
+from cairnward.sysinfo import meminfo
 
 PASSTHROUGH = (
     "stop",
@@ -288,6 +290,13 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                 f"min before the first word on {resolved.model}"
             )
 
+        driver_for_memory = deps.backends.get(resolved.backend, resolved.environment)
+        view = getattr(driver_for_memory, "memory_view", None)
+        if view is not None and (avail := meminfo().get("MemAvailable", 0)):
+            loaded, sizes = await view()
+            if mem := memory_warning(resolved.model, loaded, sizes, avail):
+                warnings.append(mem)
+
         action = Action(
             kind="model.call",
             target=resolved.backend,
@@ -326,6 +335,25 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         started = time.monotonic()
         privacy = cfg.privacy(resolved.environment)
         conv_key = conversation_key(body.messages)
+        slot_info: dict[str, Any] = {}
+
+        async def switch_slot() -> None:
+            """llama.cpp: swap the KV cache to this conversation's saved one (FR-GW-9)."""
+            if not deps.backends.spec(resolved.backend).slot_cache:
+                return
+            prev = scheduler.last_conversation(resolved.backend)
+            if prev == conv_key:
+                return
+            switch = getattr(driver, "switch_slot", None)
+            if switch is None:
+                return
+            restored = await switch(
+                f"cw-{prev[:32]}.bin" if prev else None, f"cw-{conv_key[:32]}.bin"
+            )
+            slot_info["slot_restored"] = restored
+            if restored:  # the server now holds this conversation up to its previous turn
+                scheduler.restored(resolved.backend, body.messages[:-1])
+
         queued: dict[str, float] = {"s": 0.0}
         headers = {"Cache-Control": "no-store"}
         if warnings:
@@ -355,6 +383,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                     usage_of_run.requests += 1
                     usage_of_run.tokens += int(usage.get("total_tokens") or 0)
             details: dict[str, Any] = {
+                **slot_info,
                 "queued_s": round(queued["s"], 3),
                 "duration_s": round(time.monotonic() - started, 3),
                 "prompt_tokens": usage.get("prompt_tokens"),
@@ -379,6 +408,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             try:
                 async with scheduler.slot(resolved.backend, conv_key) as waited:
                     queued["s"] = waited
+                    await switch_slot()
                     result = await driver.chat(chat_req)
             except BackendError as exc:
                 await finish(None, {}, str(exc)[:300])
@@ -401,6 +431,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             try:
                 async with scheduler.slot(resolved.backend, conv_key) as waited:
                     queued["s"] = waited
+                    await switch_slot()
                     async for chunk in driver.chat_stream(chat_req):
                         chunk["model"] = body.model
                         for choice in chunk.get("choices") or []:

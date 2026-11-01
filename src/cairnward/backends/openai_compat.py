@@ -103,6 +103,20 @@ class OpenAICompatDriver:
         vectors = [d["embedding"] for d in sorted(data["data"], key=lambda d: d["index"])]
         return vectors, int((data.get("usage") or {}).get("prompt_tokens") or 0)
 
+    async def switch_slot(self, save_as: str | None, restore_from: str) -> bool:
+        """llama-server: save slot 0's KV cache under `save_as`, then restore `restore_from`
+        if it was saved before. Returns True if a saved cache was restored."""
+        root = str(self._client.base_url).rstrip("/").removesuffix("/v1")
+        try:
+            if save_as:
+                await self._client.post(f"{root}/slots/0?action=save", json={"filename": save_as})
+            resp = await self._client.post(
+                f"{root}/slots/0?action=restore", json={"filename": restore_from}
+            )
+        except httpx.HTTPError:
+            return False
+        return resp.status_code == 200
+
     async def models(self) -> list[str]:
         try:
             resp = await self._client.get("/models")

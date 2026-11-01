@@ -275,3 +275,122 @@ async def test_concurrent_requests_queue(tmp_path: Path) -> None:
     assert waits[0] < 0.1 and waits[1] >= 0.15  # the second waited for the first
     await client.aclose()
     audit.close()
+
+
+# ------------------------------------------------------------------ memory check (FR-GW-10)
+
+GB = 1024**3
+
+
+def test_memory_warning_cases() -> None:
+    from cairnward.gateway.scheduling import memory_warning
+
+    sizes = {"qwen3:30b": 18 * GB, "qwen3:1.7b": int(1.4 * GB)}
+    # already loaded: nothing to say
+    assert memory_warning("qwen3:30b", {"qwen3:30b": 18 * GB}, sizes, 2 * GB) is None
+    # fits in free memory
+    assert memory_warning("qwen3:1.7b", {}, sizes, 8 * GB) is None
+    # the benchmark-day situation: 30B loaded, ~2 GB free, switch to the 1.7B model
+    w = memory_warning("qwen3:1.7b", {"qwen3:30b": 18 * GB}, sizes, 1 * GB)
+    assert w and "must unload qwen3:30b first" in w
+    # wouldn't fit even after unloading everything
+    w = memory_warning("qwen3:30b", {"qwen3:1.7b": int(1.4 * GB)}, sizes, 4 * GB)
+    assert w and "heavy swapping" in w
+    assert memory_warning("unknown", {}, sizes, 1 * GB) is None
+
+
+async def test_gateway_reports_memory_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeOllama()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/ps":
+            return httpx.Response(200, json={"models": [{"name": "qwen3:30b", "size": 18 * GB}]})
+        if request.url.path == "/api/tags":
+            return httpx.Response(
+                200,
+                json={
+                    "models": [
+                        {"name": "qwen3:30b", "size": 18 * GB},
+                        {"name": "qwen3:1.7b", "size": 2 * GB},
+                    ]
+                },
+            )
+        return fake.handler(request)
+
+    monkeypatch.setattr("cairnward.gateway.app.meminfo", lambda: {"MemAvailable": 1 * GB})
+    client, deps, audit, _ = await make(tmp_path, handler=handler)
+    key = ClientKeys.at(deps.config.paths.state_dir).add("w")
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"model": "cw/e:low", "messages": [{"role": "user", "content": "x"}]},
+    )
+    assert resp.status_code == 200
+    assert "must unload qwen3:30b first" in resp.headers["x-cairnward-warning"]
+    await client.aclose()
+    audit.close()
+
+
+# ------------------------------------------------------------------ llama.cpp slots (FR-GW-9)
+
+
+async def test_slot_cache_saves_and_restores_per_conversation(tmp_path: Path) -> None:
+    from tests.fakes.backends import FakeOpenAI
+
+    paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
+    (paths.config_dir / "environments").mkdir(parents=True)
+    (paths.config_dir / "environments" / "e.toml").write_text('backend = "llama"\n')
+    (paths.config_dir / "backends.toml").write_text(
+        '[backends.llama]\ndriver = "openai_compat"\nurl = "http://127.0.0.1:8080/v1"\n'
+        "slot_cache = true\n"
+        '[roles.main]\nbackend = "llama"\nmodel = "m"\n'
+        '[roles.fast]\nbackend = "llama"\nmodel = "m"\n'
+    )
+    cfg = load_config(paths)
+    fake = FakeOpenAI()
+    saved: set[str] = set()
+    slot_calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/slots/0":
+            action = request.url.params["action"]
+            name = json.loads(request.content)["filename"]
+            slot_calls.append((action, name))
+            if action == "save":
+                saved.add(name)
+                return httpx.Response(200, json={"n_saved": 100})
+            return httpx.Response(200 if name in saved else 404, json={})
+        return fake.handler(request)
+
+    backends = Backends(cfg.backends, transport_for=lambda n: httpx.MockTransport(handler))
+    with AuditLog.open(paths) as audit:
+        deps = GatewayDeps(
+            cfg, PolicyEngine(cfg, audit=audit), backends, ClientKeys.at(paths.state_dir)
+        )
+        app = create_app(deps)
+        key = ClientKeys.at(paths.state_dir).add("w")
+        h = {"Authorization": f"Bearer {key}"}
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8484"
+        ) as c:
+            a1 = [{"role": "user", "content": "conversation A " * 50}]
+            b1 = [{"role": "user", "content": "conversation B " * 50}]
+            r = await c.post(
+                "/v1/chat/completions", headers=h, json={"model": "cw/e:low", "messages": a1}
+            )
+            assert r.status_code == 200
+            await c.post(
+                "/v1/chat/completions", headers=h, json={"model": "cw/e:low", "messages": b1}
+            )
+            a2 = [*a1, r.json()["choices"][0]["message"], {"role": "user", "content": "more"}]
+            await c.post(
+                "/v1/chat/completions", headers=h, json={"model": "cw/e:low", "messages": a2}
+            )
+        actions = [a for a, _ in slot_calls]
+        # A: restore attempt (nothing saved yet); B: save A, restore B (miss);
+        # A again: save B, restore A (hit)
+        assert actions == ["restore", "save", "restore", "save", "restore"]
+        posts = [x for x in audit.records() if x.phase == "post"]
+        assert [p.details.get("slot_restored") for p in posts] == [False, False, True]

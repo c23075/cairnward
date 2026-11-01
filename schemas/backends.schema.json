@@ -41,6 +41,12 @@
           "title": "Max Parallel",
           "type": "integer"
         },
+        "slot_cache": {
+          "default": false,
+          "description": "llama.cpp only: save/restore each conversation's KV cache when switching conversations (start llama-server with --slot-save-path; needs max_parallel = 1)",
+          "title": "Slot Cache",
+          "type": "boolean"
+        },
         "timeout_s": {
           "default": 900,
           "minimum": 1,

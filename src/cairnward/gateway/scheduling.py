@@ -106,6 +106,7 @@ class _Backend:
     # what the server last read (its cached prefix): message hashes and token counts
     cached_hashes: list[str] = field(default_factory=list)
     cached_tokens: list[int] = field(default_factory=list)
+    served_key: str | None = None  # conversation whose prompt the server last read
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,14 @@ class Scheduler:
     def served(self, backend: str, messages: list[dict[str, Any]]) -> None:
         b = self._b(backend)
         b.cached_hashes, b.cached_tokens = prefix_hashes(messages), message_tokens(messages)
+        b.served_key = conversation_key(messages)
+
+    def restored(self, backend: str, messages: list[dict[str, Any]]) -> None:
+        """The server's cache was loaded from disk for this conversation (llama.cpp slots)."""
+        self.served(backend, messages)
+
+    def last_conversation(self, backend: str) -> str | None:
+        return self._b(backend).served_key
 
     def queued(self, backend: str) -> int:
         b = self._b(backend)
@@ -221,3 +230,30 @@ class RunUsage:
         if b.max_minutes is not None and (time.monotonic() - self.started) / 60 >= b.max_minutes:
             return f"run budget: {b.max_minutes:g} minutes elapsed"
         return None
+
+
+def memory_warning(
+    model: str, loaded: dict[str, int], sizes: dict[str, int], available: int
+) -> str | None:
+    """Warn when loading `model` would probably push the machine into swap (FR-GW-10)."""
+    if not available or model in loaded or (f"{model}:latest" in loaded):
+        return None
+    size = sizes.get(model) or sizes.get(f"{model}:latest")
+    if not size:
+        return None
+    need = size * 1.1  # model plus a modest KV cache
+    if need <= available:
+        return None
+    gb = 1024**3
+    others = ", ".join(sorted(loaded)) or "nothing"
+    if need > available + sum(loaded.values()):
+        return (
+            f"loading {model} needs ~{need / gb:.1f} GB but only {available / gb:.1f} GB is "
+            f"free even counting the loaded models ({others}): expect heavy swapping; "
+            "close other apps"
+        )
+    return (
+        f"loading {model} needs ~{need / gb:.1f} GB, {available / gb:.1f} GB free: the model "
+        f"server must unload {others} first (OLLAMA_MAX_LOADED_MODELS=1), otherwise the "
+        "machine will swap"
+    )
