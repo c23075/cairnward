@@ -224,11 +224,20 @@ class Vault:
             return self._to_conversation(self._row(conn, conversation_id))
 
     def list_conversations(
-        self, *, folder_id: str | None = None, include_deleted: bool = False
+        self,
+        *,
+        folder_id: str | None = None,
+        include_deleted: bool = False,
+        environment: str | None = None,
+        only_deleted: bool = False,
     ) -> list[Conversation]:
         query = select(conversations).where(conversations.c.purged_at.is_(None))
-        if not include_deleted:
+        if only_deleted:
+            query = query.where(conversations.c.deleted_at.is_not(None))
+        elif not include_deleted:
             query = query.where(conversations.c.deleted_at.is_(None))
+        if environment is not None:
+            query = query.where(conversations.c.environment == environment)
         if folder_id is not None:
             query = query.where(conversations.c.folder_id == folder_id)
         query = query.order_by(conversations.c.pinned.desc(), conversations.c.updated_at.desc())
@@ -463,6 +472,69 @@ class Vault:
         for conv_id in ids:
             self.purge(conv_id)
         return ids
+
+    def expire(self, environment: str, days: int) -> list[str]:
+        """Retention: purge this environment's conversations untouched for `days`."""
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="milliseconds")
+        with self._db.connect() as conn:
+            ids = [
+                r.id
+                for r in conn.execute(
+                    select(conversations.c.id).where(
+                        conversations.c.purged_at.is_(None),
+                        conversations.c.environment == environment,
+                        conversations.c.pinned.is_(False),
+                        conversations.c.updated_at < cutoff,
+                    )
+                )
+            ]
+        for conv_id in ids:
+            self.purge(conv_id, force=True)
+        return ids
+
+    # ------------------------------------------------------------------ lookup and search
+
+    def resolve_id(self, prefix: str) -> str:
+        """A full conversation id from a unique prefix (as the CLI shows them)."""
+        with self._db.connect() as conn:
+            ids = [
+                r.id
+                for r in conn.execute(
+                    select(conversations.c.id).where(
+                        conversations.c.id.startswith(prefix, autoescape=True),
+                        conversations.c.purged_at.is_(None),
+                    )
+                )
+            ]
+        if not ids:
+            raise NotFoundError(f"no conversation starts with '{prefix}'")
+        if len(ids) > 1:
+            raise VaultError(f"'{prefix}' matches {len(ids)} conversations; give more of the id")
+        return str(ids[0])
+
+    def search(
+        self, text: str, *, environment: str | None = None, limit: int = 50
+    ) -> list[tuple[Conversation, str]]:
+        """Conversations whose title or messages contain `text` (case-insensitive), with a
+        snippet. Decrypts as it goes: no plaintext search index is kept on disk."""
+        from cairnward.redaction import message_texts
+
+        needle = text.lower()
+        found: list[tuple[Conversation, str]] = []
+        for conv in self.list_conversations(environment=environment):
+            if conv.title and needle in conv.title.lower():
+                found.append((conv, conv.title))
+            else:
+                for msg in self.messages(conv.id):
+                    hit = next((t for t in message_texts([msg.body]) if needle in t.lower()), None)
+                    if hit is not None:
+                        i = hit.lower().index(needle)
+                        snippet = hit[max(0, i - 40) : i + len(text) + 40].replace("\n", " ")
+                        found.append((conv, snippet))
+                        break
+            if len(found) >= limit:
+                break
+        return found
 
     # ------------------------------------------------------------------ info
 

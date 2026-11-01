@@ -70,6 +70,13 @@ uv run cairnward audit log --last 30
 uv run cairnward audit verify
 ```
 ```bash
+uv run cairnward vault list
+```
+```bash
+uv run cairnward vault search "parser"
+```
+`vault show | export | delete | restore | purge` take an id or its first characters. Deleting here doesn't touch the client's own history.
+```bash
 uv run cairnward store info
 ```
 What left this machine, per destination (connections, bytes, denials, hosted model tokens, redaction flags):

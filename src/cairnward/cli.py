@@ -134,6 +134,40 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_appr.add_argument("--yes", action="store_true", help="approve without asking")
     mcp_sub.add_parser("connect", help="stdio bridge to the MCP endpoint (same as no ACTION)")
 
+    vlt = sub.add_parser("vault", help="Cairnward's copy of conversations: list, search, export")
+    vlt_sub = vlt.add_subparsers(dest="vault_command", metavar="ACTION")
+    v_list = vlt_sub.add_parser("list", help="conversations, newest first (default)")
+    v_list.add_argument("--env")
+    v_list.add_argument("--trash", action="store_true", help="what's in the trash")
+    v_list.add_argument("--limit", type=int, default=50)
+    v_search = vlt_sub.add_parser("search", help="find text in titles and messages")
+    v_search.add_argument("text")
+    v_search.add_argument("--env")
+    v_show = vlt_sub.add_parser("show", help="print a conversation")
+    v_show.add_argument("id", help="id or its first characters")
+    v_show.add_argument("--json", action="store_true")
+    v_exp = vlt_sub.add_parser("export", help="export a conversation (plain text)")
+    v_exp.add_argument("id")
+    v_exp.add_argument("--format", choices=["md", "json"], default="md")
+    v_exp.add_argument("-o", "--output", help="file to write (default: print)")
+    v_actions = (
+        ("delete", "move to the trash (30 days)"),
+        ("restore", "take out of the trash"),
+        ("purge", "destroy now (key first; can't be undone)"),
+    )
+    for name, text in v_actions:
+        cmd = vlt_sub.add_parser(name, help=text)
+        cmd.add_argument("id")
+        if name == "purge":
+            cmd.add_argument("--force", action="store_true", help="even if not in the trash")
+    v_pin = vlt_sub.add_parser("pin", help="pin (kept by retention); --off to unpin")
+    v_pin.add_argument("id")
+    v_pin.add_argument("--off", action="store_true")
+    v_title = vlt_sub.add_parser("title", help="rename a conversation")
+    v_title.add_argument("id")
+    v_title.add_argument("title")
+    vlt_sub.add_parser("prune", help="apply retention now and empty old trash")
+
     appr = sub.add_parser("approvals", help="answer requests Cairnward is waiting on (y/c/e/n)")
     appr_sub = appr.add_subparsers(dest="approvals_command", metavar="ACTION")
     appr_sub.add_parser("watch", help="wait for requests and answer them (default)")
@@ -1126,6 +1160,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_approvals(args)
         if args.command == "mcp":
             return _cmd_mcp(args)
+        if args.command == "vault":
+            from cairnward import vault_cli
+
+            return vault_cli.run(_load(args), args, sys.stdout)
         if args.command == "doctor":
             return _cmd_doctor(args)
         if args.command == "setup":

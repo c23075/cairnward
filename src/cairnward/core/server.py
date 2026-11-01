@@ -76,6 +76,20 @@ def _srt_if_wanted(cfg: Config) -> list[str] | None:
         return None
 
 
+async def retention_loop(cfg: Config, vault: Vault, log: Log) -> None:
+    """Vault retention per environment and trash emptying, at start and then daily."""
+    from cairnward.vault_cli import apply_retention
+
+    while True:
+        try:
+            result = await asyncio.to_thread(apply_retention, cfg, vault)
+            if total := sum(len(v) for v in result.values()):
+                log(f"vault retention: purged {total} conversation(s)")
+        except Exception as exc:  # never take the server down for this
+            log(f"vault retention failed: {exc}")
+        await asyncio.sleep(24 * 3600)
+
+
 async def anchor_loop(cfg: Config, audit: AuditLog, log: Log) -> None:
     """audit_anchor = "git": push a signed checkpoint every interval (spec §5.2, D49)."""
     if cfg.privacy().value("audit_anchor") != "git":
@@ -418,12 +432,14 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
 
         async def run() -> None:
             dog = asyncio.create_task(watchdog())
+            keep = asyncio.create_task(retention_loop(cfg, vault, log))
             try:
                 await asyncio.gather(
                     _serve_uds(gw, socks["gateway"]), _serve_uds(mgmt, socks["management"])
                 )
             finally:
                 dog.cancel()
+                keep.cancel()
                 await hub.aclose()
                 await backends.aclose()
 
