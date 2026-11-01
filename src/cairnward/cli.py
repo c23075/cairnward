@@ -60,6 +60,18 @@ def build_parser() -> argparse.ArgumentParser:
     log_cmd.add_argument("--conversation", help="only records for this conversation")
     log_cmd.add_argument("--json", action="store_true", help="one JSON record per line")
 
+    pol = sub.add_parser("policy", help="what the policy engine would decide")
+    pol_sub = pol.add_subparsers(dest="policy_command", metavar="ACTION", required=True)
+    explain = pol_sub.add_parser("explain", help="decision for an action, without running it")
+    explain.add_argument(
+        "kind", help="model.call, net.connect, fs.read, fs.write, exec, encrypt, sync.change, ..."
+    )
+    explain.add_argument("target", help="backend name, host[:port], path or command")
+    explain.add_argument("--env", help="environment (default: the default environment)")
+    explain.add_argument(
+        "--by", choices=["user", "model"], default="model", help="who starts it (default: model)"
+    )
+
     store = sub.add_parser("store", help="local storage (vault and keys)")
     store_sub = store.add_subparsers(dest="store_command", metavar="ACTION", required=True)
     store_sub.add_parser("info", help="database files, schema versions and counts")
@@ -190,6 +202,37 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_policy_explain(args: argparse.Namespace) -> int:
+    from typing import get_args
+
+    from cairnward.policy import Action, PolicyEngine
+    from cairnward.policy.engine import Kind
+
+    if args.kind not in get_args(Kind):
+        print(f"Unknown action kind '{args.kind}'. Known: {', '.join(get_args(Kind))}",
+              file=sys.stderr)  # fmt: skip
+        return 2
+    cfg = _load(args)
+    env = args.env or cfg.main.defaults.environment
+    if env not in cfg.environments:
+        print(f"Unknown environment '{env}'", file=sys.stderr)
+        return 2
+    engine = PolicyEngine(cfg)
+    action = Action(kind=args.kind, target=args.target, environment=env, initiated_by=args.by)
+    rule = engine.rule_for(action)
+    decision = engine.check(action, dry_run=True)
+    would_ask = decision.reason.endswith("(would ask)")
+    outcome = "ASK" if would_ask else decision.decision.upper()
+    print(f"{outcome}  ({decision.risk} risk) in environment '{env}'")
+    print(f"  rule:   {rule.reason}")
+    if not would_ask and decision.reason != rule.reason:
+        print(f"  result: {decision.reason}")
+    if decision.advisory:
+        print("  note:   isolation is off, so the OS doesn't enforce this decision")
+    print(f"  privacy: {cfg.privacy(env).label}")
+    return 0
+
+
 def _privacy_dict(eff: EffectivePrivacy) -> dict[str, object]:
     return {
         "environment": eff.environment,
@@ -273,6 +316,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_store_info(args)
         if args.command == "audit":
             return _cmd_audit(args)
+        if args.command == "policy":
+            return _cmd_policy_explain(args)
     except ConfigError as exc:
         print("Configuration problems:", file=sys.stderr)
         for problem in exc.problems:

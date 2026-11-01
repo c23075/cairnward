@@ -18,7 +18,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T0.5 | Store: SQLite (WAL) + Alembic baseline; vault tables; per-conversation age keys | FR-VLT-1, FR-ENC-5 (partial) | T0.4 | M ✅ (vault.db + keys.db; trash/purge with crypto-shredding; `store info`) |
 | T0.6 | **Sandbox spike:** bubblewrap + loopback-only netns + Unix-socket bridges; decide reuse of `sandbox-runtime` vs own implementation (ADR-0013) | FR-ISO-1 | T0.3 | M ✅ reuse srt; 13/13 checks + chaining pass; CI job `isolation-spike` |
 | T0.7 | Audit log: hash chain, `AuditSink`, `cairnward audit verify` | FR-AUD-1, FR-AUD-2 | T0.5 | M ✅ (audit.db + audit.jsonl mirror; pre/post `effect()` API; `audit verify/head/log`; settings-change records incl. `audit.disabled`/`enabled`) |
-| T0.8 | Policy engine skeleton (`allow/ask/deny`, default rules, CLI approval prompt) | FR-POL-1 | T0.7 | M |
+| T0.8 | Policy engine skeleton (`allow/ask/deny`, default rules, CLI approval prompt) | FR-POL-1 | T0.7 | M ✅ (rules for model/network/files/exec/user-only actions; risk tiers; remembered approvals; terminal approver; `guard()` with audit; `policy explain`) |
 | T0.9 | `cairnward-egress`: HTTP(S) CONNECT proxy, host allowlist, connection log; network off by default | FR-NET-1 | T0.8 | M |
 | T0.10 | Backend drivers (`ollama`, `openai_compat`) with fake servers for tests | FR-BACK-1 | T0.4 | M |
 | T0.11 | Gateway endpoint `/v1/chat/completions` (+ streaming, tools), `/v1/models`; per-client API keys; vault write; prompt prefixes never modified | FR-GW-1, FR-GW-2, FR-GW-7, FR-VLT-1 | T0.8, T0.10 | M |
