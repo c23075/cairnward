@@ -7,6 +7,7 @@ backend (messages untouched, FR-GW-7) -> vault (per privacy settings) -> audit p
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -284,7 +285,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         client_cfg = cfg.clients.clients.get(client)
         default_env = client_cfg.default_environment if client_cfg else None
         try:
-            resolved = resolve(cfg, body.model, default_environment=default_env)
+            resolved = resolve(cfg, body.model, default_environment=default_env, client=client)
         except UnknownModel as exc:
             return _error(404, str(exc), "invalid_request_error", "model_not_found")
 
@@ -399,6 +400,50 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         conv_key = conversation_key(body.messages)
         slot_info: dict[str, Any] = {}
 
+        def fallback_target(exc: BackendError) -> tuple[str, str] | None:
+            """FR-BACK-3: retry on the backend's local fallback when it is unreachable or
+            fails (5xx); client errors (4xx) aren't retried."""
+            spec = cfg.backends.backends[resolved.backend]
+            if not spec.fallback or 400 <= exc.status < 500:
+                return None
+            target = (spec.fallback, spec.fallback_model or resolved.model)
+            slot_info["fallback"] = {"from": resolved.backend, "to": target[0],
+                                     "model": target[1], "reason": str(exc)[:200]}  # fmt: skip
+            if deps.engine.audit:
+                deps.engine.audit.append(
+                    "model.fallback", actor="cairnward", target=target[0],
+                    environment=resolved.environment, client=client, run_id=run_id,
+                    details=dict(slot_info["fallback"]),
+                )  # fmt: skip
+            return target
+
+        async def chat_with_fallback(req: ChatRequest) -> dict[str, Any]:
+            try:
+                return await driver.chat(req)
+            except BackendError as exc:
+                target = fallback_target(exc)
+                if target is None:
+                    raise
+                note = f"{resolved.backend} failed; answered by the local fallback {target[0]}"
+                previous = headers.get("X-Cairnward-Warning")
+                headers["X-Cairnward-Warning"] = f"{previous} | {note}" if previous else note
+                fb = deps.backends.get(target[0], resolved.environment)
+                return await fb.chat(dataclasses.replace(req, model=target[1]))
+
+        async def stream_with_fallback(req: ChatRequest) -> AsyncIterator[dict[str, Any]]:
+            started_stream = False
+            try:
+                async for chunk in driver.chat_stream(req):
+                    started_stream = True
+                    yield chunk
+            except BackendError as exc:
+                target = None if started_stream else fallback_target(exc)
+                if target is None:
+                    raise
+                fb = deps.backends.get(target[0], resolved.environment)
+                async for chunk in fb.chat_stream(dataclasses.replace(req, model=target[1])):
+                    yield chunk
+
         async def switch_slot() -> None:
             """llama.cpp: swap the KV cache to this conversation's saved one (FR-GW-9)."""
             if not deps.backends.spec(resolved.backend).slot_cache:
@@ -475,7 +520,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                 async with scheduler.slot(resolved.backend, conv_key) as waited:
                     queued["s"] = waited
                     await switch_slot()
-                    result = await driver.chat(chat_req)
+                    result = await chat_with_fallback(chat_req)
             except BackendError as exc:
                 await finish(None, {}, str(exc)[:300])
                 return _error(
@@ -498,7 +543,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                 async with scheduler.slot(resolved.backend, conv_key) as waited:
                     queued["s"] = waited
                     await switch_slot()
-                    async for chunk in driver.chat_stream(chat_req):
+                    async for chunk in stream_with_fallback(chat_req):
                         chunk["model"] = body.model
                         for choice in chunk.get("choices") or []:
                             delta = choice.get("delta") or {}

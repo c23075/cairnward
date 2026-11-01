@@ -165,6 +165,13 @@ class Backend(_Strict):
         description="llama.cpp only: save/restore each conversation's KV cache when switching "
         "conversations (start llama-server with --slot-save-path; needs max_parallel = 1)",
     )
+    fallback: str | None = Field(
+        default=None,
+        description="a LOCAL backend to retry on when this one is unreachable or fails (5xx)",
+    )
+    fallback_model: str | None = Field(
+        default=None, description="model name on the fallback backend (default: the same)"
+    )
 
     @field_validator("api_key")
     @classmethod
@@ -264,6 +271,8 @@ class Client(_Strict):
     profile: str = "generic"
     default_environment: str | None = None
     enabled: bool = True
+    backend: str | None = Field(default=None, description="this client's backend (all roles)")
+    models: dict[Role, str] = Field(default_factory=dict, description="this client's models")
 
     @model_validator(mode="after")
     def _profile_matches_kind(self) -> Client:

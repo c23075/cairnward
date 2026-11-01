@@ -24,6 +24,32 @@
           "title": "Driver",
           "type": "string"
         },
+        "fallback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "a LOCAL backend to retry on when this one is unreachable or fails (5xx)",
+          "title": "Fallback"
+        },
+        "fallback_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "model name on the fallback backend (default: the same)",
+          "title": "Fallback Model"
+        },
         "location": {
           "default": "local",
           "enum": [

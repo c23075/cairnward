@@ -3,6 +3,19 @@
     "Client": {
       "additionalProperties": false,
       "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "this client's backend (all roles)",
+          "title": "Backend"
+        },
         "default_environment": {
           "anyOf": [
             {
@@ -27,6 +40,22 @@
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "models": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "this client's models",
+          "propertyNames": {
+            "enum": [
+              "main",
+              "fast",
+              "vision",
+              "embed"
+            ]
+          },
+          "title": "Models",
+          "type": "object"
         },
         "profile": {
           "default": "generic",

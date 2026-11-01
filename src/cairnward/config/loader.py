@@ -166,7 +166,23 @@ def _cross_check(cfg: Config) -> list[str]:
         for server in env.mcp_servers:
             if server not in cfg.mcp.servers:
                 out.append(f"{src}: mcp_servers: unknown MCP server '{server}' (mcp.toml)")
+    for name, b in backends.items():
+        if b.fallback is not None:
+            fb = backends.get(b.fallback)
+            if fb is None:
+                out.append(f"{p.backends_config}: backends.{name}.fallback: unknown backend "
+                           f"'{b.fallback}'")  # fmt: skip
+            elif fb.location != "local":
+                out.append(
+                    f"{p.backends_config}: backends.{name}.fallback: '{b.fallback}' "
+                    "isn't local; fallbacks must stay on this machine (FR-BACK-3)"
+                )
+            elif b.fallback == name:
+                out.append(f"{p.backends_config}: backends.{name}.fallback: can't be itself")
     for name, client in cfg.clients.clients.items():
+        if client.backend and client.backend not in backends:
+            out.append(f"{p.clients_config}: clients.{name}.backend: unknown backend "
+                       f"'{client.backend}'")  # fmt: skip
         if client.default_environment and client.default_environment not in cfg.environments:
             out.append(
                 f"{p.clients_config}: clients.{name}.default_environment: unknown environment "

@@ -62,7 +62,12 @@ def resolve_embedding(
     return Resolved(name, env_name, EMBED, backend, model, GenerationOptions())
 
 
-def resolve(cfg: Config, name: str, *, default_environment: str | None = None) -> Resolved:
+def resolve(
+    cfg: Config, name: str, *, default_environment: str | None = None, client: str | None = None
+) -> Resolved:
+    """Override order (FR-BACK-2), most specific first: the request itself (a raw model or
+    the effort level's own model/backend), then the client (clients.toml), then the
+    environment, then the global roles (backends.toml)."""
     if not name.startswith(PREFIX):
         raise UnknownModel(f"unknown model '{name}': use a cw/<environment>:<effort> model")
     rest = name[len(PREFIX) :]
@@ -87,8 +92,11 @@ def resolve(cfg: Config, name: str, *, default_environment: str | None = None) -
     role_cfg = cfg.backends.roles.get(role) or cfg.backends.roles.get("main")
     if role_cfg is None:
         raise UnknownModel(f"no backend configured for the '{role}' role")
-    model = raw_model or level.model or env.models.get(role) or role_cfg.model
-    backend = level.backend or env.backend or role_cfg.backend
+    c = cfg.clients.clients.get(client or "")
+    client_model = c.models.get(role) if c else None
+    client_backend = c.backend if c else None
+    model = raw_model or level.model or client_model or env.models.get(role) or role_cfg.model
+    backend = level.backend or client_backend or env.backend or role_cfg.backend
     options = GenerationOptions(
         thinking=level.thinking,
         context_tokens=level.context_tokens or env.context_tokens,
