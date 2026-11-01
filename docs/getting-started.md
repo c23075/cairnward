@@ -72,6 +72,11 @@ uv run cairnward audit verify
 ```bash
 uv run cairnward store info
 ```
+What left this machine, per destination (connections, bytes, denials, hosted model tokens, redaction flags):
+```bash
+uv run cairnward audit egress --since 24h
+```
+Filter with `--run`, `--client`, `--env`, `--conversation`; export with `--json` or `--csv`. `audit log` takes the same filters.
 
 ## 6. A literature library
 Pull the embedding model once:

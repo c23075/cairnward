@@ -60,6 +60,16 @@ def build_parser() -> argparse.ArgumentParser:
     log_cmd.add_argument("--action", help="only this action, e.g. settings.changed")
     log_cmd.add_argument("--conversation", help="only records for this conversation")
     log_cmd.add_argument("--json", action="store_true", help="one JSON record per line")
+    eg_rep = audit_sub.add_parser("egress", help="what left this machine, per destination")
+    for cmd in (log_cmd, eg_rep):
+        cmd.add_argument("--run", help="only this run (id or its first characters)")
+        cmd.add_argument("--client", help="only this client")
+        cmd.add_argument("--env", help="only this environment")
+        cmd.add_argument("--since", help="e.g. 24h, 7d, or an ISO date")
+    eg_rep.add_argument("--conversation", help="only model calls of this conversation")
+    fmt = eg_rep.add_mutually_exclusive_group()
+    fmt.add_argument("--json", action="store_true")
+    fmt.add_argument("--csv", action="store_true")
 
     pol = sub.add_parser("policy", help="what the policy engine would decide")
     pol_sub = pol.add_subparsers(dest="policy_command", metavar="ACTION", required=True)
@@ -323,7 +333,31 @@ def _cmd_audit(args: argparse.Namespace) -> int:
             for p in res.problems:
                 print(f"  - {p}", file=sys.stderr)
             return 1
-        records = log.records(action=args.action, conversation_id=args.conversation, last=args.last)
+        from cairnward.audit.egress_report import parse_since, record_time
+
+        since = parse_since(args.since) if args.since else None
+        if args.audit_command == "egress":
+            from cairnward.audit import egress_report as er
+
+            cfg = _load(args)
+            remote = {n for n, b in cfg.backends.backends.items() if b.location != "local"}
+            rows = er.build(log.records(), remote_backends=remote, run=args.run,
+                            client=args.client, environment=args.env,
+                            conversation=args.conversation, since=since)  # fmt: skip
+            render = er.render_json if args.json else er.render_csv if args.csv else er.render_text
+            sys.stdout.write(render(rows))
+            return 0
+        filtered = any((args.run, args.client, args.env, since))
+        records = log.records(action=args.action, conversation_id=args.conversation,
+                              last=None if filtered else args.last)  # fmt: skip
+        if filtered:
+            records = [
+                r for r in records
+                if (not args.run or (r.run_id or "").startswith(args.run))
+                and (not args.client or r.client == args.client)
+                and (not args.env or r.environment == args.env)
+                and (not since or record_time(r) >= since)
+            ][-args.last:]  # fmt: skip
         for r in records:
             if args.json:
                 print(r.to_json_line())
