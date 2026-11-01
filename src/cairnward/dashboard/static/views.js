@@ -397,3 +397,47 @@ export async function settingsView(main) {
     Object.keys(s.clients).length ? table([{ label: "Name", render: r => r[0] }, { label: "Kind", render: r => r[1].kind }, { label: "Default environment", render: r => r[1].default_environment || "-" }], Object.entries(s.clients)) : h("p", {}, "None in clients.toml (keys made with `cairnward client add` work without an entry)."),
     h("h2", {}, "Audit anchoring"), h("p", {}, s.anchor_repo || "not set up"));
 }
+
+// ------------------------------------------------------------------ artifacts
+
+export async function artifacts(main, params) {
+  const scope = params.get("scope"), owner = params.get("owner");
+  if (!scope) {
+    put(main, h("h1", {}, "Artifacts"),
+      h("p", { class: "muted" }, "Versioned files from conversations (MCP tool artifact_write), research jobs and runs. Each write is a version; restoring makes a new one."));
+    const repos = await api("/api/artifacts");
+    put(main, repos.length ? table([
+      { label: "Kind", key: "scope" },
+      { label: "Owner", render: r => h("a", { href: `#/artifacts?scope=${encodeURIComponent(r.scope)}&owner=${encodeURIComponent(r.owner)}` }, r.owner) },
+      { label: "Files", key: "files", num: true },
+    ], repos) : h("p", {}, "No artifacts yet."));
+    return;
+  }
+  const data = await api(`/api/artifacts/${encodeURIComponent(scope)}/${encodeURIComponent(owner)}`);
+  const view = h("section", { "aria-live": "polite", "aria-label": "File" });
+  const base = `/api/artifacts/${encodeURIComponent(scope)}/${encodeURIComponent(owner)}`;
+  const open = async (path, rev) => {
+    clear(view);
+    const q = new URLSearchParams({ path, ...(rev ? { rev } : {}) });
+    const history = await api(`${base}/history?path=${encodeURIComponent(path)}`);
+    put(view, h("h2", {}, path, rev ? h("span", { class: "muted" }, ` (version ${rev.slice(0, 10)})`) : null));
+    if (/\.(html?|svg)$/i.test(path)) {
+      // sandboxed: no scripts, no network, opaque origin (FR-ART-4)
+      put(view, h("iframe", { src: `/api/preview/${encodeURIComponent(scope)}/${encodeURIComponent(owner)}?${q}`,
+        sandbox: "", title: `Preview of ${path}`, class: "preview" }));
+    } else {
+      put(view, h("pre", { class: "message" }, await api(`${base}/file?${q}`)));
+    }
+    put(view, h("h2", {}, "Versions"), table([
+      { label: "Version", render: r => h("a", { href: "#", onclick: ev => { ev.preventDefault(); open(path, r.rev); } }, r.rev.slice(0, 10)) },
+      { label: "When", render: r => when(r.date) }, { label: "What", key: "message" },
+      { label: "", render: r => r.rev === history[0]?.rev ? "current" : h("button", { type: "button", onclick: async () => {
+        await api(`${base}/restore`, { method: "POST", body: { path, rev: r.rev } }); toast("Restored as a new version."); open(path);
+      } }, "Restore") },
+    ], history));
+  };
+  put(main, h("h1", {}, `Artifacts: ${scope} ${owner}`), h("p", {}, h("a", { href: "#/artifacts" }, "All artifacts")),
+    h("div", { class: "split" },
+      table([{ label: "File", render: r => h("a", { href: "#", onclick: ev => { ev.preventDefault(); open(r); } }, r) }], data.files.map(f => f)),
+      view));
+}

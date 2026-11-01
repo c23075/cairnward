@@ -46,8 +46,14 @@ LINK_TTL_S = 120
 SESSION_IDLE_S = 12 * 3600
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    "connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
-    "form-action 'self'"
+    "connect-src 'self'; font-src 'self'; frame-src 'self'; frame-ancestors 'none'; "
+    "base-uri 'none'; form-action 'self'"
+)
+# Artifact previews (FR-ART-4): an opaque origin (CSP sandbox, no allow-same-origin), no
+# scripts, no network; only inline styles and inline images. Framed by the dashboard only.
+PREVIEW_CSP = (
+    "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; "
+    "frame-ancestors 'self'; base-uri 'none'; form-action 'none'"
 )
 
 
@@ -162,10 +168,11 @@ def dashboard_app(
                 if not secrets.compare_digest(request.headers.get("x-csrf-token", ""), csrf):
                     return JSONResponse({"detail": "missing or wrong CSRF token"}, status_code=403)
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = CSP
+        preview = path.startswith("/api/preview/")
+        response.headers["Content-Security-Policy"] = PREVIEW_CSP if preview else CSP
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN" if preview else "DENY"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
         if path.startswith("/api/") or path == "/login":
@@ -463,6 +470,68 @@ def dashboard_app(
             return {"cancelled": need_jobs().cancel(job_id)}
         except (KeyError, OSError):
             raise HTTPException(404, "no such job") from None
+
+    # ------------------------------------------------------------------ artifacts
+
+    from cairnward.artifacts import SCOPES, ArtifactError, ArtifactStore, Scope
+
+    artifacts = ArtifactStore(cfg.paths.data_dir)
+
+    def scope_of(value: str) -> Scope:
+        if value not in SCOPES:
+            raise HTTPException(404, "no such artifact repository")
+        return value
+
+    def art_call(fn: Callable[[], Any]) -> Any:
+        try:
+            return fn()
+        except ArtifactError as exc:
+            raise HTTPException(404, str(exc)) from None
+
+    @app.get("/api/artifacts")
+    def artifact_repos() -> list[dict[str, Any]]:
+        return [{"scope": s, "owner": o, "files": n} for s, o, n in artifacts.repos()]
+
+    @app.get("/api/artifacts/{scope}/{owner}")
+    def artifact_files(scope: str, owner: str) -> dict[str, Any]:
+        sc = scope_of(scope)
+        files = art_call(lambda: artifacts.files(sc, owner))
+        log = art_call(lambda: artifacts.log(sc, owner))
+        return {"files": files, "log": [dataclasses.asdict(v) for v in log]}
+
+    @app.get("/api/artifacts/{scope}/{owner}/file")
+    def artifact_file(scope: str, owner: str, path: str, rev: str | None = None) -> Response:
+        sc = scope_of(scope)
+        data = art_call(lambda: artifacts.read(sc, owner, path, rev))
+        return PlainTextResponse(data.decode("utf-8", "replace"))
+
+    @app.get("/api/artifacts/{scope}/{owner}/history")
+    def artifact_history(scope: str, owner: str, path: str) -> list[dict[str, Any]]:
+        sc = scope_of(scope)
+        return [dataclasses.asdict(v) for v in art_call(lambda: artifacts.log(sc, owner, path))]
+
+    @app.post("/api/artifacts/{scope}/{owner}/restore")
+    def artifact_restore(scope: str, owner: str, body: dict[str, str]) -> dict[str, str]:
+        sc = scope_of(scope)
+        path, old = body.get("path", ""), body.get("rev", "")
+        rev = art_call(lambda: artifacts.restore(sc, owner, path, old))
+        if audit:
+            audit.append("artifact.restore", actor="user", target=f"{scope}/{owner}",
+                         details={"path": path[:200], "via": "dashboard"})  # fmt: skip
+        return {"rev": rev}
+
+    @app.get("/api/preview/{scope}/{owner}")
+    def artifact_preview(scope: str, owner: str, path: str, rev: str | None = None) -> Response:
+        sc = scope_of(scope)
+        lower = path.lower()
+        if lower.endswith((".html", ".htm")):
+            media = "text/html; charset=utf-8"
+        elif lower.endswith(".svg"):
+            media = "image/svg+xml"
+        else:
+            media = "text/plain; charset=utf-8"
+        data = art_call(lambda: artifacts.read(sc, owner, path, rev))
+        return Response(data, media_type=media)
 
     # ------------------------------------------------------------------ MCP
 

@@ -152,6 +152,28 @@ async def test_actions(env: Any) -> None:
             assert PASS.encode() not in f.read_bytes(), f
 
 
+async def test_artifact_preview_is_sandboxed(env: Any) -> None:
+    from cairnward.artifacts import ArtifactStore
+
+    app, auth, *_, paths = env
+    ArtifactStore(paths.data_dir).write("job", "abc123", "page.html", "<script>x()</script>")
+    c, _csrf = await signed_in(app, auth)
+    try:
+        page = await c.get("/")
+        assert "frame-src 'self'" in page.headers["content-security-policy"]
+        pv = await c.get("/api/preview/job/abc123", params={"path": "page.html"})
+        csp = pv.headers["content-security-policy"]
+        assert csp.startswith("sandbox;") and "allow-scripts" not in csp
+        assert "default-src 'none'" in csp and "script-src" not in csp
+        assert pv.headers["x-frame-options"] == "SAMEORIGIN"
+        assert pv.headers["content-type"].startswith("text/html")
+        assert (await c.get("/api/preview/nope/abc123", params={"path": "x"})).status_code == 404
+        listed = (await c.get("/api/artifacts")).json()
+        assert listed == [{"scope": "job", "owner": "abc123", "files": 1}]
+    finally:
+        await c.aclose()
+
+
 def test_static_files_never_use_innerhtml() -> None:
     """XSS guard: the page builds DOM from data with textContent only."""
     for f in dash_module.STATIC.glob("*.js"):

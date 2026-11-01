@@ -176,3 +176,42 @@ async def test_research_tool_needs_opt_in(paths: Paths) -> None:
         await c.aclose()
         await hub.aclose()
         audit.close()
+
+
+async def test_artifact_tools(paths: Paths) -> None:
+    (paths.config_dir / "environments" / "lit.toml").write_text(
+        'tools = ["artifacts"]\n[privacy]\nisolation = "off"\n'
+    )
+    c, hub, audit, tracker = await setup(paths)
+    try:
+        assert "error" not in await rpc(c, "tools/list")
+        no_conv = await rpc(c, "tools/call", {"name": "cairnward__artifact_list", "arguments": {}})
+        assert no_conv["result"]["isError"]
+        tracker.note_conversation("jan", None, "conv-1")
+        w = await rpc(
+            c,
+            "tools/call",
+            {
+                "name": "cairnward__artifact_write",
+                "arguments": {"path": "plan.md", "content": "step 1"},
+            },
+        )
+        assert "saved plan.md" in w["result"]["content"][0]["text"]
+        r = await rpc(
+            c, "tools/call", {"name": "cairnward__artifact_read", "arguments": {"path": "plan.md"}}
+        )
+        assert r["result"]["content"][0]["text"] == "step 1"
+        bad = await rpc(
+            c,
+            "tools/call",
+            {"name": "cairnward__artifact_write", "arguments": {"path": "../x", "content": "y"}},
+        )
+        assert bad["result"]["isError"]
+    finally:
+        await c.aclose()
+        await hub.aclose()
+    assert any(
+        x.action == "tool.call" and x.target == "cairnward/artifact_write" and x.phase == "post"
+        for x in audit.records()
+    )
+    audit.close()

@@ -194,6 +194,28 @@ def build_parser() -> argparse.ArgumentParser:
                        ("result", "print a finished job's result")):  # fmt: skip
         jb_sub.add_parser(name, help=text).add_argument("id")
 
+    art = sub.add_parser("artifacts", help="versioned files of conversations, jobs and runs")
+    art_sub = art.add_subparsers(dest="artifacts_command", metavar="ACTION")
+    art_sub.add_parser("list", help="repositories (default)")
+    art_actions = (
+        ("files", "files in a repository"),
+        ("log", "versions (of a file)"),
+        ("show", "print a file"),
+        ("restore", "bring back an old version"),
+    )
+    for name, text in art_actions:
+        a = art_sub.add_parser(name, help=text)
+        a.add_argument("scope", choices=["conversation", "job", "run"])
+        a.add_argument("owner", help="conversation, job or run id")
+        if name in ("log",):
+            a.add_argument("path", nargs="?")
+        if name in ("show", "restore"):
+            a.add_argument("path")
+        if name == "show":
+            a.add_argument("--rev")
+        if name == "restore":
+            a.add_argument("rev")
+
     cite = sub.add_parser("cite", help="format references (APA 7, IEEE, or a .csl style)")
     cite.add_argument("file", type=Path, help="CSL-JSON (e.g. exported from Zotero)")
     cite.add_argument("--style", default="apa", help="apa (default), ieee, or a .csl file")
@@ -1056,6 +1078,35 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
         return 0
 
 
+def _cmd_artifacts(args: argparse.Namespace) -> int:
+    from cairnward.artifacts import ArtifactError, ArtifactStore
+
+    store = ArtifactStore(_load(args).paths.data_dir)
+    action = args.artifacts_command or "list"
+    try:
+        if action == "list":
+            repos = store.repos()
+            if not repos:
+                print("no artifacts yet")
+            for scope, owner, n in repos:
+                print(f"{scope:12} {owner}  {n} file(s)")
+        elif action == "files":
+            print("\n".join(store.files(args.scope, args.owner)) or "(empty)")
+        elif action == "log":
+            for v in store.log(args.scope, args.owner, args.path):
+                print(f"{v.rev[:12]}  {v.date[:19]}  {v.message}")
+        elif action == "show":
+            sys.stdout.write(store.read(args.scope, args.owner, args.path, args.rev)
+                             .decode("utf-8", "replace"))  # fmt: skip
+        else:
+            rev = store.restore(args.scope, args.owner, args.path, args.rev)
+            print(f"restored {args.path} as new version {rev[:12]}")
+    except ArtifactError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_dashboard(args: argparse.Namespace) -> int:
     import webbrowser
 
@@ -1461,6 +1512,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_models(args)
         if args.command in ("research", "jobs"):
             return _cmd_jobs(args)
+        if args.command == "artifacts":
+            return _cmd_artifacts(args)
         if args.command == "cite":
             from cairnward.research.cite import CiteError, bibliography, load_items
 

@@ -102,9 +102,10 @@ class Folder:
 class Vault:
     """Open with `Vault.open(paths)`; use as a context manager or call `close()`."""
 
-    def __init__(self, vault_engine: Engine, keys_engine: Engine):
+    def __init__(self, vault_engine: Engine, keys_engine: Engine, data_dir: Path | None = None):
         self._db = vault_engine
         self._keys = keys_engine
+        self._data_dir = data_dir  # for the conversation's artifacts (purged with it)
         # Unlocked keys of locked conversations, in memory only: id -> (key, expires)
         self._unlocked: dict[str, tuple[bytes, float]] = {}
 
@@ -114,7 +115,7 @@ class Vault:
         keys_engine = make_engine(paths.data_dir / "keys.db")
         upgrade(vault_engine, "vault")
         upgrade(keys_engine, "keys")
-        return cls(vault_engine, keys_engine)
+        return cls(vault_engine, keys_engine, paths.data_dir)
 
     @classmethod
     def files(cls, paths: Paths) -> dict[str, Path]:
@@ -539,6 +540,12 @@ class Vault:
                 )
             )
         checkpoint(self._db)
+        # 3. The conversation's artifacts (FR-ART-1) go with it.
+        if self._data_dir is not None:
+            import shutil
+
+            shutil.rmtree(self._data_dir / "artifacts" / "conversation" / conversation_id,
+                          ignore_errors=True)  # fmt: skip
 
     def purge_expired(self, *, older_than_days: int = TRASH_DAYS) -> list[str]:
         """Purge conversations that have been in the trash longer than the limit."""

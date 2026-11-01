@@ -219,6 +219,8 @@ class PolicyEngine:
             if server_name == "cairnward" and env is not None:  # Cairnward's own tools
                 research_tools = ("lit_search", "lit_ask", "lit_review_start")
                 needed = "research" if tool in research_tools else None
+                if tool.startswith("artifact_"):
+                    needed = "artifacts"
                 if needed and needed in env.tools:
                     return Rule("allow", "low", f"Cairnward's {tool} (read-only, local)")
                 return Rule("deny", "high", f"Cairnward's {tool} isn't enabled here")

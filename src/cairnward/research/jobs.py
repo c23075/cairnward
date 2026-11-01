@@ -247,7 +247,13 @@ class JobRunner:
             self.store.save(job)
         job.status = "done" if any(s.status == "done" for s in job.steps) else "failed"
         job.finished = _now()
-        self.store.write_result(job, render(job))
+        text = render(job)
+        self.store.write_result(job, text)
+        with contextlib.suppress(Exception):  # artifacts are a copy; the result file stays
+            from cairnward.artifacts import ArtifactStore
+
+            ArtifactStore(self.store.root.parent).write("job", job.id, "result.md", text,
+                                                        f"job {job.status}")  # fmt: skip
         self.store.save(job)
         if self.audit:
             failed = sum(s.status == "failed" for s in job.steps)

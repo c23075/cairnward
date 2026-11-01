@@ -298,6 +298,24 @@ class McpHub:
                         }},
                         "annotations": {"readOnlyHint": True},
                     })  # fmt: skip
+        if "artifacts" in env.tools:
+            tools += [
+                {"name": exposed_name(BUILTIN, "artifact_write"),
+                 "description": "Save a file (text) in this conversation's artifacts, versioned "
+                                "by Cairnward: each write is a new version, nothing is lost.",
+                 "inputSchema": {"type": "object", "required": ["path", "content"], "properties": {
+                     "path": {"type": "string", "description": "relative path, e.g. notes/plan.md"},
+                     "content": {"type": "string"}}}},
+                {"name": exposed_name(BUILTIN, "artifact_read"),
+                 "description": "Read a file from this conversation's artifacts.",
+                 "inputSchema": {"type": "object", "required": ["path"],
+                                 "properties": {"path": {"type": "string"}}},
+                 "annotations": {"readOnlyHint": True}},
+                {"name": exposed_name(BUILTIN, "artifact_list"),
+                 "description": "List the files in this conversation's artifacts.",
+                 "inputSchema": {"type": "object", "properties": {}},
+                 "annotations": {"readOnlyHint": True}},
+            ]  # fmt: skip
         if "vault" not in env.tools or self.vault is None:
             return tools
         return [*tools, {
@@ -313,7 +331,7 @@ class McpHub:
 
     async def _builtin(self, environment: str, tool: str, arguments: dict[str, Any], *,
                        client: str, run_id: str | None) -> dict[str, Any]:  # fmt: skip
-        """User-only actions (D46): always confirmed by the user, with provenance."""
+        """Cairnward's own tools; user-only ones (D46) are confirmed with provenance."""
         seen, conversation = (
             self.provenance.current(client, run_id) if self.provenance else ((), None)
         )
@@ -323,6 +341,9 @@ class McpHub:
             return await self._lit_ask(environment, arguments, client=client, run_id=run_id)
         if tool == "lit_review_start":
             return await self._lit_review(environment, arguments, client=client, run_id=run_id)
+        if tool.startswith("artifact_"):
+            return await self._artifact(environment, tool, arguments, client=client,
+                                        run_id=run_id, conversation=conversation)  # fmt: skip
         if tool != "lock_conversation" or conversation is None:
             return _tool_error("Cairnward doesn't know which conversation this is yet: "
                                "lock it with `cairnward vault lock`")  # fmt: skip
@@ -420,6 +441,44 @@ class McpHub:
                                 details={"sources": len(answer.sources)})  # fmt: skip
         return {"content": [{"type": "text", "text": answer.render()}],
                 "structuredContent": answer.as_dict()}  # fmt: skip
+
+    async def _artifact(self, environment: str, tool: str, arguments: dict[str, Any], *,
+                        client: str, run_id: str | None,
+                        conversation: str | None) -> dict[str, Any]:  # fmt: skip
+        from cairnward.artifacts import ArtifactError, ArtifactStore
+
+        if conversation is None:
+            return _tool_error("Cairnward doesn't know this conversation yet (send a message "
+                               "through Cairnward first)")  # fmt: skip
+        action = Action(kind="tool.call", target=f"{BUILTIN}/{tool}", environment=environment,
+                        client=client, run_id=run_id, conversation_id=conversation,
+                        actor=f"agent:{client}" if run_id else f"client:{client}",
+                        details={"path": str(arguments.get("path", ""))[:200]})  # fmt: skip
+        decision = await asyncio.to_thread(self.engine.check, action)
+        if not decision.allowed:
+            await asyncio.to_thread(self.engine.audit_deny, decision)
+            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
+        store = ArtifactStore(self.cfg.paths.data_dir)
+        content = str(arguments.get("content", ""))
+        pre = await asyncio.to_thread(self.engine.audit_pre, decision,
+                                      content if tool == "artifact_write" else None)  # fmt: skip
+        try:
+            if tool == "artifact_write":
+                rev = await asyncio.to_thread(store.write, "conversation", conversation,
+                                              str(arguments.get("path", "")), content)  # fmt: skip
+                text = f"saved {arguments.get('path')} (version {rev[:10]})"
+            elif tool == "artifact_read":
+                data = await asyncio.to_thread(store.read, "conversation", conversation,
+                                               str(arguments.get("path", "")))  # fmt: skip
+                text = data.decode("utf-8", "replace")
+            else:
+                text = "\n".join(store.files("conversation", conversation)) or "(no artifacts yet)"
+        except ArtifactError as exc:
+            await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
+                                    details={"error": str(exc)[:200]})  # fmt: skip
+            return _tool_error(str(exc))
+        await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok")
+        return {"content": [{"type": "text", "text": text}]}
 
     async def _lit_review(self, environment: str, arguments: dict[str, Any], *, client: str,
                           run_id: str | None) -> dict[str, Any]:  # fmt: skip

@@ -146,6 +146,13 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
 
         t = threading.Thread(target=ask)
         t.start()
+        from cairnward.artifacts import ArtifactStore
+
+        ArtifactStore(paths.data_dir).write(
+            "job", "e2e000000001", "page.html",
+            "<h1>Report</h1><script>parent.pwned2 = 1; window.top.pwned2 = 1</script>"
+            "<img src='https://example.com/beacon.png'>",
+        )  # fmt: skip
         link = subprocess.run([*cw, "dashboard", "--no-open"], env=env, capture_output=True,
                               text=True, check=True).stdout.splitlines()[1]  # fmt: skip
         node = subprocess.run([shutil.which("node") or "node", str(HERE / "dashboard.mjs"), link],
@@ -162,7 +169,11 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
             serve.kill()
         srv.shutdown()
     # no script errors and no CSP violations (the browser logs the expected 423 Locked)
-    assert [e for e in out["errors"] if "status of 423" not in e] == []
+    # the sandboxed preview doing its job: its script and its beacon image are blocked
+    expected = ("status of 423", "Blocked script execution", "beacon.png")
+    assert [e for e in out["errors"] if not any(x in e for x in expected)] == []
+    assert out["previewSandbox"] == "" and out["pwned2"] is False
+    assert out["previewText"] == "Report"
     assert out["landed"] == "/"  # the token left the address bar
     assert out["badge"].startswith("Privacy: Balanced")
     assert out["firstTab"] == "Skip to content"

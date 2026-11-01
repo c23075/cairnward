@@ -57,7 +57,19 @@ async function go(view) {
     && document.querySelector("main h1") && !document.querySelector("main").dataset.loading, view);
   return page.textContent("main h1");
 }
-for (const view of ["activity", "audit", "egress", "jobs", "mcp", "settings"]) {
+// an artifact with a script and an external image: the sandboxed preview runs neither
+await page.click("a[data-view=artifacts]");
+await page.waitForSelector("main h1");
+await page.click("main table a");
+await page.waitForSelector("main table a >> text=page.html");
+await page.click("main table a >> text=page.html");
+await page.waitForSelector("iframe.preview");
+await page.waitForTimeout(1500);
+out.previewSandbox = await page.getAttribute("iframe.preview", "sandbox");
+out.pwned2 = await page.evaluate(() => window.pwned2 === 1);
+out.previewText = await page.frameLocator("iframe.preview").locator("h1").textContent();
+
+for (const view of ["activity", "audit", "egress", "jobs", "artifacts", "mcp", "settings"]) {
   out[`h1_${view}`] = await go(view);
 }
 // accessibility basics on the settings page and the vault page
