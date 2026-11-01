@@ -104,7 +104,8 @@ def add_mcp_routes(
             headers["Mcp-Session-Id"] = new_sid
             return ok({
                 "protocolVersion": asked if asked in PROTOCOLS else PROTOCOLS[1],
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False},
+                                 "resources": {"listChanged": False}},
                 "serverInfo": {"name": "cairnward", "title": f"Cairnward ({environment})",
                                "version": __version__},
                 "instructions": INSTRUCTIONS,
@@ -122,13 +123,19 @@ def add_mcp_routes(
                 return ok(await hub.call(environment, name, args, client=client, run_id=run_id))
             except McpError as exc:
                 return _rpc_error(rid, exc.code or -32603, str(exc))
-        if method in ("resources/list", "prompts/list", "resources/templates/list"):
-            key = (
-                method.split("/")[0]
-                if method != "resources/templates/list"
-                else "resourceTemplates"
-            )
-            return ok({key: []})
+        try:
+            if method == "prompts/list":
+                return ok({"prompts": hub.list_prompts(environment)})
+            if method == "prompts/get":
+                return ok(hub.get_prompt(environment, str(params.get("name", "")), client))
+            if method == "resources/list":
+                return ok({"resources": hub.list_resources(environment)})
+            if method == "resources/read":
+                return ok(hub.read_resource(environment, str(params.get("uri", ""))))
+        except McpError as exc:
+            return _rpc_error(rid, exc.code or -32603, str(exc))
+        if method == "resources/templates/list":
+            return ok({"resourceTemplates": []})
         return _rpc_error(rid, -32601, f"method not found: {method}")
 
     @app.post("/mcp", include_in_schema=False)

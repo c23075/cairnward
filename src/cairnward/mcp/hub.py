@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from cairnward.audit.log import AuditLog, canonical, digest
@@ -55,6 +56,7 @@ class McpHub:
     audit: AuditLog | None = None
     provenance: ProvenanceTracker | None = None
     vault: Any = None  # for Cairnward's own tools
+    backends: Any = None  # for research tools (embeddings through the gateway's drivers)
     _servers: dict[tuple[str, str], _Server] = field(default_factory=dict)
     _locks: dict[tuple[str, str], asyncio.Lock] = field(default_factory=dict)
     _reported: set[tuple[str, str, str]] = field(default_factory=set)
@@ -182,7 +184,7 @@ class McpHub:
         server, sep, tool = name.partition(SEP)
         env = self.cfg.environments[environment]
         if server == BUILTIN and any(t["name"] == name for t in self._builtin_tools(environment)):
-            return await self._builtin(environment, tool, client=client, run_id=run_id)
+            return await self._builtin(environment, tool, arguments, client=client, run_id=run_id)
         if not sep or server not in env.mcp_servers:
             raise McpError(f"unknown tool '{name}'", -32602)
         views = await self.server_tools(server, environment)
@@ -237,11 +239,36 @@ class McpHub:
 
     # ------------------------------------------------------------------ Cairnward's own tools
 
+    def _libraries(self, environment: str) -> list[str]:
+        from cairnward.research import Research
+
+        with contextlib.closing(Research.open(self.cfg.paths)) as research:
+            return [lib.name for lib, _docs, _chunks in research.list_libraries()
+                    if lib.environment == environment and lib.embedding_dim]  # fmt: skip
+
     def _builtin_tools(self, environment: str) -> list[dict[str, Any]]:
         env = self.cfg.environments[environment]
+        tools: list[dict[str, Any]] = []
+        if "research" in env.tools and self.backends is not None:
+            libraries = self._libraries(environment)
+            if libraries:
+                tools.append({
+                    "name": exposed_name(BUILTIN, "lit_search"),
+                    "description": (
+                        "Search the user's literature library for passages relevant to a "
+                        "question (vector + keyword search). Returns passages with document "
+                        "titles and page numbers; cite them as [title, p. N]."
+                    ),
+                    "inputSchema": {"type": "object", "required": ["query"], "properties": {
+                        "query": {"type": "string", "description": "what to look for"},
+                        "library": {"type": "string", "enum": libraries},
+                        "k": {"type": "integer", "minimum": 1, "maximum": 20, "default": 8},
+                    }},
+                    "annotations": {"readOnlyHint": True},
+                })  # fmt: skip
         if "vault" not in env.tools or self.vault is None:
-            return []
-        return [{
+            return tools
+        return [*tools, {
             "name": exposed_name(BUILTIN, "lock_conversation"),
             "description": (
                 "Lock the current conversation in Cairnward's transcript vault with a "
@@ -252,12 +279,14 @@ class McpHub:
             "inputSchema": {"type": "object", "properties": {}},
         }]  # fmt: skip
 
-    async def _builtin(self, environment: str, tool: str, *, client: str,
-                       run_id: str | None) -> dict[str, Any]:  # fmt: skip
+    async def _builtin(self, environment: str, tool: str, arguments: dict[str, Any], *,
+                       client: str, run_id: str | None) -> dict[str, Any]:  # fmt: skip
         """User-only actions (D46): always confirmed by the user, with provenance."""
         seen, conversation = (
             self.provenance.current(client, run_id) if self.provenance else ((), None)
         )
+        if tool == "lit_search":
+            return await self._lit_search(environment, arguments, client=client, run_id=run_id)
         if tool != "lock_conversation" or conversation is None:
             return _tool_error("Cairnward doesn't know which conversation this is yet: "
                                "lock it with `cairnward vault lock`")  # fmt: skip
@@ -282,6 +311,100 @@ class McpHub:
             "Locked. The user set the passphrase in Cairnward; this conversation won't be "
             "sent to hosted models, and new messages are stored only while it's unlocked."
         )}]}  # fmt: skip
+
+    async def _lit_search(self, environment: str, arguments: dict[str, Any], *, client: str,
+                          run_id: str | None) -> dict[str, Any]:  # fmt: skip
+        from cairnward.research import InProcessEmbedder, Research
+
+        libraries = self._libraries(environment)
+        name = arguments.get("library") or (libraries[0] if len(libraries) == 1 else None)
+        query = str(arguments.get("query", "")).strip()
+        if name not in libraries or not query:
+            return _tool_error(f"give a query and one of the libraries: {', '.join(libraries)}")
+        k = max(1, min(int(arguments.get("k", 8) or 8), 20))
+        action = Action(
+            kind="tool.call", target=f"{BUILTIN}/lit_search", environment=environment,
+            client=client, run_id=run_id,
+            actor=f"agent:{client}" if run_id else f"client:{client}",
+            details={"library": name, "k": k},
+        )  # fmt: skip
+        decision = await asyncio.to_thread(self.engine.check, action)
+        if not decision.allowed:
+            await asyncio.to_thread(self.engine.audit_deny, decision)
+            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
+        pre = await asyncio.to_thread(self.engine.audit_pre, decision, query)
+        embedder = InProcessEmbedder(self.cfg, self.engine, self.backends, environment=environment)
+        research = Research.open(self.cfg.paths)
+        try:
+            hits = await research.search(name, query, embedder, k=k)
+        except Exception as exc:  # library and embedding backend errors alike
+            await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
+                                    details={"error": str(exc)[:300]})  # fmt: skip
+            return _tool_error(f"search failed: {exc}")
+        finally:
+            research.close()
+        if self.provenance is not None:  # document text is untrusted content
+            self.provenance.note_tool(client, run_id, f"lit_search in {name}")
+        await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok",
+                                details={"hits": len(hits)})  # fmt: skip
+        lines = [f"[{h.title or Path(h.path).name}, p. {h.pages}] {h.text}" for h in hits]
+        return {
+            "content": [{"type": "text", "text": "\n\n".join(lines) or "No passages found."}],
+            "structuredContent": {"hits": [{
+                "title": h.title, "file": Path(h.path).name, "pages": h.pages, "text": h.text,
+                "score": round(h.score, 4)} for h in hits]},
+        }  # fmt: skip
+
+    # ------------------------------------------------------------------ skills (prompts)
+
+    def _skills(self, environment: str) -> dict[str, Any]:
+        from cairnward import skills
+
+        wanted = set(self.cfg.environments[environment].skills)
+        found = skills.load(self.cfg.paths.config_dir / "skills")
+        return {n: s for n, s in found.items() if n in wanted}
+
+    def list_prompts(self, environment: str) -> list[dict[str, Any]]:
+        return [{"name": n, "title": n.replace("-", " ").replace("_", " "),
+                 "description": s.description, "arguments": []}
+                for n, s in self._skills(environment).items()]  # fmt: skip
+
+    def get_prompt(self, environment: str, name: str, client: str) -> dict[str, Any]:
+        from cairnward import skills
+
+        skill = self._skills(environment).get(name)
+        if skill is None:
+            raise McpError(f"unknown prompt '{name}'", -32602)
+        self._audit("skill.use", actor=f"client:{client}", target=name, environment=environment)
+        extra = skills.files(skill)
+        text = skill.body
+        if extra:
+            text += "\n\nFiles of this skill (MCP resources): " + ", ".join(
+                f"skill://{name}/{f}" for f in extra)  # fmt: skip
+        return {
+            "description": skill.description,
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}],
+        }
+
+    def list_resources(self, environment: str) -> list[dict[str, Any]]:
+        from cairnward import skills
+
+        return [{"uri": f"skill://{n}/{f}", "name": f"{n}/{f}", "mimeType": "text/plain"}
+                for n, s in self._skills(environment).items() for f in skills.files(s)]  # fmt: skip
+
+    def read_resource(self, environment: str, uri: str) -> dict[str, Any]:
+        from cairnward import skills
+
+        rest = uri.removeprefix("skill://")
+        name, _, rel = rest.partition("/")
+        skill = self._skills(environment).get(name)
+        if not uri.startswith("skill://") or skill is None:
+            raise McpError(f"unknown resource '{uri}'", -32002)
+        try:
+            text = skills.read(skill, rel)
+        except skills.SkillError as exc:
+            raise McpError(str(exc), -32002) from None
+        return {"contents": [{"uri": uri, "mimeType": "text/plain", "text": text}]}
 
     def approve(self, server: str, environment: str, approvals: dict[str, str],
                 current: list[ToolView]) -> None:  # fmt: skip

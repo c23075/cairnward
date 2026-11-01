@@ -167,7 +167,7 @@ def _core_parts(
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     tracker = ProvenanceTracker()
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
-                 provenance=tracker, vault=vault)  # fmt: skip
+                 provenance=tracker, vault=vault, backends=backends)  # fmt: skip
     run_keys = RunKeys()
     from cairnward.gateway.scheduling import BenchProfile
 
