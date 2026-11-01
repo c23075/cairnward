@@ -72,6 +72,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--by", choices=["user", "model"], default="model", help="who starts it (default: model)"
     )
 
+    serve = sub.add_parser("serve", help="run the gateway and cairnward-egress (foreground)")
+    serve.add_argument("--no-egress", action="store_true", help="don't start cairnward-egress")
+
+    cli_cmd = sub.add_parser("client", help="API keys for chat clients and coding agents")
+    cli_sub = cli_cmd.add_subparsers(dest="client_command", metavar="ACTION", required=True)
+    add = cli_sub.add_parser("add", help="create (or rotate) a client's API key; shown once")
+    add.add_argument("name")
+    rm = cli_sub.add_parser("remove", help="revoke a client's API key")
+    rm.add_argument("name")
+    cli_sub.add_parser("list", help="clients with API keys")
+
+    api = sub.add_parser("api", help="the gateway's API contract")
+    api_sub = api.add_subparsers(dest="api_command", metavar="ACTION", required=True)
+    oas = api_sub.add_parser("schema", help="write the OpenAPI document")
+    oas.add_argument("--out", type=Path, default=Path("api/openapi.json"))
+    oas.add_argument("--check", action="store_true", help="only check it is up to date")
+
     egress = sub.add_parser("egress", help="run cairnward-egress, the outbound proxy (foreground)")
     egress.add_argument("--env", help="environment for the printed session (default: default env)")
     egress.add_argument("--client", help="client name to attribute traffic to")
@@ -276,6 +293,116 @@ def _cmd_egress(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_client(args: argparse.Namespace) -> int:
+    from cairnward.gateway import ClientKeys
+
+    keys = ClientKeys.at(default_paths(args.config_dir).state_dir)
+    if args.client_command == "add":
+        try:
+            key = keys.add(args.name)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(f"API key for '{args.name}' (shown once; store it in the client's settings):")
+        print(key)
+        cfg = default_paths(args.config_dir)
+        print(
+            f"Base URL: http://127.0.0.1:<gateway_port>/v1  (see {cfg.main_config})",
+            file=sys.stderr,
+        )
+        return 0
+    if args.client_command == "remove":
+        if keys.remove(args.name):
+            print(f"Revoked '{args.name}'.")
+            return 0
+        print(f"No key for '{args.name}'.", file=sys.stderr)
+        return 1
+    for name, created in keys.names().items():
+        print(f"{name:24} created {created}")
+    return 0
+
+
+def _openapi_text() -> str:
+    from cairnward.gateway.app import openapi_document
+
+    return json.dumps(openapi_document(), indent=2, sort_keys=True) + "\n"
+
+
+def _cmd_api(args: argparse.Namespace) -> int:
+    text = _openapi_text()
+    if args.check:
+        if not args.out.exists() or args.out.read_text(encoding="utf-8") != text:
+            print(f"{args.out} is out of date (run `cairnward api schema`)", file=sys.stderr)
+            return 1
+        print("OpenAPI document up to date.")
+        return 0
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(text, encoding="utf-8")
+    print(f"wrote {args.out}")
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    import asyncio
+
+    import uvicorn
+
+    from cairnward.audit import AuditLog, enabled_for, record_settings
+    from cairnward.backends import Backends
+    from cairnward.egress import EgressProxy, Session, Sessions
+    from cairnward.gateway import ClientKeys, GatewayDeps, create_app
+    from cairnward.policy import DenyApprover, PolicyEngine, TerminalApprover
+    from cairnward.store import Vault
+
+    cfg = _load(args)
+    server = cfg.main.server
+    approver = TerminalApprover() if sys.stdin.isatty() else DenyApprover()
+    with AuditLog.open(cfg.paths, enabled_for(cfg)) as log, Vault.open(cfg.paths) as vault:
+        sync = record_settings(cfg, log)
+        engine = PolicyEngine(cfg, approver=approver, audit=log)
+        sessions = Sessions()
+        tokens = {env: sessions.create(Session(environment=env, actor="cairnward"))
+                  for env in cfg.environments}  # fmt: skip
+
+        def egress_url(env: str | None) -> str | None:
+            if args.no_egress:
+                return None
+            token = tokens.get(env or cfg.main.defaults.environment)
+            return f"http://cw:{token}@127.0.0.1:{server.egress_port}"
+
+        backends = Backends(cfg.backends, egress_url_for=egress_url)
+        app = create_app(
+            GatewayDeps(cfg, engine, backends, ClientKeys.at(cfg.paths.state_dir), vault)
+        )
+        uv = uvicorn.Server(uvicorn.Config(app, host=server.gateway_host, port=server.gateway_port,
+                                           log_level="warning", access_log=False))  # fmt: skip
+
+        async def run() -> None:
+            tasks = [uv.serve()]
+            if not args.no_egress:
+                proxy = EgressProxy(cfg, engine, sessions)
+                await proxy.start()
+                tasks.append(proxy.serve_forever())
+                print(f"cairnward-egress on 127.0.0.1:{proxy.port}", file=sys.stderr)
+            print(f"Cairnward gateway on http://{server.gateway_host}:{server.gateway_port}/v1 "
+                  f"(privacy: {cfg.privacy().label})", file=sys.stderr)  # fmt: skip
+            if sync.changes:
+                print(f"Recorded {len(sync.changes)} settings change(s) in the audit log.",
+                      file=sys.stderr)  # fmt: skip
+            if not sys.stdin.isatty():
+                print("No terminal: requests that need approval are denied.", file=sys.stderr)
+            try:
+                await asyncio.gather(*tasks)
+            finally:
+                await backends.aclose()
+
+        try:
+            asyncio.run(run())
+        except KeyboardInterrupt:
+            print("\nstopped", file=sys.stderr)
+    return 0
+
+
 def _privacy_dict(eff: EffectivePrivacy) -> dict[str, object]:
     return {
         "environment": eff.environment,
@@ -363,6 +490,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_policy_explain(args)
         if args.command == "egress":
             return _cmd_egress(args)
+        if args.command == "serve":
+            return _cmd_serve(args)
+        if args.command == "client":
+            return _cmd_client(args)
+        if args.command == "api":
+            return _cmd_api(args)
     except ConfigError as exc:
         print("Configuration problems:", file=sys.stderr)
         for problem in exc.problems:

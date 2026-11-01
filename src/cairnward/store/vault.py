@@ -353,6 +353,23 @@ class Vault:
             )
         return out
 
+    def find_by_prefix_hash(self, prefix_hash: str) -> tuple[str, str] | None:
+        """(conversation_id, message_id) of the newest live message with this prefix hash."""
+        query = (
+            select(messages.c.conversation_id, messages.c.id)
+            .join(conversations, conversations.c.id == messages.c.conversation_id)
+            .where(
+                messages.c.prefix_hash == prefix_hash,
+                conversations.c.deleted_at.is_(None),
+                conversations.c.purged_at.is_(None),
+            )
+            .order_by(messages.c.created_at.desc())
+            .limit(1)
+        )
+        with self._db.connect() as conn:
+            row = conn.execute(query).first()
+        return (row.conversation_id, row.id) if row else None
+
     # ------------------------------------------------------------------ folders
 
     def create_folder(self, name: str, parent_id: str | None = None) -> str:
