@@ -72,7 +72,7 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D58 | Weakening | Allowed without friction, but **visible** (dashboard badge, `cairnward status`, `cairnward privacy show`) and **logged** (audit record of every change, written before audit itself is switched off) | 0012 |
 | D59 | Reference machine | Ryzen 3 3200G (4 cores), 29.3 GB usable RAM, no GPU, Debian 13. Main model reads prompts at ~20 tok/s, writes at 2–11 tok/s; 1.7B model reads at ~50 tok/s | — |
 | D60 | Default context | **8K** tokens (16K allowed with a warning; 32K only on machines with more RAM/speed) | — |
-| D61 | Default models | Main: `qwen3:30b` (30B-A3B MoE); **fast: `qwen3:1.7b`** (2.3 GB, loads in 2 s, reads 2.5× faster); `qwen3:4b` to be measured | — |
+| D61 | Default models | Main: `qwen3:30b` (30B-A3B MoE); **fast: `qwen3:1.7b`** (2.3 GB, loads in 2 s, reads 2.5× faster). `qwen3:4b` measured: no faster than the 30B MoE on CPU, so it's only offered as a low-memory main model | — |
 | D62 | Cache-aware gateway | Never alter a conversation's prompt prefix; keep the main model loaded while in use; **conversation affinity** so follow-up turns reuse the cache (measured 18.6× faster); save/restore caches per conversation where the backend supports it (llama.cpp slots) | — |
 | D63 | Tiered research pipeline | Fast model screens titles/abstracts; main model reads only included papers; full-text reading is an overnight job (~5–8 papers/hour) | — |
 | D64 | Coding agents on this hardware | Lean agents first (**Aider**); heavy-prompt agents (Qwen Code, opencode, Goose) supported but flagged as slow on CPU (first turn of a ~10K-token prompt ≈ 8 min) | — |
@@ -326,6 +326,8 @@ As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Sc
 - Measured on the reference machine (D59; [results](bench/results-2026-11-01-ryzen3-3200g.md)): Ryzen 3 3200G, 4 cores, 29.3 GB usable RAM, no GPU, Debian 13.
   - `qwen3:30b`: reads ~20 tok/s, writes 11 → 2 tok/s as context grows to 4K; 18.2 GB at 8K context; loads in ~74 s.
   - `qwen3:1.7b`: reads ~50 tok/s, writes 17 → 6.5 tok/s; 2.3 GB; loads in ~2 s.
+  - `qwen3:4b`: reads ~21 tok/s (same as the 30B MoE), writes 10 → 2.6 tok/s; 3.6 GB. Small dense models are only faster on CPU when they have fewer *active* parameters than the MoE model (~3B).
+  - Load time of the 30B model: 33 s when cached by the OS, 74 s cold.
   - Follow-up turns with an unchanged prompt start: 18.6× faster (11.7 s vs 217 s at 4K).
   - Main + fast model fit together at 8K context only when heavy desktop apps are closed (~9 GB left).
 - Consequences: 8K default context (D60); first turns of long prompts take minutes, follow-ups seconds (D62); heavy coding agents are slow (D64); research runs as overnight batch jobs (D63).
@@ -368,8 +370,7 @@ As v0.5 §9, plus: **isolation tests** (every sandbox type tries direct DNS/TCP/
 As v0.5 §10 (pydantic-validated TOML with JSON Schema, Alembic migrations, OpenAPI for the dashboard/management API, versioned event-log format), plus the **client profile** format for `cairnward run` and `cairnward client add`.
 
 ## 12. Open questions
-0a. Is the steep drop in generation speed with context (11 → 2 tok/s at 4K) caused by the flash-attention/`q8_0` KV settings? A/B test pending; result decides the default Ollama settings `cairnward doctor` recommends.
-0b. Measure `qwen3:4b` to decide between 1.7B and 4B as the fast model.
+0a. Optional: does enabling Ollama flash attention (without KV quantisation) reduce the slowdown in generation speed with context on this CPU? If so, `cairnward doctor` recommends it.
 0. Should the dashboard/endpoint hardening (loopback-only binding, Host/Origin checks) also be switchable? Currently not, because switching it off exposes Cairnward rather than reducing friction (§5.0).
 1. Third tested chat client: LibreChat or AnythingLLM (decide at M2).
 2. Reuse Anthropic's `sandbox-runtime` (Node.js) directly, or reimplement its approach in Python (decide in T0.6, ADR-0013).

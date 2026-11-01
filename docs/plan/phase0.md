@@ -11,7 +11,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | # | Task | Reqs | Depends | Size |
 |---|---|---|---|---|
 | T0.1 | Project setup: uv, ruff, mypy strict, pytest, CI (Debian 12, Ubuntu, Windows unit tests), pip-audit, Dependabot | NFR-MAINT-1, NFR-SUP-1 | — | S ✅ |
-| T0.2 | Benchmark script; run on reference machine; record results in `docs/bench/` | NFR-P3 | — | S ✅ (results 2026-11-01; KV A/B and `qwen3:4b` pending) |
+| T0.2 | Benchmark script; run on reference machine; record results in `docs/bench/` | NFR-P3 | — | S ✅ (results 2026-11-01; optional flash-attention test pending) |
 | T0.3 | Rename package to `cairnward`; Apache-2.0 LICENSE | D51 | — | S ✅ |
 | T0.4 | Config: pydantic models for `cairnward.toml`, `backends.toml`, `clients.toml`; JSON Schema export | spec §11 | T0.3 | S |
 | T0.4b | Privacy settings model: `[privacy]` table, presets, environment overrides, `privacy show`, settings-change audit hooks; CI matrix over presets | FR-PRIV-1, FR-PRIV-2, FR-PRIV-4, FR-PRIV-6 | T0.4 | M |
