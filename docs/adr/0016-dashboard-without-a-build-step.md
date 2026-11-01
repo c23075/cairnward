@@ -1,6 +1,6 @@
 # ADR-0016: Dashboard as plain ES modules, without a build step
 
-- Status: Accepted (implementation decision; review welcome)
+- Status: Provisional, pending owner review (pinned 2026-11-01; see spec §12). Built and in use; easy to revisit
 - Date: 2026-11-01
 - Spec: §3.1, §4.9; FR-DASH-1..3, FR-VLT-3; supersedes the "Svelte, built offline" line in §6
 

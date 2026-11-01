@@ -406,11 +406,12 @@ As v0.5 §10 (pydantic-validated TOML with JSON Schema, Alembic migrations, Open
 ## 12. Open questions
 0a. Optional: does enabling Ollama flash attention (without KV quantisation) reduce the slowdown in generation speed with context on this CPU? If so, `cairnward doctor` recommends it.
 0. Should the dashboard/endpoint hardening (loopback-only binding, Host/Origin checks) also be switchable? Currently not, because switching it off exposes Cairnward rather than reducing friction (§5.0).
-1. Third tested chat client: LibreChat or AnythingLLM (decide at M2).
+1. ~~Third tested chat client~~: LibreChat (T2.9).
 2. ~~Reuse `sandbox-runtime` or reimplement?~~ Decided in T0.6: reuse it ([ADR-0013](adr/0013-reuse-sandbox-runtime-for-isolation.md)).
-3. PaperQA2 as engine or own pipeline (decide in T1.1).
+3. ~~PaperQA2 as engine or own pipeline~~: own pipeline, PaperQA2 optional ([ADR-0014](adr/0014-literature-engine.md)).
 4. Repo rename to `cairnward` (owner action, with the default-branch fix).
 5. Drive folders for the first mirror (setup time).
+6. **Pinned for owner review (2026-11-01):** own minimal MCP JSON-RPC layer instead of the MCP Python SDK ([ADR-0015](adr/0015-mcp-proxy.md)); dashboard as plain ES modules instead of Svelte ([ADR-0016](adr/0016-dashboard-without-a-build-step.md)). Both are built and in use; switching later is contained (the MCP layer is ~300 lines behind the hub; the dashboard talks to a JSON API).
 
 ## 13. History
 - v0.1–v0.5: all-in-one local agent with Claude-app features (see git history of this file).

@@ -1,6 +1,6 @@
 # ADR-0015: MCP tool proxy
 
-- Status: Accepted (implementation decision; review welcome)
+- Status: Provisional, pending owner review (pinned 2026-11-01; see spec §12). Built and in use; easy to revisit
 - Date: 2026-11-01
 - Spec: §4.2; FR-MCP-1, FR-MCP-2, FR-MCP-3; threat model T-04, T-07, T-12
 
