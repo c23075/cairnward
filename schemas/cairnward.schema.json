@@ -1,0 +1,359 @@
+{
+  "$defs": {
+    "Defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "default": "medium",
+          "title": "Effort",
+          "type": "string"
+        },
+        "environment": {
+          "default": "coding",
+          "title": "Environment",
+          "type": "string"
+        }
+      },
+      "title": "Defaults",
+      "type": "object"
+    },
+    "PrivacyOverrides": {
+      "additionalProperties": false,
+      "description": "A `[privacy]` table: an optional preset plus optional individual settings.",
+      "properties": {
+        "approvals": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "high_only",
+                "tiered"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approvals"
+        },
+        "audit": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audit"
+        },
+        "audit_anchor": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "git"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audit Anchor"
+        },
+        "backup_purge": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "ask",
+                "on"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backup Purge"
+        },
+        "crypto_shred": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Crypto Shred"
+        },
+        "egress_report": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Egress Report"
+        },
+        "hosted_backends": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "ask",
+                "deny"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hosted Backends"
+        },
+        "isolation": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Isolation"
+        },
+        "mcp_pinning": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mcp Pinning"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "ask",
+                "allowlist",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network"
+        },
+        "network_allow_hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "hosts allowed when network = 'allowlist' or pre-approved in 'ask'",
+          "title": "Network Allow Hosts"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "balanced",
+                "strict"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "open, balanced or strict",
+          "title": "Preset"
+        },
+        "redaction": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "warn",
+                "enforce"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Redaction"
+        },
+        "vault": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "digests",
+                "full"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vault"
+        }
+      },
+      "title": "PrivacyOverrides",
+      "type": "object"
+    },
+    "ServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "dashboard_host": {
+          "default": "127.0.0.1",
+          "description": "loopback only",
+          "title": "Dashboard Host",
+          "type": "string"
+        },
+        "dashboard_port": {
+          "default": 8485,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Dashboard Port",
+          "type": "integer"
+        },
+        "gateway_host": {
+          "default": "127.0.0.1",
+          "description": "loopback only",
+          "title": "Gateway Host",
+          "type": "string"
+        },
+        "gateway_port": {
+          "default": 8484,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Gateway Port",
+          "type": "integer"
+        },
+        "socket_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unix socket for the CLI (default: <state_dir>/cairnward.sock)",
+          "title": "Socket Path"
+        }
+      },
+      "title": "ServerConfig",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/c23075/cairnward/schemas/cairnward.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "cairnward.toml",
+  "properties": {
+    "defaults": {
+      "$ref": "#/$defs/Defaults",
+      "default": {
+        "effort": "medium",
+        "environment": "coding"
+      }
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacyOverrides",
+      "default": {
+        "approvals": null,
+        "audit": null,
+        "audit_anchor": null,
+        "backup_purge": null,
+        "crypto_shred": null,
+        "egress_report": null,
+        "hosted_backends": null,
+        "isolation": null,
+        "mcp_pinning": null,
+        "network": null,
+        "network_allow_hosts": null,
+        "preset": null,
+        "redaction": null,
+        "vault": null
+      }
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "server": {
+      "$ref": "#/$defs/ServerConfig",
+      "default": {
+        "dashboard_host": "127.0.0.1",
+        "dashboard_port": 8485,
+        "gateway_host": "127.0.0.1",
+        "gateway_port": 8484,
+        "socket_path": null
+      }
+    }
+  },
+  "title": "MainConfig",
+  "type": "object"
+}

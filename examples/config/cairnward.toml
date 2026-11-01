@@ -1,0 +1,18 @@
+#:schema ../../schemas/cairnward.schema.json
+# Copy to ~/.config/cairnward/cairnward.toml. Every setting is optional.
+schema_version = 1
+
+[server]
+# The gateway and dashboard only ever listen on this machine (not switchable).
+gateway_port = 8484
+dashboard_port = 8485
+
+[privacy]
+# open | balanced | strict  (spec §5.0). Individual settings below override the preset.
+preset = "balanced"
+# approvals = "tiered"
+# network_allow_hosts = ["pypi.org"]
+
+[defaults]
+environment = "coding"
+effort = "medium"

@@ -5,7 +5,9 @@ description = "Local privacy gateway for AI clients and agents, with literature-
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = []
+dependencies = [
+    "pydantic>=2.8",
+]
 
 [project.scripts]
 cairnward = "cairnward.cli:main"

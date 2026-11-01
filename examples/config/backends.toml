@@ -1,0 +1,33 @@
+#:schema ../../schemas/backends.schema.json
+# Model servers. Swap hardware or models by editing this file only.
+schema_version = 1
+fallback = ["local-ollama"]
+
+[backends.local-ollama]
+driver = "ollama"
+url = "http://127.0.0.1:11434"
+
+# llama.cpp's llama-server: faster on CPU MoE models, supports KV-cache save/restore.
+[backends.local-llamacpp]
+driver = "openai_compat"
+url = "http://127.0.0.1:8080/v1"
+
+# A hosted provider: denied by the privacy settings unless you allow hosted backends.
+# The key lives in your OS keychain, never in this file.
+[backends.hosted-qwen]
+driver = "openai_compat"
+url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+location = "hosted"
+api_key = "keyring:hosted-qwen"
+
+[roles.main]
+backend = "local-ollama"
+model = "qwen3:30b"
+
+[roles.fast]
+backend = "local-ollama"
+model = "qwen3:1.7b"
+
+[roles.embed]
+backend = "local-ollama"
+model = "qwen3-embedding:0.6b"

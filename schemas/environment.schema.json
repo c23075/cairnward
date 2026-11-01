@@ -1,0 +1,372 @@
+{
+  "$defs": {
+    "PrivacyOverrides": {
+      "additionalProperties": false,
+      "description": "A `[privacy]` table: an optional preset plus optional individual settings.",
+      "properties": {
+        "approvals": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "high_only",
+                "tiered"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approvals"
+        },
+        "audit": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audit"
+        },
+        "audit_anchor": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "git"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audit Anchor"
+        },
+        "backup_purge": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "ask",
+                "on"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backup Purge"
+        },
+        "crypto_shred": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Crypto Shred"
+        },
+        "egress_report": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Egress Report"
+        },
+        "hosted_backends": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "ask",
+                "deny"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hosted Backends"
+        },
+        "isolation": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Isolation"
+        },
+        "mcp_pinning": {
+          "anyOf": [
+            {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mcp Pinning"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "ask",
+                "allowlist",
+                "off"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network"
+        },
+        "network_allow_hosts": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "hosts allowed when network = 'allowlist' or pre-approved in 'ask'",
+          "title": "Network Allow Hosts"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "balanced",
+                "strict"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "open, balanced or strict",
+          "title": "Preset"
+        },
+        "redaction": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "warn",
+                "enforce"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Redaction"
+        },
+        "vault": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "digests",
+                "full"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vault"
+        }
+      },
+      "title": "PrivacyOverrides",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/c23075/cairnward/schemas/environment.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "environments/<name>.toml (the file name is the environment's name)",
+  "properties": {
+    "backend": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "override the backend for all roles",
+      "title": "Backend"
+    },
+    "citation_style": {
+      "default": "apa",
+      "title": "Citation Style",
+      "type": "string"
+    },
+    "context_tokens": {
+      "default": 8192,
+      "description": "spec D60",
+      "maximum": 1048576,
+      "minimum": 512,
+      "title": "Context Tokens",
+      "type": "integer"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "effort_default": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Effort Default"
+    },
+    "models": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "enum": [
+          "main",
+          "fast",
+          "vision",
+          "embed"
+        ]
+      },
+      "title": "Models",
+      "type": "object"
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacyOverrides",
+      "default": {
+        "approvals": null,
+        "audit": null,
+        "audit_anchor": null,
+        "backup_purge": null,
+        "crypto_shred": null,
+        "egress_report": null,
+        "hosted_backends": null,
+        "isolation": null,
+        "mcp_pinning": null,
+        "network": null,
+        "network_allow_hosts": null,
+        "preset": null,
+        "redaction": null,
+        "vault": null
+      }
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "skills": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Skills",
+      "type": "array"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tools",
+      "type": "array"
+    },
+    "vault_retention_days": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Vault Retention Days"
+    },
+    "workspace": {
+      "description": "folders agents may write",
+      "items": {
+        "format": "path",
+        "type": "string"
+      },
+      "title": "Workspace",
+      "type": "array"
+    }
+  },
+  "title": "EnvironmentConfig",
+  "type": "object"
+}

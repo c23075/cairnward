@@ -1,0 +1,13 @@
+#:schema ../../schemas/clients.schema.json
+# Chat apps and coding agents that use the gateway. API keys are issued with
+# `cairnward client add` and kept in the state store, not here.
+schema_version = 1
+
+[clients.open-webui]
+kind = "chat"
+profile = "open-webui"
+default_environment = "coding"
+
+[clients.aider]
+kind = "agent"
+profile = "aider"

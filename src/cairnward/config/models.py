@@ -1,0 +1,372 @@
+"""Schemas for Cairnward's configuration files (spec §4.1, §4.3, §5.0, §11).
+
+Every file has `schema_version`; unknown keys are errors (typos shouldn't silently
+weaken a setting). Built-in defaults match the spec's reference-machine choices.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import re
+from pathlib import Path
+from typing import Any, Literal, get_args
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from cairnward.config.privacy import PrivacyOverrides
+
+SCHEMA_VERSION: Literal[1] = 1
+Role = Literal["main", "fast", "vision", "embed"]
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+_SECRET_REF = re.compile(r"^(keyring|env):[A-Za-z0-9_.-]{1,128}$")
+_DURATION = re.compile(r"^(\d+)(s|m|h)$")
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def _check_name(value: str, what: str) -> str:
+    if not _NAME.match(value):
+        raise ValueError(
+            f"{what} '{value}' must be lowercase letters, digits, '.', '_' or '-' (max 63)"
+        )
+    return value
+
+
+def parse_duration(value: str) -> int:
+    """'90s', '30m', '2h' -> seconds."""
+    m = _DURATION.match(value)
+    if not m:
+        raise ValueError(f"duration '{value}' must look like 90s, 30m or 2h")
+    return int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
+
+
+# --------------------------------------------------------------------------- cairnward.toml
+
+
+class ServerConfig(_Strict):
+    socket_path: Path | None = Field(
+        default=None, description="Unix socket for the CLI (default: <state_dir>/cairnward.sock)"
+    )
+    gateway_host: str = Field(default="127.0.0.1", description="loopback only")
+    gateway_port: int = Field(default=8484, ge=1, le=65535)
+    dashboard_host: str = Field(default="127.0.0.1", description="loopback only")
+    dashboard_port: int = Field(default=8485, ge=1, le=65535)
+
+    @field_validator("gateway_host", "dashboard_host")
+    @classmethod
+    def _loopback_only(cls, value: str) -> str:
+        # Not switchable (spec §5.0): binding elsewhere would expose Cairnward to the network.
+        if value not in LOOPBACK_HOSTS:
+            raise ValueError(
+                f"'{value}' is not a loopback address; the gateway and dashboard only listen "
+                "on this machine (127.0.0.1, ::1 or localhost)"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _distinct_ports(self) -> ServerConfig:
+        if self.gateway_port == self.dashboard_port:
+            raise ValueError("gateway_port and dashboard_port must differ")
+        return self
+
+
+class Defaults(_Strict):
+    environment: str = "coding"
+    effort: str = "medium"
+
+
+class MainConfig(_Strict):
+    """cairnward.toml"""
+
+    schema_version: Literal[1] = SCHEMA_VERSION
+    server: ServerConfig = ServerConfig()
+    privacy: PrivacyOverrides = PrivacyOverrides()
+    defaults: Defaults = Defaults()
+
+
+# --------------------------------------------------------------------------- backends.toml
+
+
+class Backend(_Strict):
+    driver: Literal["ollama", "openai_compat"]
+    url: str
+    location: Literal["local", "lan", "hosted"] = "local"
+    api_key: str | None = Field(
+        default=None,
+        description="a reference, never the key itself: 'keyring:<name>' or 'env:<VAR>'",
+    )
+    max_parallel: int = Field(default=1, ge=1, le=64)
+    timeout_s: int = Field(default=900, ge=1)
+
+    @field_validator("api_key")
+    @classmethod
+    def _secret_ref(cls, value: str | None) -> str | None:
+        if value is not None and not _SECRET_REF.match(value):
+            raise ValueError(
+                "api_key must be a reference like 'keyring:openrouter' or 'env:OPENROUTER_KEY'; "
+                "keys are never stored in config files"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _url_matches_location(self) -> Backend:
+        parsed = urlparse(self.url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError(f"url '{self.url}' must be an http(s) URL with a host")
+        host = parsed.hostname
+        if self.location == "local" and host not in LOOPBACK_HOSTS:
+            raise ValueError(
+                f"location 'local' requires a loopback URL (got host '{host}'); "
+                "use location = 'lan' or 'hosted' for other machines"
+            )
+        if self.location == "lan":
+            try:
+                ip = ipaddress.ip_address(host)
+            except ValueError:
+                ip = None  # a LAN host name; can't check further here
+            if ip is not None and not ip.is_private:
+                raise ValueError(f"location 'lan' requires a private address (got '{host}')")
+        if self.location == "hosted" and parsed.scheme != "https":
+            raise ValueError("hosted backends must use https")
+        return self
+
+
+class RoleModel(_Strict):
+    backend: str
+    model: str
+
+
+def _default_backends() -> dict[str, Backend]:
+    return {"local-ollama": Backend(driver="ollama", url="http://127.0.0.1:11434")}
+
+
+def _default_roles() -> dict[Role, RoleModel]:
+    # Spec D61: measured on the reference machine (docs/bench/).
+    return {
+        "main": RoleModel(backend="local-ollama", model="qwen3:30b"),
+        "fast": RoleModel(backend="local-ollama", model="qwen3:1.7b"),
+        "embed": RoleModel(backend="local-ollama", model="qwen3-embedding:0.6b"),
+    }
+
+
+class BackendsConfig(_Strict):
+    """backends.toml"""
+
+    schema_version: Literal[1] = SCHEMA_VERSION
+    backends: dict[str, Backend] = Field(default_factory=_default_backends)
+    roles: dict[Role, RoleModel] = Field(default_factory=_default_roles)
+    fallback: list[str] = Field(
+        default_factory=list, description="local backends to try if a backend is down"
+    )
+
+    @field_validator("backends")
+    @classmethod
+    def _names(cls, value: dict[str, Backend]) -> dict[str, Backend]:
+        for name in value:
+            _check_name(name, "backend name")
+        return value
+
+    @model_validator(mode="after")
+    def _references(self) -> BackendsConfig:
+        for role, rm in self.roles.items():
+            if rm.backend not in self.backends:
+                raise ValueError(f"roles.{role}: unknown backend '{rm.backend}'")
+        for name in self.fallback:
+            if name not in self.backends:
+                raise ValueError(f"fallback: unknown backend '{name}'")
+            if self.backends[name].location != "local":
+                raise ValueError(
+                    f"fallback: '{name}' is not local; fallback only uses local backends"
+                )
+        return self
+
+
+# --------------------------------------------------------------------------- clients.toml
+
+AgentProfile = Literal["aider", "qwen-code", "opencode", "goose", "generic"]
+ChatProfile = Literal["open-webui", "jan", "librechat", "anythingllm", "generic"]
+
+
+class Client(_Strict):
+    kind: Literal["chat", "agent"]
+    profile: str = "generic"
+    default_environment: str | None = None
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _profile_matches_kind(self) -> Client:
+        allowed = AgentProfile if self.kind == "agent" else ChatProfile
+        if self.profile not in get_args(allowed):
+            raise ValueError(f"profile '{self.profile}' is not a known {self.kind} profile")
+        return self
+
+
+class ClientsConfig(_Strict):
+    """clients.toml (API keys live in the state store, not here)"""
+
+    schema_version: Literal[1] = SCHEMA_VERSION
+    clients: dict[str, Client] = Field(default_factory=dict)
+
+    @field_validator("clients")
+    @classmethod
+    def _names(cls, value: dict[str, Client]) -> dict[str, Client]:
+        for name in value:
+            _check_name(name, "client name")
+        return value
+
+
+# --------------------------------------------------------------------------- effort.toml
+
+
+class SubagentLimits(_Strict):
+    max: int = Field(default=0, ge=0, le=32)
+    max_parallel: int = Field(default=1, ge=1, le=32)
+    backend: str | None = None
+    effort: str | None = None
+
+
+class EffortLevel(_Strict):
+    model_role: Literal["main", "fast"] | None = Field(default=None, description="or set model")
+    model: str | None = None
+    backend: str | None = None
+    thinking: bool = False
+    thinking_budget_tokens: int | None = Field(default=None, ge=0)
+    max_tool_steps: int = Field(default=10, ge=0, le=1000)
+    subagents: SubagentLimits = SubagentLimits()
+    context_tokens: int | None = Field(default=None, ge=512, le=1_048_576)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    top_p: float | None = Field(default=None, gt=0, le=1)
+    top_k: int | None = Field(default=None, ge=1)
+    min_p: float | None = Field(default=None, ge=0, le=1)
+    wall_clock_limit: str | None = Field(default=None, description="e.g. 30m")
+    max_tokens_per_request: int | None = Field(default=None, ge=1)
+    skills: list[str] = Field(default_factory=list)
+    hidden: bool = False
+    order: int = 100
+
+    @field_validator("subagents", mode="before")
+    @classmethod
+    def _int_subagents(cls, value: Any) -> Any:
+        return {"max": value} if isinstance(value, int) else value
+
+    @field_validator("wall_clock_limit")
+    @classmethod
+    def _duration(cls, value: str | None) -> str | None:
+        if value is not None:
+            parse_duration(value)
+        return value
+
+    @model_validator(mode="after")
+    def _model_or_role(self) -> EffortLevel:
+        if (self.model_role is None) == (self.model is None):
+            raise ValueError("set exactly one of model_role or model")
+        return self
+
+
+def default_effort_levels() -> dict[str, EffortLevel]:
+    """Spec §4.2 with D61 models."""
+    return {
+        "low": EffortLevel(model_role="fast", thinking=False, max_tool_steps=3, order=10),
+        "medium": EffortLevel(
+            model_role="main",
+            thinking=False,
+            max_tool_steps=10,
+            subagents=SubagentLimits(max=2),
+            order=20,
+        ),
+        "high": EffortLevel(
+            model_role="main",
+            thinking=True,
+            thinking_budget_tokens=4096,
+            max_tool_steps=25,
+            subagents=SubagentLimits(max=4),
+            order=30,
+        ),
+    }
+
+
+class EffortConfig(_Strict):
+    """effort.toml: levels here replace built-ins of the same name and add new ones."""
+
+    schema_version: Literal[1] = SCHEMA_VERSION
+    effort: dict[str, EffortLevel] = Field(default_factory=dict)
+
+    @field_validator("effort")
+    @classmethod
+    def _names(cls, value: dict[str, EffortLevel]) -> dict[str, EffortLevel]:
+        for name in value:
+            _check_name(name, "effort level")
+        return value
+
+
+# --------------------------------------------------------------------------- environments/*.toml
+
+
+class EnvironmentConfig(_Strict):
+    """environments/<name>.toml (the file name is the environment's name)"""
+
+    schema_version: Literal[1] = SCHEMA_VERSION
+    description: str = ""
+    workspace: list[Path] = Field(default_factory=list, description="folders agents may write")
+    backend: str | None = Field(default=None, description="override the backend for all roles")
+    models: dict[Role, str] = Field(default_factory=dict)
+    effort_default: str | None = None
+    context_tokens: int = Field(default=8192, ge=512, le=1_048_576, description="spec D60")
+    tools: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    citation_style: str = "apa"
+    vault_retention_days: int | None = Field(default=None, ge=1)
+    privacy: PrivacyOverrides = PrivacyOverrides()
+
+    @field_validator("workspace", mode="before")
+    @classmethod
+    def _one_or_many(cls, value: Any) -> Any:
+        return [value] if isinstance(value, str) else value
+
+    @field_validator("workspace")
+    @classmethod
+    def _expand(cls, value: list[Path]) -> list[Path]:
+        return [p.expanduser() for p in value]
+
+
+def builtin_environments() -> dict[str, EnvironmentConfig]:
+    """Templates from spec §4.3; a file with the same name replaces one."""
+    return {
+        "coding": EnvironmentConfig(
+            description="Coding agents in the current project",
+            tools=["fs", "shell", "git"],
+            effort_default="medium",
+        ),
+        "litreview-offline": EnvironmentConfig(
+            description="Literature review with no network",
+            tools=["rag", "pdf", "zotero"],
+            skills=["lit-review", "citation-check", "references"],
+            effort_default="high",
+            privacy=PrivacyOverrides(network="off", hosted_backends="deny"),
+        ),
+        "litreview-online": EnvironmentConfig(
+            description="Literature review with academic APIs (approval per new host)",
+            tools=["rag", "pdf", "zotero", "scholar"],
+            skills=["lit-review", "citation-check", "references"],
+            effort_default="high",
+            privacy=PrivacyOverrides(
+                network="ask",
+                network_allow_hosts=[
+                    "export.arxiv.org",
+                    "api.semanticscholar.org",
+                    "api.openalex.org",
+                    "eutils.ncbi.nlm.nih.gov",
+                    "api.crossref.org",
+                ],
+            ),
+        ),
+        "scratch": EnvironmentConfig(
+            description="Experiments with no protections in the way",
+            effort_default="low",
+            privacy=PrivacyOverrides(preset="open"),
+        ),
+    }

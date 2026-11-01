@@ -1,0 +1,264 @@
+{
+  "$defs": {
+    "EffortLevel": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend"
+        },
+        "context_tokens": {
+          "anyOf": [
+            {
+              "maximum": 1048576,
+              "minimum": 512,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Tokens"
+        },
+        "hidden": {
+          "default": false,
+          "title": "Hidden",
+          "type": "boolean"
+        },
+        "max_tokens_per_request": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens Per Request"
+        },
+        "max_tool_steps": {
+          "default": 10,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Max Tool Steps",
+          "type": "integer"
+        },
+        "min_p": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min P"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "model_role": {
+          "anyOf": [
+            {
+              "enum": [
+                "main",
+                "fast"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "or set model",
+          "title": "Model Role"
+        },
+        "order": {
+          "default": 100,
+          "title": "Order",
+          "type": "integer"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "subagents": {
+          "$ref": "#/$defs/SubagentLimits",
+          "default": {
+            "backend": null,
+            "effort": null,
+            "max": 0,
+            "max_parallel": 1
+          }
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "thinking": {
+          "default": false,
+          "title": "Thinking",
+          "type": "boolean"
+        },
+        "thinking_budget_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thinking Budget Tokens"
+        },
+        "top_k": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top K"
+        },
+        "top_p": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top P"
+        },
+        "wall_clock_limit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "e.g. 30m",
+          "title": "Wall Clock Limit"
+        }
+      },
+      "title": "EffortLevel",
+      "type": "object"
+    },
+    "SubagentLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend"
+        },
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "max": {
+          "default": 0,
+          "maximum": 32,
+          "minimum": 0,
+          "title": "Max",
+          "type": "integer"
+        },
+        "max_parallel": {
+          "default": 1,
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Parallel",
+          "type": "integer"
+        }
+      },
+      "title": "SubagentLimits",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/c23075/cairnward/schemas/effort.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "effort.toml: levels here replace built-ins of the same name and add new ones.",
+  "properties": {
+    "effort": {
+      "additionalProperties": {
+        "$ref": "#/$defs/EffortLevel"
+      },
+      "title": "Effort",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "title": "EffortConfig",
+  "type": "object"
+}

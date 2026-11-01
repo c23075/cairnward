@@ -1,0 +1,126 @@
+{
+  "$defs": {
+    "Backend": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "a reference, never the key itself: 'keyring:<name>' or 'env:<VAR>'",
+          "title": "Api Key"
+        },
+        "driver": {
+          "enum": [
+            "ollama",
+            "openai_compat"
+          ],
+          "title": "Driver",
+          "type": "string"
+        },
+        "location": {
+          "default": "local",
+          "enum": [
+            "local",
+            "lan",
+            "hosted"
+          ],
+          "title": "Location",
+          "type": "string"
+        },
+        "max_parallel": {
+          "default": 1,
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Max Parallel",
+          "type": "integer"
+        },
+        "timeout_s": {
+          "default": 900,
+          "minimum": 1,
+          "title": "Timeout S",
+          "type": "integer"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "driver",
+        "url"
+      ],
+      "title": "Backend",
+      "type": "object"
+    },
+    "RoleModel": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "title": "Backend",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "model"
+      ],
+      "title": "RoleModel",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/c23075/cairnward/schemas/backends.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "backends.toml",
+  "properties": {
+    "backends": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Backend"
+      },
+      "title": "Backends",
+      "type": "object"
+    },
+    "fallback": {
+      "description": "local backends to try if a backend is down",
+      "items": {
+        "type": "string"
+      },
+      "title": "Fallback",
+      "type": "array"
+    },
+    "roles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/RoleModel"
+      },
+      "propertyNames": {
+        "enum": [
+          "main",
+          "fast",
+          "vision",
+          "embed"
+        ]
+      },
+      "title": "Roles",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "title": "BackendsConfig",
+  "type": "object"
+}

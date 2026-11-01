@@ -1,0 +1,65 @@
+{
+  "$defs": {
+    "Client": {
+      "additionalProperties": false,
+      "properties": {
+        "default_environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Environment"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "chat",
+            "agent"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "profile": {
+          "default": "generic",
+          "title": "Profile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Client",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/c23075/cairnward/schemas/clients.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "clients.toml (API keys live in the state store, not here)",
+  "properties": {
+    "clients": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Client"
+      },
+      "title": "Clients",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "title": "ClientsConfig",
+  "type": "object"
+}
