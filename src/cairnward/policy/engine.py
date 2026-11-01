@@ -98,6 +98,8 @@ class Decision:
     approved_by: str | None = None
     scope: str | None = None
     advisory: bool = False  # isolation is off, so the OS doesn't enforce this
+    # A passphrase the user typed in Cairnward's own prompt (e.g. encrypt); never audited.
+    secret: str | None = field(default=None, repr=False)
 
     @property
     def allowed(self) -> bool:
@@ -267,6 +269,7 @@ class PolicyEngine:
             provenance=action.provenance,
             run_id=action.run_id,
             rememberable=rule.risk != "high" and action.kind not in USER_ONLY,
+            needs_secret=action.kind == "encrypt",
         )  # fmt: skip
         remembered = self.memory.granted(req)
         if remembered:
@@ -277,7 +280,8 @@ class PolicyEngine:
         answer = self.approver.request(req)
         self.memory.remember(answer, req)
         if answer.granted:
-            return done("allow", asked=True, approved_by=answer.by, scope=answer.scope)
+            return done("allow", asked=True, approved_by=answer.by, scope=answer.scope,
+                        secret=answer.secret)  # fmt: skip
         return done(
             "deny", reason=f"{rule.reason}: not approved", asked=True, approved_by=answer.by
         )

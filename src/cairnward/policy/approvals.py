@@ -33,6 +33,7 @@ class ApprovalRequest:
     provenance: tuple[str, ...] = ()
     rememberable: bool = True
     run_id: str | None = None
+    needs_secret: bool = False  # the approver also asks for a passphrase (e.g. encrypt)
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,8 @@ class ApprovalAnswer:
     granted: bool
     scope: Scope = "once"
     by: str = "user"
+    # A passphrase typed in Cairnward's own prompt; never stored, logged or shown.
+    secret: str | None = field(default=None, repr=False)
 
 
 class Approver(Protocol):
@@ -132,6 +135,13 @@ class ApprovalMemory:
         return None
 
 
+LATE_S = 600  # how long a request the client gave up on can still be answered
+
+
+def _retry_key(r: ApprovalRequest) -> tuple[str | None, ...]:
+    return (r.kind, r.target, r.client, r.conversation_id, r.run_id, r.environment)
+
+
 @dataclass
 class _Pending:
     id: str
@@ -139,6 +149,7 @@ class _Pending:
     created: float
     done: threading.Event = field(default_factory=threading.Event)
     answer: ApprovalAnswer | None = None
+    gave_up: float | None = None  # when the waiting request timed out
 
 
 class ApprovalInbox:
@@ -146,6 +157,11 @@ class ApprovalInbox:
 
     `request()` is called from a worker thread (the policy engine is synchronous); it waits
     until the request is answered or the timeout passes, which counts as "no".
+
+    Retries (FR-POL-5): a request whose client gave up stays listed as "gave up" for
+    LATE_S; answering yes then approves the client's next identical request once, so a
+    retry doesn't ask again. Batching (FR-POL-3): `answer_similar` answers every pending
+    request with the same kind and target at once.
     """
 
     def __init__(
@@ -154,39 +170,75 @@ class ApprovalInbox:
         self.timeout_s = timeout_s
         self.notify = notify
         self._pending: dict[str, _Pending] = {}
+        self._retry: dict[tuple[str | None, ...], float] = {}
         self._lock = threading.Condition()
         self._version = 0
 
+    def _changed(self) -> None:
+        self._version += 1
+        self._lock.notify_all()
+
     def request(self, req: ApprovalRequest) -> ApprovalAnswer:
-        item = _Pending(secrets.token_hex(6), req, time.time())
+        now = time.time()
         with self._lock:
+            self._expire(now)
+            key = _retry_key(req)
+            if not req.needs_secret and self._retry.pop(key, 0) > now:
+                return ApprovalAnswer(True, "once", by="user (answered after a retry)")
+            item = _Pending(secrets.token_hex(6), req, now)
             self._pending[item.id] = item
-            self._version += 1
-            self._lock.notify_all()
+            self._changed()
         if self.notify is not None:
             with contextlib.suppress(Exception):  # a failed notice must not decide anything
                 self.notify(self._describe(item))
         answered = item.done.wait(self.timeout_s)
         with self._lock:
-            self._pending.pop(item.id, None)
-            self._version += 1
-            self._lock.notify_all()
+            if answered:
+                self._pending.pop(item.id, None)
+            else:
+                item.gave_up = time.time()  # still answerable for a retry
+            self._changed()
         if not answered or item.answer is None:
             return ApprovalAnswer(False, by="timeout")
         return item.answer
 
-    def answer(
-        self, request_id: str, granted: bool, scope: Scope = "once", by: str = "user"
-    ) -> bool:
+    def _expire(self, now: float) -> None:
+        for pid, p in list(self._pending.items()):
+            if p.gave_up is not None and now - p.gave_up > LATE_S:
+                del self._pending[pid]
+        for key, until in list(self._retry.items()):
+            if until < now:
+                del self._retry[key]
+
+    def answer(self, request_id: str, granted: bool, scope: Scope = "once", by: str = "user",
+               secret: str | None = None) -> bool:  # fmt: skip
         with self._lock:
             item = self._pending.get(request_id)
             if item is None or item.done.is_set():
                 return False
             if not item.req.rememberable:
                 scope = "once"
-            item.answer = ApprovalAnswer(granted, scope, by)
+            if item.gave_up is not None:  # the client stopped waiting: applies to its retry
+                del self._pending[request_id]
+                if granted:
+                    self._retry[_retry_key(item.req)] = time.time() + LATE_S
+                self._changed()
+                return True
+            item.answer = ApprovalAnswer(granted, scope, by, secret)
             item.done.set()
             return True
+
+    def answer_similar(self, request_id: str, granted: bool, scope: Scope = "once",
+                       by: str = "user") -> int:  # fmt: skip
+        """Answer this request and every other pending one with the same kind and target."""
+        with self._lock:
+            first = self._pending.get(request_id)
+            if first is None:
+                return 0
+            same = [p.id for p in self._pending.values()
+                    if (p.req.kind, p.req.target) == (first.req.kind, first.req.target)
+                    and not p.done.is_set() and not p.req.needs_secret]  # fmt: skip
+        return sum(self.answer(pid, granted, scope, by) for pid in same)
 
     @property
     def version(self) -> int:
@@ -195,7 +247,17 @@ class ApprovalInbox:
 
     def pending(self) -> list[dict[str, object]]:
         with self._lock:
-            return [self._describe(p) for p in self._pending.values() if not p.done.is_set()]
+            self._expire(time.time())
+            items = [p for p in self._pending.values() if not p.done.is_set()]
+            out = []
+            for p in items:
+                d = self._describe(p)
+                d["similar"] = sum(
+                    1 for q in items
+                    if q is not p and (q.req.kind, q.req.target) == (p.req.kind, p.req.target)
+                )  # fmt: skip
+                out.append(d)
+            return out
 
     def wait_for_change(self, version: int, timeout: float) -> int:
         """Block until the inbox changes after `version` (or timeout); returns the new version."""
@@ -211,6 +273,7 @@ class ApprovalInbox:
             "environment": r.environment, "client": r.client, "run_id": r.run_id,
             "conversation_id": r.conversation_id, "initiated_by": r.initiated_by,
             "provenance": list(r.provenance), "rememberable": r.rememberable,
+            "needs_secret": r.needs_secret, "gave_up": p.gave_up is not None,
             "age_s": round(time.time() - p.created, 1),
         }  # fmt: skip
 

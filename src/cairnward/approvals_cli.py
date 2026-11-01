@@ -26,8 +26,10 @@ def describe(item: dict[str, Any]) -> str:
              f"client {item['client']}" if item.get("client") else "",
              f"run {str(item['run_id'])[:8]}" if item.get("run_id") else "",
              f"started by {item['initiated_by']}"]  # fmt: skip
+    state = "the client gave up waiting; yes applies to its retry" if item.get("gave_up") else (
+        f"waiting {item['age_s']:.0f}s")  # fmt: skip
     lines = [
-        f"[{item['id']}] {item['risk']} risk, waiting {item['age_s']:.0f}s",
+        f"[{item['id']}] {item['risk']} risk, {state}",
         f"  action : {item['kind']}",
         f"  target : {item['target']}",
         f"  why    : {item['reason']}",
@@ -43,14 +45,17 @@ def describe(item: dict[str, Any]) -> str:
 
 def options(item: dict[str, Any]) -> str:
     yes = "this run" if item.get("run_id") and item["kind"] == "net.connect" else "once"
+    extra = "  [a] yes to all like it" if item.get("similar") else ""
     if item.get("rememberable"):
-        return f"[y] yes, {yes}  [c] this conversation  [e] this environment  [n] no"
-    return f"[y] yes, {yes}  [n] no"
+        return f"[y] yes, {yes}  [c] this conversation  [e] this environment{extra}  [n] no"
+    return f"[y] yes, {yes}{extra}  [n] no"
 
 
 def parse_answer(reply: str, item: dict[str, Any]) -> tuple[bool, str] | None:
     reply = reply.strip().lower()
     reply = {"yes": "y", "no": "n"}.get(reply, reply)
+    if reply == "a":
+        return (True, "once") if item.get("similar") else None
     if reply in ("c", "e") and not item.get("rememberable"):
         return None
     if reply == "c" and not item.get("conversation_id"):
@@ -58,9 +63,19 @@ def parse_answer(reply: str, item: dict[str, Any]) -> tuple[bool, str] | None:
     return ANSWERS.get(reply)
 
 
-def send(mgmt: httpx.Client, request_id: str, granted: bool, scope: str) -> bool:
-    resp = mgmt.post(f"/v1/approvals/{request_id}", json={"granted": granted, "scope": scope})
+def send(mgmt: httpx.Client, request_id: str, granted: bool, scope: str, *,
+         similar: bool = False, secret: str | None = None) -> bool:  # fmt: skip
+    body: dict[str, Any] = {"granted": granted, "scope": scope, "similar": similar}
+    if secret is not None:
+        body["secret"] = secret
+    resp = mgmt.post(f"/v1/approvals/{request_id}", json=body)
     return resp.status_code == 200
+
+
+def ask_passphrase(prompt: str) -> str:
+    import getpass
+
+    return getpass.getpass(prompt)
 
 
 def _notify(item: dict[str, Any]) -> None:
@@ -115,7 +130,14 @@ def watch(mgmt: httpx.Client, stdin: TextIO, out: TextIO, *, notify: bool = True
                 if answer is not None:
                     break
                 out.write("  (not one of the options)\n")
-            ok = send(mgmt, item["id"], *answer)
+            secret = None
+            if answer[0] and item.get("needs_secret"):
+                secret = ask_passphrase("  Passphrase (typed here only, never in the chat): ")
+                if len(secret) < 8 or ask_passphrase("  Again: ") != secret:
+                    out.write("  -> passphrases differ or are too short: answered no\n")
+                    answer, secret = (False, "once"), None
+            ok = send(mgmt, item["id"], *answer, similar=line.strip().lower() == "a",
+                      secret=secret)  # fmt: skip
             out.write(("  -> " + ("allowed" if answer[0] else "denied")) if ok
                       else "  -> too late: it was answered elsewhere or timed out")  # fmt: skip
             out.write("\n")

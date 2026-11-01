@@ -70,11 +70,39 @@ def test_inbox_answer_and_notify() -> None:
     assert not inbox.answer(item["id"], False)  # gone
 
 
-def test_inbox_timeout_is_no() -> None:
+def test_inbox_timeout_is_no_and_a_late_yes_covers_the_retry() -> None:
     inbox = ApprovalInbox(0.2)
     got = inbox.request(req())
     assert not got.granted and got.by == "timeout"
+    (late,) = inbox.pending()
+    assert late["gave_up"] is True
+    assert inbox.answer(str(late["id"]), True)
     assert inbox.pending() == []
+    retry = inbox.request(req())  # the client's retry: no new question
+    assert retry.granted and "retry" in retry.by
+    assert not inbox.request(req()).granted  # only once
+
+
+def test_answer_similar_and_secrets() -> None:
+    inbox = ApprovalInbox(5)
+    threads = [ask_in_thread(inbox, req()) for _ in range(3)]
+    other = ask_in_thread(inbox, req(target="x.org:443"))
+    items = wait_pending(inbox, 4)
+    first = next(i for i in items if i["target"] == "pypi.org:443")
+    assert first["similar"] == 2
+    assert inbox.answer_similar(str(first["id"]), True) == 3
+    for t, out in threads:
+        t.join(5)
+        assert out[0].granted
+    assert [i["target"] for i in inbox.pending()] == ["x.org:443"]
+    inbox.answer(str(inbox.pending()[0]["id"]), False)
+    other[0].join(5)
+    t, out = ask_in_thread(inbox, req(kind="encrypt", needs_secret=True, rememberable=False))
+    (item,) = wait_pending(inbox)
+    assert item["needs_secret"] is True
+    inbox.answer(str(item["id"]), True, secret="s3cret-pass")
+    t.join(5)
+    assert out[0].secret == "s3cret-pass" and "s3cret" not in repr(out[0])
 
 
 def test_unrememberable_answers_become_once() -> None:

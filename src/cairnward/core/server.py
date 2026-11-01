@@ -38,6 +38,7 @@ from cairnward.mcp.hub import McpHub
 from cairnward.mcp.launch import BridgeLauncher, Launcher, LocalLauncher, RemoteLauncher
 from cairnward.mcp.pins import PinStore
 from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
+from cairnward.policy.provenance import ProvenanceTracker
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
 
@@ -153,7 +154,9 @@ def _core_parts(
     launcher: Launcher,
 ) -> tuple[Any, Any, McpHub]:
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
-    hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit)
+    tracker = ProvenanceTracker()
+    hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
+                 provenance=tracker, vault=vault)  # fmt: skip
     run_keys = RunKeys()
     from cairnward.gateway.scheduling import BenchProfile
 
@@ -167,6 +170,7 @@ def _core_parts(
             run_keys,
             profile=BenchProfile.at(cfg.paths.state_dir),
             mcp=hub,
+            provenance=tracker,
         )
     )
     management = management_app(

@@ -13,7 +13,7 @@ from cairnward.store import Vault
 from cairnward.store.vault import LockedError, VaultError
 from tests.test_gateway import gw  # noqa: F401  (fixture)
 
-SECRET = "correct horse battery staple 42"  # noqa: S105 - a test passphrase
+SECRET = "correct horse battery staple 42"
 
 
 @pytest.fixture

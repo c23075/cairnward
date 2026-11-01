@@ -53,6 +53,8 @@ class RunEnd(BaseModel):
 class AnswerIn(BaseModel):
     granted: bool
     scope: Literal["once", "conversation", "environment"] = "once"
+    similar: bool = Field(default=False, description="also answer pending ones like it")
+    secret: str | None = Field(default=None, max_length=1024, repr=False)
 
 
 class SandboxAskIn(BaseModel):
@@ -358,9 +360,15 @@ def management_app(
 
     # declared last so that /ask and /sandbox above aren't taken for request ids
     @app.post("/v1/approvals/{request_id}")
-    def answer(request_id: str, body: AnswerIn) -> dict[str, bool]:
-        if inbox is None or not inbox.answer(request_id, body.granted, body.scope):
-            raise HTTPException(404, "no such pending approval (answered or timed out)")
-        return {"ok": True}
+    def answer(request_id: str, body: AnswerIn) -> dict[str, Any]:
+        if inbox is None:
+            raise HTTPException(404, "no such pending approval")
+        if body.similar:
+            count = inbox.answer_similar(request_id, body.granted, body.scope)
+        else:
+            count = int(inbox.answer(request_id, body.granted, body.scope, secret=body.secret))
+        if not count:
+            raise HTTPException(404, "no such pending approval (answered or expired)")
+        return {"ok": True, "answered": count}
 
     return app

@@ -40,6 +40,7 @@ from cairnward.gateway.scheduling import (
     memory_warning,
 )
 from cairnward.policy.engine import Action, Decision, PolicyEngine
+from cairnward.policy.provenance import ProvenanceTracker
 from cairnward.redaction import check_outbound, message_texts
 from cairnward.store import Vault
 from cairnward.sysinfo import meminfo
@@ -96,6 +97,7 @@ class GatewayDeps:
     scheduler: Scheduler | None = None
     profile: BenchProfile | None = None
     mcp: Any = None  # McpHub: the MCP proxy (spec §4.2), when configured
+    provenance: ProvenanceTracker = field(default_factory=ProvenanceTracker)
 
 
 def _options(resolved: Resolved, req: ChatCompletionRequest) -> GenerationOptions:
@@ -336,6 +338,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             if mem := memory_warning(resolved.model, loaded, sizes, avail):
                 warnings.append(mem)
 
+        seen = deps.provenance.note_request(client, run_id, body.messages)
         action = Action(
             kind="model.call",
             target=resolved.backend,
@@ -343,6 +346,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             client=client,
             run_id=run_id,
             actor=f"agent:{client}" if run_id else f"client:{client}",
+            provenance=seen,
             details={
                 "model": resolved.model,
                 "virtual_model": resolved.name,
@@ -435,6 +439,8 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                     completion_tokens=usage.get("completion_tokens"),
                 )
                 conv_id = rec.conversation_id if rec else None
+                if conv_id:
+                    deps.provenance.note_conversation(client, run_id, conv_id)
                 if rec is None:
                     slot_info["vault_note"] = "locked: not stored"
             if reply is not None:

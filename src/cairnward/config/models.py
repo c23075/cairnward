@@ -480,6 +480,8 @@ class McpConfig(_Strict):
     @classmethod
     def _names(cls, value: dict[str, McpServer]) -> dict[str, McpServer]:
         for name in value:
+            if name == "cairnward":
+                raise ValueError("'cairnward' is reserved for Cairnward's own tools")
             if not _MCP_NAME.match(name):
                 raise ValueError(
                     f"MCP server name '{name}' must be lowercase letters, digits or '-' (max 31)"

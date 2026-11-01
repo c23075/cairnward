@@ -19,9 +19,11 @@ from cairnward.mcp.jsonrpc import Connection, McpError
 from cairnward.mcp.launch import Launcher, LaunchError, Started
 from cairnward.mcp.pins import PinStore, ToolState
 from cairnward.policy.engine import Action, PolicyEngine
+from cairnward.policy.provenance import ProvenanceTracker
 from cairnward.redaction import check_outbound, value_texts
 
 SEP = "__"
+BUILTIN = "cairnward"  # prefix of Cairnward's own tools
 
 
 def exposed_name(server: str, tool: str) -> str:
@@ -51,6 +53,8 @@ class McpHub:
     launcher: Launcher
     pins: PinStore
     audit: AuditLog | None = None
+    provenance: ProvenanceTracker | None = None
+    vault: Any = None  # for Cairnward's own tools
     _servers: dict[tuple[str, str], _Server] = field(default_factory=dict)
     _locks: dict[tuple[str, str], asyncio.Lock] = field(default_factory=dict)
     _reported: set[tuple[str, str, str]] = field(default_factory=set)
@@ -152,7 +156,7 @@ class McpHub:
         """Tools offered to clients in this environment, and problems (servers that
         didn't start), so one broken server doesn't hide the others."""
         env = self.cfg.environments[environment]
-        out: list[dict[str, Any]] = []
+        out: list[dict[str, Any]] = self._builtin_tools(environment)
         problems: list[str] = []
         for server in env.mcp_servers:
             try:
@@ -177,6 +181,8 @@ class McpHub:
         """A tools/call result (errors the model should see come back as isError)."""
         server, sep, tool = name.partition(SEP)
         env = self.cfg.environments[environment]
+        if server == BUILTIN and any(t["name"] == name for t in self._builtin_tools(environment)):
+            return await self._builtin(environment, tool, client=client, run_id=run_id)
         if not sep or server not in env.mcp_servers:
             raise McpError(f"unknown tool '{name}'", -32602)
         views = await self.server_tools(server, environment)
@@ -218,6 +224,8 @@ class McpHub:
                                     details={"duration_s": round(time.monotonic() - started, 3),
                                              "error": str(exc)[:300]})  # fmt: skip
             return _tool_error(f"{name} failed: {exc}")
+        if self.provenance is not None:
+            self.provenance.note_tool(client, run_id, f"{server}/{tool}")
         text = canonical(result)
         await asyncio.to_thread(
             self.engine.audit_post, action, pre,
@@ -226,6 +234,54 @@ class McpHub:
                      "result_bytes": len(text.encode())},
         )  # fmt: skip
         return result
+
+    # ------------------------------------------------------------------ Cairnward's own tools
+
+    def _builtin_tools(self, environment: str) -> list[dict[str, Any]]:
+        env = self.cfg.environments[environment]
+        if "vault" not in env.tools or self.vault is None:
+            return []
+        return [{
+            "name": exposed_name(BUILTIN, "lock_conversation"),
+            "description": (
+                "Lock the current conversation in Cairnward's transcript vault with a "
+                "passphrase. The user confirms in Cairnward and types the passphrase there, "
+                "never in this chat. Only use it when the user asks to lock or encrypt this "
+                "conversation."
+            ),
+            "inputSchema": {"type": "object", "properties": {}},
+        }]  # fmt: skip
+
+    async def _builtin(self, environment: str, tool: str, *, client: str,
+                       run_id: str | None) -> dict[str, Any]:  # fmt: skip
+        """User-only actions (D46): always confirmed by the user, with provenance."""
+        seen, conversation = (
+            self.provenance.current(client, run_id) if self.provenance else ((), None)
+        )
+        if tool != "lock_conversation" or conversation is None:
+            return _tool_error("Cairnward doesn't know which conversation this is yet: "
+                               "lock it with `cairnward vault lock`")  # fmt: skip
+        action = Action(
+            kind="encrypt", target=conversation, environment=environment, client=client,
+            run_id=run_id, conversation_id=conversation, initiated_by="model",
+            actor=f"agent:{client}" if run_id else f"client:{client}", provenance=seen,
+        )  # fmt: skip
+        decision = await asyncio.to_thread(self.engine.check, action)
+        if not decision.allowed or not decision.secret:
+            await asyncio.to_thread(self.engine.audit_deny, decision)
+            return _tool_error(f"Not locked: {decision.reason}")
+        from cairnward.store.vault import VaultError
+
+        try:
+            await asyncio.to_thread(self.vault.lock, conversation, decision.secret)
+        except VaultError as exc:
+            return _tool_error(f"Not locked: {exc}")
+        pre = await asyncio.to_thread(self.engine.audit_pre, decision)
+        await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok")
+        return {"content": [{"type": "text", "text": (
+            "Locked. The user set the passphrase in Cairnward; this conversation won't be "
+            "sent to hosted models, and new messages are stored only while it's unlocked."
+        )}]}  # fmt: skip
 
     def approve(self, server: str, environment: str, approvals: dict[str, str],
                 current: list[ToolView]) -> None:  # fmt: skip
