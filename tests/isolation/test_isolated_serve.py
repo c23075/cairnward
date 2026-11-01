@@ -117,6 +117,15 @@ def test_isolated_serve_and_run(tmp_path: Path) -> None:
         )
         assert "core isolated in the sandbox" in st.stdout, st.stdout + st.stderr
         (paths.data_dir / "keys.db").exists()
+        # the dashboard, served by the isolated core through the outer process's forwarder
+        import httpx
+
+        link = subprocess.run([*cw, "dashboard", "--no-open"], env=env, capture_output=True,
+                              text=True, check=True).stdout.splitlines()[1]  # fmt: skip
+        with httpx.Client(base_url=f"http://127.0.0.1:{dash}", trust_env=False) as web:
+            assert web.get(link.split(str(dash), 1)[1]).status_code == 303
+            info = web.get("/api/session").json()
+            assert info["isolated"] is True and info["privacy"].startswith("Strict")
         run = subprocess.run(
             [
                 *cw,

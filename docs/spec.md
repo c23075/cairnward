@@ -240,6 +240,8 @@ As v0.5 ([ADR-0007](adr/0007-sync-restic-backup-and-event-log-replication.md)), 
 ### 4.9 Dashboard
 Loopback web app (hardened as §3.1), the only UI Cairnward builds: **approvals inbox**, live activity, audit browser (per client/run/conversation), egress report, vault browser, research jobs, artifacts, sync status, settings (backends, environments, effort, clients, MCP servers). Plus a terminal equivalent for key flows: `cairnward approvals`, `cairnward audit`, `cairnward vault`. Accessibility target WCAG 2.2 AA.
 
+**Implemented (T2.7):** `cairnward dashboard` asks the running core for a single-use sign-in link (2 minutes) and opens it; the link becomes an HttpOnly, SameSite=Strict session cookie and leaves the address bar. Served on 127.0.0.1:`dashboard_port` (in isolated mode the core serves a Unix socket and the outer process forwards the port). Host allowlist, CSRF token header plus Origin check on every change, strict CSP, no CORS, `no-store` on the API. Views: approvals (live; provenance warning; passphrase dialog for user-only actions; "yes to all like it"; late answers), activity (live audit tail), audit (filters, chain check, JSON-lines export), egress (filters, CSV), vault (search, trash, pin, folders, lock/unlock dialogs, export, delete with undo; shortcuts `j k Enter / d f L p x l ?`, switchable in Settings), MCP tools (permissions, review and approve definitions with warnings), settings (read-only privacy per environment with weaker-than-Strict values highlighted, backends, roles, clients). Tested with request-level security tests and a Chromium end-to-end test (sign-in, live approval, vault shortcuts, an XSS probe, locking, no CSP violations, labelled controls, skip link). Not yet: editing settings, research jobs, artifacts and sync views (those features don't exist yet), a full axe-core audit.
+
 ---
 
 ## 5. Security and privacy
@@ -343,7 +345,7 @@ As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Sc
 | Citations | citeproc-py + CSL styles | BSD / CC BY-SA |
 | Research engine | own pipeline; PaperQA2 evaluated | Apache-2.0 |
 | Backup / sync transport | restic, rclone, git | BSD-2 / MIT / GPL-2.0 (separate processes) |
-| Dashboard | Svelte, built offline and served by the core | MIT |
+| Dashboard | plain ES modules, no build step ([ADR-0016](adr/0016-dashboard-without-a-build-step.md)) | — |
 | Agent loop for research workflows | evaluate PydanticAI (MCP + OpenTelemetry built in) vs own loop | MIT |
 
 ---

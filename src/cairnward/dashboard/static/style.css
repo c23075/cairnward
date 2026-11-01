@@ -1,0 +1,65 @@
+/* Cairnward dashboard. Colours chosen for WCAG 2.2 AA contrast in light and dark. */
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #555; --line: #d0d0d0; --panel: #f5f5f4;
+  --accent: #0b5cad; --ok: #1d6b2f; --warn-bg: #fff4d6; --warn-fg: #6b4a00;
+  --bad: #a3141a; --focus: #0b5cad; --sel: #e3edf9;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 16px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161616; --fg: #ececec; --muted: #b3b3b3; --line: #3d3d3d; --panel: #222;
+    --accent: #7fb6ff; --ok: #7fd08f; --warn-bg: #3a2f10; --warn-fg: #ffd77a;
+    --bad: #ff8a8f; --focus: #7fb6ff; --sel: #1f3048;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); line-height: 1.45; }
+a { color: var(--accent); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.skip { position: absolute; left: -999px; top: 0; }
+.skip:focus { left: 8px; background: var(--bg); padding: 8px; z-index: 10; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 16px;
+       border-bottom: 1px solid var(--line); background: var(--panel); }
+.brand { font-weight: 700; }
+.top nav ul { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.top nav a { display: inline-block; padding: 6px 10px; border-radius: 6px; text-decoration: none; color: var(--fg); }
+.top nav a[aria-current="page"] { background: var(--sel); font-weight: 600; }
+.count:not(:empty) { background: var(--bad); color: #fff; border-radius: 10px; padding: 0 7px; margin-left: 4px; font-size: 0.85em; }
+.badge { padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); font-size: 0.9em; }
+.badge.weak { background: var(--warn-bg); color: var(--warn-fg); }
+main { padding: 16px; max-width: 1200px; }
+h1 { font-size: 1.4rem; margin: 0 0 12px; }
+h2 { font-size: 1.1rem; margin: 20px 0 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: var(--panel); position: sticky; top: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.selected { background: var(--sel); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+.muted { color: var(--muted); }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; background: var(--panel); }
+.card dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; }
+.card dt { color: var(--muted); }
+.warnbox { background: var(--warn-bg); color: var(--warn-fg); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.bad { color: var(--bad); } .ok { color: var(--ok); }
+button, select, input { font: inherit; }
+button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.quiet { margin-left: auto; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+form.filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin-bottom: 12px; }
+form.filters label, dialog label { display: flex; flex-direction: column; font-size: 0.9em; gap: 2px; }
+input, select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.split { display: grid; grid-template-columns: minmax(280px, 40%) 1fr; gap: 16px; }
+@media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
+.message { border-left: 3px solid var(--line); padding: 4px 10px; margin: 8px 0; white-space: pre-wrap; word-break: break-word; }
+.message.user { border-color: var(--accent); }
+.message .role { font-weight: 600; display: block; margin-bottom: 2px; }
+.toast { position: fixed; bottom: 16px; right: 16px; max-width: 420px; }
+.toast > div { background: var(--fg); color: var(--bg); padding: 10px 14px; border-radius: 8px; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+.toast button { background: transparent; color: var(--bg); border-color: var(--bg); }
+dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); max-width: 520px; width: 92vw; }
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog form { display: flex; flex-direction: column; gap: 10px; }
+kbd { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-family: inherit; font-size: 0.85em; }

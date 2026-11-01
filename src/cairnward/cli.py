@@ -175,6 +175,9 @@ def build_parser() -> argparse.ArgumentParser:
     v_unlock.add_argument("--permanently", action="store_true", help="remove the lock")
     vlt_sub.add_parser("relock", help="close every unlocked conversation in the server now")
 
+    dsh = sub.add_parser("dashboard", help="open the dashboard (a single-use sign-in link)")
+    dsh.add_argument("--no-open", action="store_true", help="only print the link")
+
     appr = sub.add_parser("approvals", help="answer requests Cairnward is waiting on (y/c/e/n)")
     appr_sub = appr.add_subparsers(dest="approvals_command", metavar="ACTION")
     appr_sub.add_parser("watch", help="wait for requests and answer them (default)")
@@ -848,6 +851,29 @@ def httpx_timeout() -> Any:
     return httpx.Timeout(180, connect=10)  # starting a server can take a while (npx, uvx)
 
 
+def _cmd_dashboard(args: argparse.Namespace) -> int:
+    import webbrowser
+
+    from cairnward.run.runner import RunError, management
+
+    cfg = _load(args)
+    try:
+        with management(cfg) as mgmt:
+            resp = mgmt.post("/v1/dashboard/link")
+    except RunError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    if resp.status_code != 200:
+        print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
+        return 1
+    url = resp.json()["url"]
+    print("Sign-in link (works once, for 2 minutes):")
+    print(url)
+    if not args.no_open:
+        webbrowser.open(url)
+    return 0
+
+
 def _cmd_bench(args: argparse.Namespace) -> int:
     from cairnward.gateway.scheduling import BenchProfile
 
@@ -1061,21 +1087,7 @@ def _cmd_sandbox(args: argparse.Namespace) -> int:
 
 
 def _privacy_dict(eff: EffectivePrivacy) -> dict[str, object]:
-    return {
-        "environment": eff.environment,
-        "label": eff.label,
-        "base_preset": eff.base_preset,
-        "custom": eff.is_custom,
-        "weaker_than_strict": eff.weaker_than_strict,
-        "settings": {
-            n: {"value": s.value, "source": s.source, "weaker_than_strict": s.weaker_than_strict}
-            for n, s in eff.settings.items()
-        },
-        "changed_from_preset": eff.changed_from_preset,
-        "network_allow_hosts": eff.network_allow_hosts,
-        "warnings": eff.warnings,
-        "notes": eff.notes,
-    }
+    return eff.as_dict()
 
 
 def _print_privacy(eff: EffectivePrivacy) -> None:
@@ -1165,6 +1177,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_status(args)
         if args.command == "approvals":
             return _cmd_approvals(args)
+        if args.command == "dashboard":
+            return _cmd_dashboard(args)
         if args.command == "mcp":
             return _cmd_mcp(args)
         if args.command == "vault":

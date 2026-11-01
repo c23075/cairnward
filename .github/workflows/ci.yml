@@ -68,6 +68,27 @@ jobs:
           uv export --format requirements-txt --all-groups --no-emit-project -o requirements-audit.txt
           uvx pip-audit -r requirements-audit.txt --disable-pip --require-hashes --strict
 
+  dashboard-e2e:
+    # T2.7: the dashboard in Chromium against a running `cairnward serve`.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install pinned Playwright and Chromium
+        working-directory: tests/e2e
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Dashboard end to end
+        run: |
+          uv sync
+          uv run pytest -v tests/e2e
+
   isolation-spike:
     # T0.6: sandbox-runtime + bubblewrap isolation checks (docs/adr/0013).
     runs-on: ubuntu-24.04

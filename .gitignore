@@ -11,3 +11,4 @@ build/
 *.egg-info/
 # local benchmark output (commit chosen results to docs/bench/ explicitly)
 bench-*.json
+node_modules/

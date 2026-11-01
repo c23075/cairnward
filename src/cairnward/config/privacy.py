@@ -204,6 +204,27 @@ class EffectivePrivacy:
     def value(self, name: str) -> str:
         return self.settings[name].value
 
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "environment": self.environment,
+            "label": self.label,
+            "base_preset": self.base_preset,
+            "custom": self.is_custom,
+            "weaker_than_strict": self.weaker_than_strict,
+            "settings": {
+                n: {
+                    "value": s.value,
+                    "source": s.source,
+                    "weaker_than_strict": s.weaker_than_strict,
+                }
+                for n, s in self.settings.items()
+            },
+            "changed_from_preset": self.changed_from_preset,
+            "network_allow_hosts": self.network_allow_hosts,
+            "warnings": self.warnings,
+            "notes": self.notes,
+        }
+
     @property
     def changed_from_preset(self) -> list[str]:
         return [n for n, s in self.settings.items() if s.value != PRESETS[self.base_preset][n]]

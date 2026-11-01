@@ -63,6 +63,10 @@ uv run cairnward bench import bench-qwen3_30b-*.json bench-qwen3_1.7b-*.json
 ```
 
 ## 5. See what happened
+Open the dashboard (approvals, activity, audit, egress, vault, MCP tools, settings) with a one-time sign-in link:
+```bash
+uv run cairnward dashboard
+```
 ```bash
 uv run cairnward audit log --last 30
 ```

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Cairnward</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <span class="brand" aria-label="Cairnward">Cairnward</span>
+    <span id="privacy-badge" class="badge" role="status"></span>
+    <nav aria-label="Sections">
+      <ul id="nav">
+        <li><a href="#/approvals" data-view="approvals">Approvals <span id="pending-count" class="count" aria-label="pending approvals"></span></a></li>
+        <li><a href="#/activity" data-view="activity">Activity</a></li>
+        <li><a href="#/audit" data-view="audit">Audit</a></li>
+        <li><a href="#/egress" data-view="egress">Egress</a></li>
+        <li><a href="#/vault" data-view="vault">Vault</a></li>
+        <li><a href="#/mcp" data-view="mcp">MCP tools</a></li>
+        <li><a href="#/settings" data-view="settings">Settings</a></li>
+      </ul>
+    </nav>
+    <button id="logout" type="button" class="quiet">Sign out</button>
+  </header>
+  <main id="main" tabindex="-1"></main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+</body>
+</html>

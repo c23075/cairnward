@@ -112,6 +112,7 @@ def management_app(
     inbox: ApprovalInbox | None = None,
     mcp: Any = None,
     vault: Any = None,
+    dashboard: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward management", docs_url=None, redoc_url=None)
     runs: dict[str, _Run] = {}
@@ -331,6 +332,14 @@ def management_app(
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         return {"approved": sorted(body.tools)}
+
+    @app.post("/v1/dashboard/link")
+    def dashboard_link() -> dict[str, Any]:
+        """A single-use sign-in link for the dashboard (only the owner can ask for one)."""
+        if dashboard is None:
+            raise HTTPException(503, "the dashboard isn't running")
+        token = dashboard.new_link_token()
+        return {"url": f"http://127.0.0.1:{server.dashboard_port}/login?t={token}"}
 
     # ------------------------------------------------------------------ vault (locks)
 

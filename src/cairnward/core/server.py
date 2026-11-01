@@ -30,6 +30,7 @@ from cairnward.audit import AuditLog, enabled_for, record_settings
 from cairnward.backends import Backends
 from cairnward.config.loader import Config
 from cairnward.core.management import management_app
+from cairnward.dashboard import DashboardAuth, dashboard_app
 from cairnward.egress import EgressProxy, Session, Sessions
 from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, control_app
 from cairnward.gateway import ClientKeys, GatewayDeps, create_app
@@ -52,6 +53,7 @@ def sockets(cfg: Config) -> dict[str, Path]:
         "management": s / "cairnward.sock",
         "gateway": s / "gateway.sock",
         "egress": s / "egress.sock",
+        "dashboard": s / "dashboard.sock",
     }
 
 
@@ -152,7 +154,7 @@ def _core_parts(
     backends: Backends,
     isolated: bool,
     launcher: Launcher,
-) -> tuple[Any, Any, McpHub]:
+) -> tuple[Any, Any, McpHub, Any]:
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     tracker = ProvenanceTracker()
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
@@ -173,6 +175,9 @@ def _core_parts(
             provenance=tracker,
         )
     )
+    auth = DashboardAuth()
+    dashboard = dashboard_app(cfg, auth=auth, audit=audit, vault=vault, inbox=inbox, mcp=hub,
+                              isolated=isolated)  # fmt: skip
     management = management_app(
         cfg,
         audit=audit,
@@ -183,8 +188,9 @@ def _core_parts(
         inbox=inbox,
         mcp=hub,
         vault=vault,
+        dashboard=auth,
     )
-    return gateway, management, hub
+    return gateway, management, hub, dashboard
 
 
 # ------------------------------------------------------------------ single process
@@ -212,7 +218,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
             revoke_session=sessions.revoke,
             egress_port=server.egress_port if with_egress else None,
         )
-        gateway, management, hub = _core_parts(
+        gateway, management, hub, dashboard = _core_parts(
             cfg,
             audit,
             vault,
@@ -232,9 +238,19 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
             )
         )
         mgmt = _uds_server(management, socks["management"])
+        dash = uvicorn.Server(
+            uvicorn.Config(
+                dashboard,
+                host=server.dashboard_host,
+                port=server.dashboard_port,
+                log_level="warning",
+                access_log=False,
+            )
+        )
 
         async def run() -> None:
             tasks = [
+                dash.serve(),
                 gw.serve(),
                 _serve_uds(mgmt, socks["management"]),
                 anchor_loop(cfg, audit, log),
@@ -248,6 +264,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 f"Cairnward gateway on http://{server.gateway_host}:{server.gateway_port}/v1 "
                 f"(privacy: {cfg.privacy().label}; single process, core not isolated)"
             )
+            log("dashboard: run `cairnward dashboard` to open it")
             if sync.changes:
                 log(f"Recorded {len(sync.changes)} settings change(s) in the audit log.")
             try:
@@ -370,6 +387,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                 await proxy.start()
                 ctl_task = asyncio.create_task(_serve_uds(ctl, socks["egress"]))
                 fwd = await _forward(server.gateway_port, socks["gateway"])
+                fwd_dash = await _forward(server.dashboard_port, socks["dashboard"])
                 core = await asyncio.create_subprocess_exec(*cmd, env=env, stdin=subprocess.DEVNULL)
                 log(f"cairnward-egress on 127.0.0.1:{proxy.port} (only networked process)")
                 log(
@@ -386,6 +404,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                         with contextlib.suppress(Exception):
                             await asyncio.wait_for(core.wait(), 10)
                     fwd.close()
+                    fwd_dash.close()
                     ctl.should_exit = True
                     serve_task.cancel()
                     anchors.cancel()
@@ -413,7 +432,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit, Vault.open(cfg.paths) as vault:
         backends = Backends(cfg.backends, proxy_all=srt_proxy or None)
         egress = RemoteEgress(str(egress_control))
-        gateway, management, hub = _core_parts(
+        gateway, management, hub, dashboard = _core_parts(
             cfg,
             audit,
             vault,
@@ -425,6 +444,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
         )
         gw = _uds_server(gateway, socks["gateway"])
         mgmt = _uds_server(management, socks["management"])
+        dash = _uds_server(dashboard, socks["dashboard"])
 
         async def watchdog() -> None:
             # Stop if the egress process (our parent and only route out) has gone.
@@ -433,14 +453,16 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
                 await asyncio.sleep(2)
                 misses = 0 if await asyncio.to_thread(egress.alive) else misses + 1
             log("cairnward core: egress process gone, shutting down")
-            gw.should_exit = mgmt.should_exit = True
+            gw.should_exit = mgmt.should_exit = dash.should_exit = True
 
         async def run() -> None:
             dog = asyncio.create_task(watchdog())
             keep = asyncio.create_task(retention_loop(cfg, vault, log))
             try:
                 await asyncio.gather(
-                    _serve_uds(gw, socks["gateway"]), _serve_uds(mgmt, socks["management"])
+                    _serve_uds(gw, socks["gateway"]),
+                    _serve_uds(mgmt, socks["management"]),
+                    _serve_uds(dash, socks["dashboard"]),
                 )
             finally:
                 dog.cancel()

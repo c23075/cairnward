@@ -83,7 +83,11 @@ def check_ports(cfg: Config) -> list[Check]:
     s = cfg.main.server
     busy = [
         f"{name} {p}"
-        for name, p in (("gateway", s.gateway_port), ("egress", s.egress_port))
+        for name, p in (
+            ("gateway", s.gateway_port),
+            ("dashboard", s.dashboard_port),
+            ("egress", s.egress_port),
+        )
         if not _port_free(p)
     ]
     if busy:
@@ -95,7 +99,14 @@ def check_ports(cfg: Config) -> list[Check]:
                 "stop that program or change the ports in cairnward.toml [server]",
             )
         ]
-    return [Check("ports", "ok", f"gateway {s.gateway_port} and egress {s.egress_port} are free")]
+    return [
+        Check(
+            "ports",
+            "ok",
+            f"gateway {s.gateway_port}, dashboard {s.dashboard_port} and egress "
+            f"{s.egress_port} are free",
+        )
+    ]
 
 
 def check_backends(cfg: Config) -> list[Check]:
