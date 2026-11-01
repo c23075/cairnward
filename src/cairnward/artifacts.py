@@ -141,5 +141,20 @@ class ArtifactStore:
         repo = self.repo(scope, owner)
         if not repo.exists():
             return False
-        shutil.rmtree(repo)
+        remove_tree(repo)
         return True
+
+
+def remove_tree(path: Path) -> None:
+    """rmtree that also removes read-only files (git objects on Windows)."""
+    import stat
+
+    def writable_then_retry(func: object, target: str, _exc: object) -> None:
+        t = Path(target)
+        t.chmod(stat.S_IWRITE)
+        if t.is_file():
+            t.unlink()
+        else:
+            t.rmdir()
+
+    shutil.rmtree(path, onexc=writable_then_retry)

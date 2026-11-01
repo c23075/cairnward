@@ -2,6 +2,7 @@
 links, HttpOnly SameSite=Strict session, CSRF token + Origin on changes, strict CSP,
 no CORS, no path tricks; and that its actions work."""
 
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -152,6 +153,7 @@ async def test_actions(env: Any) -> None:
             assert PASS.encode() not in f.read_bytes(), f
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 async def test_artifact_preview_is_sandboxed(env: Any) -> None:
     from cairnward.artifacts import ArtifactStore
 

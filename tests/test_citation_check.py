@@ -83,7 +83,7 @@ def test_draft_check(env: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str
     assert [x.status for x in report.references] == ["in_library", "doi_unverified", "not_found"]
     assert report.problems == 2
     f = tmp_path / "draft.md"
-    f.write_text(draft)
+    f.write_text(draft, encoding="utf-8")
     monkeypatch.setenv("CAIRNWARD_DATA_DIR", str(paths.data_dir))
     monkeypatch.setenv("CAIRNWARD_STATE_DIR", str(paths.state_dir))
     paths.config_dir.mkdir(parents=True, exist_ok=True)

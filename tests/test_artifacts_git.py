@@ -1,6 +1,7 @@
 """Artifacts: a git repository per conversation, job or run; one commit per write;
 restore = new commit (FR-ART-1); deleted with their conversation."""
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ import pytest
 from cairnward.artifacts import ArtifactError, ArtifactStore
 from cairnward.config.paths import Paths
 from cairnward.store import Vault
+
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 
 
 def test_versions_and_restore(tmp_path: Path) -> None:

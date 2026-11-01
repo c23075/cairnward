@@ -83,9 +83,12 @@ async def test_review_survives_a_restart(lib: Paths) -> None:
     result = second.store.result_path(job.id).read_text()
     assert all(f"| Paper {x} |" in result for x in "ABC") and "Small \\| sample (p. 2)" in result
     assert "## References" in result and "*Paper A*" in result
+    import shutil
+
     from cairnward.artifacts import ArtifactStore
 
-    assert ArtifactStore(lib.data_dir).read("job", job.id, "result.md").decode() == result
+    if shutil.which("git"):  # artifacts need git; the result file doesn't
+        assert ArtifactStore(lib.data_dir).read("job", job.id, "result.md").decode() == result
 
 
 async def test_schedule_cancel_and_ask_jobs(lib: Paths) -> None:

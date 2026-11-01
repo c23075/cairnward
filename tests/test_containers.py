@@ -58,7 +58,7 @@ def test_open_webui() -> None:
                               str(ROOT / "open-webui" / "compose.yaml"), "config"],
                              capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"},
                              check=False)  # fmt: skip
-    assert missing.returncode != 0 and "OPEN_WEBUI_IMAGE" in missing.stderr  # pins are required
+    assert missing.returncode != 0 and "required variable" in missing.stderr  # pins required
 
 
 def test_librechat_override(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 """Skills served as MCP prompts/resources (FR-MCP-4) and research search as an MCP tool
 (FR-RES-10, lit.search part)."""
 
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -178,6 +179,7 @@ async def test_research_tool_needs_opt_in(paths: Paths) -> None:
         audit.close()
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 async def test_artifact_tools(paths: Paths) -> None:
     (paths.config_dir / "environments" / "lit.toml").write_text(
         'tools = ["artifacts"]\n[privacy]\nisolation = "off"\n'

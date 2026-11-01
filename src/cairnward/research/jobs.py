@@ -35,8 +35,20 @@ StepStatus = Literal["pending", "done", "failed"]
 NOTE_FIELDS = ("aim", "method", "sample", "findings", "limitations")
 
 
+_last_created = [datetime.min.replace(tzinfo=UTC)]
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
+
+
+def _created() -> str:
+    """Strictly increasing, so jobs keep their order even with a coarse clock (Windows)."""
+    from datetime import timedelta
+
+    now = max(datetime.now(UTC), _last_created[0] + timedelta(microseconds=1))
+    _last_created[0] = now
+    return now.isoformat(timespec="microseconds")
 
 
 @dataclass
@@ -56,7 +68,7 @@ class Job:
     params: dict[str, Any]
     steps: list[Step]
     status: Status = "queued"
-    created: str = field(default_factory=_now)
+    created: str = field(default_factory=_created)
     not_before: str | None = None  # ISO time: scheduled ("run overnight")
     started: str | None = None
     finished: str | None = None

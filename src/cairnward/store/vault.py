@@ -541,11 +541,12 @@ class Vault:
             )
         checkpoint(self._db)
         # 3. The conversation's artifacts (FR-ART-1) go with it.
-        if self._data_dir is not None:
-            import shutil
+        repo = (self._data_dir / "artifacts" / "conversation" / conversation_id
+                if self._data_dir is not None else None)  # fmt: skip
+        if repo is not None and repo.exists():
+            from cairnward.artifacts import remove_tree
 
-            shutil.rmtree(self._data_dir / "artifacts" / "conversation" / conversation_id,
-                          ignore_errors=True)  # fmt: skip
+            remove_tree(repo)
 
     def purge_expired(self, *, older_than_days: int = TRASH_DAYS) -> list[str]:
         """Purge conversations that have been in the trash longer than the limit."""
