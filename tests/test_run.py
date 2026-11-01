@@ -67,6 +67,7 @@ def test_sandboxed_plan(paths: Paths, tmp_path: Path) -> None:
         "no_proxy",
         "-u",
         "NO_PROXY",
+        f"TMPDIR={tmp_path}",
         "aider",
         "--yes",
     ]
@@ -187,3 +188,43 @@ async def test_egress_control_app() -> None:
         assert sessions._by_token[token] == Session("e", None, "r", "cairnward", True)
         await c.post("/v1/sessions/revoke", json={"run_id": "r"})
         assert token not in sessions._by_token
+
+
+def test_profiles_point_agents_at_the_gateway(tmp_path: Path) -> None:
+    base, key, model, fast = (
+        "http://127.0.0.1:8484/v1",
+        "cw-run-k",
+        "cw/coding:medium",
+        "cw/coding:low",
+    )
+    aider = PROFILES["aider"].env(base, key, model, fast)
+    assert aider["AIDER_EDIT_FORMAT"] == "diff" and aider["AIDER_ANALYTICS"] == "false"
+    qwen = PROFILES["qwen-code"].env(base, key, model, fast)
+    assert (qwen["OPENAI_BASE_URL"], qwen["OPENAI_MODEL"]) == (base, model)
+    goose = PROFILES["goose"].env(base, key, model, fast)
+    assert goose["OPENAI_HOST"] == "http://127.0.0.1:8484" and goose["GOOSE_MODEL"] == model
+    oc = PROFILES["opencode"]
+    assert oc.config is not None
+    env = oc.config(base, key, model, fast, tmp_path)
+    cfg = json.loads(Path(env["OPENCODE_CONFIG"]).read_text())
+    assert cfg["model"] == f"cairnward/{model}" and cfg["small_model"] == f"cairnward/{fast}"
+    assert cfg["provider"]["cairnward"]["options"] == {"baseURL": base, "apiKey": key}
+    assert cfg["autoupdate"] is False and cfg["share"] == "disabled"
+    assert Path(env["OPENCODE_CONFIG"]).stat().st_mode & 0o777 == 0o600
+
+
+def test_profile_config_written_in_plan(paths: Paths, tmp_path: Path) -> None:
+    p = plan_run(cfg_with(paths, 'preset = "strict"'), environment="e",
+                 profile=PROFILES["opencode"], model="cw/e:medium", workspace=tmp_path / "ws",
+                 command=["opencode", "run", "x"], run=RUN, srt=["srt"],
+                 settings_file=tmp_path / "srt.json", tmp_dir=tmp_path)  # fmt: skip
+    assert Path(p.env["OPENCODE_CONFIG"]).parent == tmp_path  # removed with the run folder
+    assert "registry.npmjs.org" not in json.loads((tmp_path / "srt.json").read_text())["network"][
+        "allowedDomains"]  # fmt: skip
+
+
+def test_sandbox_debug_switch(
+    paths: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CAIRNWARD_SANDBOX_DEBUG", "1")
+    assert plan(paths, 'preset = "strict"', tmp_path, srt=["srt"]).env["SRT_DEBUG"] == "1"

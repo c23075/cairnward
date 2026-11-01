@@ -84,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--model", help="virtual model (default: cw/<env>:<env's default effort>)")
     run.add_argument("--workspace", type=Path, help="writable folder (default: current folder)")
     run.add_argument("--client", help="client name in the audit log (default: the profile)")
+    run.add_argument("--max-requests", type=int, help="stop the agent's model calls after N")
+    run.add_argument("--max-tokens", type=int, help="... after N tokens (prompt + reply)")
+    run.add_argument("--max-minutes", type=float, help="... after N minutes")
     run.add_argument(
         "agent_command",
         nargs=argparse.REMAINDER,
@@ -109,6 +112,28 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="wait up to this long for Cairnward to come up",
     )
+
+    bench = sub.add_parser("bench", help="model speed measurements")
+    bench_sub = bench.add_subparsers(dest="bench_command", metavar="ACTION", required=True)
+    bi = bench_sub.add_parser(
+        "import", help="use results of scripts/bench_backend.py for waiting-time estimates"
+    )
+    bi.add_argument("files", nargs="+", type=Path)
+    bench_sub.add_parser("show", help="the stored speeds")
+
+    runs = sub.add_parser("runs", help="past `cairnward run` sessions: review and undo changes")
+    runs_sub = runs.add_subparsers(dest="runs_command", metavar="ACTION", required=True)
+    runs_sub.add_parser("list", help="runs with exit code and files changed")
+    rd = runs_sub.add_parser("diff", help="what a run changed")
+    rd.add_argument("run", help="run id (the first few characters are enough)")
+    rd.add_argument("--stat", action="store_true", help="only a summary per file")
+    rv = runs_sub.add_parser("revert", help="undo a run's changes")
+    rv.add_argument("run")
+    rv.add_argument(
+        "--force", action="store_true", help="also undo files that changed again since the run"
+    )
+    rp = runs_sub.add_parser("prune", help="delete old snapshots")
+    rp.add_argument("--keep", type=int, default=20, help="keep the newest N runs (default 20)")
 
     lib = sub.add_parser("library", help="literature libraries: folders of PDFs, indexed")
     lib_sub = lib.add_subparsers(dest="library_command", metavar="ACTION", required=True)
@@ -447,6 +472,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
             workspace=args.workspace,
             client=args.client,
             log=_log,
+            budget={
+                "max_requests": args.max_requests,
+                "max_tokens": args.max_tokens,
+                "max_minutes": args.max_minutes,
+            },
         )
     except RunError as exc:
         _log(f"cairnward run: {exc}")
@@ -542,6 +572,82 @@ def _cmd_status(args: argparse.Namespace) -> int:
     print(f"egress:  {'127.0.0.1:' + str(st['egress_port']) if st['egress_port'] else 'off'}")
     print(f"privacy: {st['privacy']} (global); active runs: {st['active_runs']}")
     return 0
+
+
+def _cmd_bench(args: argparse.Namespace) -> int:
+    from cairnward.gateway.scheduling import BenchProfile
+
+    profile = BenchProfile.at(default_paths(args.config_dir).state_dir)
+    if args.bench_command == "import":
+        try:
+            models = profile.import_results(args.files)
+        except (OSError, ValueError, KeyError) as exc:
+            _log(f"cairnward bench import: {exc}")
+            return 1
+        print(f"Imported speeds for: {', '.join(models)} (used after the next `cairnward serve`).")
+    for model, s in sorted(profile.speeds.items()):
+        gen = f"{s.gen_tps:.1f}" if s.gen_tps else "?"
+        print(f"{model:24} reads {s.prompt_tps:6.1f} tok/s   writes {gen} tok/s")
+    if not profile.speeds:
+        print("No speeds stored; run scripts/bench_backend.py, then `cairnward bench import`.")
+    return 0
+
+
+def _cmd_runs(args: argparse.Namespace) -> int:
+    from cairnward.audit import AuditLog
+    from cairnward.run.history import RunNotFound, find_run, list_runs, snapshots_for
+    from cairnward.run.snapshots import SnapshotError, Snapshots
+
+    cfg = _load(args)
+    with AuditLog.open(cfg.paths) as audit:
+        try:
+            if args.runs_command == "list":
+                for r in list_runs(audit)[-50:]:
+                    code = "running" if r.exit_code is None else f"exit {r.exit_code}"
+                    changed = "" if r.changed_files is None else f"{r.changed_files} changed"
+                    print(
+                        f"{r.run_id[:8]}  {r.started[:19]}  {r.client or '':10} "
+                        f"{r.program or '':12} {code:8} {changed:12} {r.workspace}"
+                    )
+                return 0
+            if args.runs_command == "prune":
+                runs = list_runs(audit)
+                keep = {r.run_id for r in runs[-args.keep :]} if args.keep > 0 else set()
+                removed = 0
+                for ws in {r.workspace for r in runs if r.workspace}:
+                    removed += Snapshots(cfg.paths.state_dir, ws).prune(keep)
+                print(f"Removed snapshots of {removed} run(s); kept the newest {args.keep}.")
+                return 0
+            run = find_run(audit, args.run)
+            snaps = snapshots_for(cfg.paths.state_dir, run)
+            if args.runs_command == "diff":
+                print(snaps.diff(run.run_id, stat=args.stat), end="")
+                return 0
+            result = snaps.revert(run.run_id, force=args.force)
+            audit.append(
+                "run.revert",
+                actor="user",
+                run_id=run.run_id,
+                environment=run.environment,
+                client=run.client,
+                details={
+                    "restored": len(result.restored),
+                    "conflicts": len(result.conflicts),
+                    "forced": args.force,
+                },
+            )
+            for path in result.restored:
+                print(f"restored  {path}")
+            for path in result.conflicts:
+                print(f"skipped   {path}  (changed again since the run; --force to undo anyway)")
+            print(
+                f"Reverted run {run.run_id[:8]}: {len(result.restored)} file(s) restored, "
+                f"{len(result.conflicts)} skipped."
+            )
+            return 1 if result.conflicts else 0
+        except (RunNotFound, SnapshotError) as exc:
+            _log(f"cairnward runs: {exc}")
+            return 1
 
 
 def _embedder(cfg: Config, environment: str) -> tuple[Any, Any, Any]:
@@ -777,6 +883,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_sandbox(args)
         if args.command == "library":
             return _cmd_library(args)
+        if args.command == "runs":
+            return _cmd_runs(args)
+        if args.command == "bench":
+            return _cmd_bench(args)
         if args.command == "status":
             return _cmd_status(args)
         if args.command == "doctor":

@@ -19,6 +19,7 @@ from cairnward.config.loader import Config
 from cairnward.egress.control import EgressControl
 from cairnward.egress.proxy import Session
 from cairnward.gateway.clients import RunKeys
+from cairnward.gateway.scheduling import Budget
 
 
 class RunIn(BaseModel):
@@ -29,11 +30,15 @@ class RunIn(BaseModel):
     program: str = Field(max_length=200)
     arg_count: int = Field(ge=0)
     sandbox: str
+    max_requests: int | None = Field(default=None, ge=1)
+    max_tokens: int | None = Field(default=None, ge=1)
+    max_minutes: float | None = Field(default=None, gt=0)
 
 
 class RunEnd(BaseModel):
     exit_code: int
     duration_s: float
+    changed_files: int | None = None
 
 
 @dataclass
@@ -71,7 +76,13 @@ def management_app(
         if body.environment not in cfg.environments:
             raise HTTPException(404, f"unknown environment '{body.environment}'")
         run_id = str(uuid.uuid4())
-        key = run_keys.issue(body.client, run_id)
+        env_budget = cfg.environments[body.environment].run_budget
+        budget = Budget(
+            max_requests=body.max_requests or env_budget.max_requests,
+            max_tokens=body.max_tokens or env_budget.max_tokens,
+            max_minutes=body.max_minutes or env_budget.max_minutes,
+        )
+        key = run_keys.issue(body.client, run_id, budget)
         token = None
         if egress is not None:
             token = egress.create(
@@ -96,6 +107,7 @@ def management_app(
                     "workspace": body.workspace,
                     "arg_count": body.arg_count,
                     "sandbox": body.sandbox,
+                    "budget": {k: v for k, v in budget.__dict__.items() if v},
                 },
             )
         return {
@@ -122,7 +134,11 @@ def management_app(
                 client=run.client,
                 run_id=run_id,
                 outcome="ok" if body.exit_code == 0 else "error",
-                details={"exit_code": body.exit_code, "duration_s": round(body.duration_s, 3)},
+                details={
+                    "exit_code": body.exit_code,
+                    "duration_s": round(body.duration_s, 3),
+                    "changed_files": body.changed_files,
+                },
             )
         return {"ok": True}
 

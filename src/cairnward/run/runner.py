@@ -24,6 +24,7 @@ import httpx
 from cairnward.config.loader import Config
 from cairnward.core.server import sockets
 from cairnward.run.profiles import PROFILES, Profile, home_dirs
+from cairnward.run.snapshots import SnapshotError, Snapshots
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.sandbox.srt import install_dir
 
@@ -44,6 +45,13 @@ BASE_ENV = (
 
 class RunError(Exception):
     pass
+
+
+def _ensure_dirs(dirs: list[Path]) -> list[Path]:
+    """Agent state folders (e.g. ~/.qwen) must exist to be made writable in the sandbox."""
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+    return dirs
 
 
 @dataclass(frozen=True)
@@ -85,6 +93,8 @@ def plan_run(
     fast = f"cw/{environment}:low"
     env = {k: os.environ[k] for k in BASE_ENV if k in os.environ}
     env.update(profile.env(base_url, run["gateway_key"], model, fast))
+    if profile.config is not None:
+        env.update(profile.config(base_url, run["gateway_key"], model, fast, tmp_dir))
     env.update(CAIRNWARD_RUN_ID=run["run_id"], TMPDIR=str(tmp_dir))
     egress = (
         f"http://cw:{run['egress_token']}@127.0.0.1:{eg_port}" if run.get("egress_token") else None
@@ -113,7 +123,7 @@ def plan_run(
         p = cfg.paths
         spec = SandboxSpec(
             allowed_hosts=hosts,
-            allow_write=[workspace, tmp_dir, *[d for d in home_dirs(profile) if d.exists()]],
+            allow_write=[workspace, tmp_dir, *_ensure_dirs(home_dirs(profile))],
             deny_read=[*secret_dirs(), p.config_dir, p.data_dir, p.state_dir],
             # srt's own helpers live in the data folder and must stay readable.
             allow_read=(install_dir(p),),
@@ -121,7 +131,9 @@ def plan_run(
         spec.write(settings_file)
         if egress:
             env.update(HTTP_PROXY=egress, HTTPS_PROXY=egress)  # srt's parent proxy
-        return Plan(wrap(srt, settings_file, command), env, True, spec, warnings)
+        if os.environ.get("CAIRNWARD_SANDBOX_DEBUG"):
+            env["SRT_DEBUG"] = "1"  # srt logs every allow/deny decision to stderr
+        return Plan(wrap(srt, settings_file, command, tmp_dir=tmp_dir), env, True, spec, warnings)
 
     warnings.append("isolation = off: the agent runs unsandboxed and could bypass Cairnward")
     if egress:
@@ -140,6 +152,7 @@ def run_agent(
     model: str | None = None,
     workspace: Path | None = None,
     client: str | None = None,
+    budget: dict[str, Any] | None = None,
     log: Any = print,
 ) -> int:
     if not command:
@@ -174,6 +187,7 @@ def run_agent(
                 "program": Path(command[0]).name,
                 "arg_count": len(command) - 1,
                 "sandbox": "srt" if srt else "none",
+                **{k: v for k, v in (budget or {}).items() if v},
             },
         )
         if resp.status_code != 200:
@@ -181,6 +195,13 @@ def run_agent(
         run = resp.json()
         started = time.monotonic()
         code = 1
+        snaps: Snapshots | None = Snapshots(cfg.paths.state_dir, workspace)
+        try:
+            snaps.take(run["run_id"], "before")  # type: ignore[union-attr]
+        except SnapshotError as exc:
+            log(f"cairnward: no snapshot before the run ({exc}); runs diff/revert unavailable")
+            snaps = None
+        changed: int | None = None
         try:
             with tempfile.TemporaryDirectory(prefix="cairnward-run-") as tmp:
                 plan = plan_run(
@@ -205,8 +226,24 @@ def run_agent(
                     plan.argv, env=plan.env, cwd=workspace, check=False
                 ).returncode
         finally:
+            if snaps is not None:
+                try:
+                    snaps.take(run["run_id"], "after")
+                    changed = len(snaps.changes(run["run_id"]))
+                except SnapshotError as exc:
+                    log(f"cairnward: no snapshot after the run ({exc})")
             mgmt.post(
                 f"/v1/runs/{run['run_id']}/end",
-                json={"exit_code": code, "duration_s": time.monotonic() - started},
+                json={
+                    "exit_code": code,
+                    "duration_s": time.monotonic() - started,
+                    "changed_files": changed,
+                },
             )
+    if changed:
+        short = run["run_id"][:8]
+        log(
+            f"cairnward: {changed} file(s) changed. Review: cairnward runs diff {short}  "
+            f"Undo: cairnward runs revert {short}"
+        )
     return code

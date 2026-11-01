@@ -154,15 +154,12 @@ def srt_hosts(allow_hosts: list[str]) -> list[str]:
     return out
 
 
-def wrap(srt_cmd: list[str], settings_file: Path, command: list[str]) -> list[str]:
-    return [
-        *srt_cmd,
-        "--settings",
-        str(settings_file),
-        "env",
-        "-u",
-        "no_proxy",
-        "-u",
-        "NO_PROXY",
-        *command,
-    ]
+def wrap(
+    srt_cmd: list[str], settings_file: Path, command: list[str], *, tmp_dir: Path | None = None
+) -> list[str]:
+    """srt + clear no_proxy (+ point TMPDIR at a private folder: srt's default is a shared
+    /tmp/claude that may not exist and is shared between sandboxes)."""
+    inner = ["env", "-u", "no_proxy", "-u", "NO_PROXY"]
+    if tmp_dir is not None:
+        inner.append(f"TMPDIR={tmp_dir}")
+    return [*srt_cmd, "--settings", str(settings_file), *inner, *command]

@@ -31,11 +31,27 @@ from cairnward.gateway.models import (
     virtual_model_ids,
 )
 from cairnward.gateway.recorder import record_exchange
+from cairnward.gateway.scheduling import (
+    SLOW_SECONDS,
+    BenchProfile,
+    Scheduler,
+    conversation_key,
+    estimate_tokens,
+)
 from cairnward.policy.engine import Action, PolicyEngine
 from cairnward.store import Vault
 
-PASSTHROUGH = ("stop", "seed", "response_format", "n", "presence_penalty", "frequency_penalty",
-               "logit_bias", "user", "parallel_tool_calls")  # fmt: skip
+PASSTHROUGH = (
+    "stop",
+    "seed",
+    "response_format",
+    "n",
+    "presence_penalty",
+    "frequency_penalty",
+    "logit_bias",
+    "user",
+    "parallel_tool_calls",
+)
 
 
 class EmbeddingRequest(BaseModel):
@@ -74,6 +90,8 @@ class GatewayDeps:
     keys: ClientKeys
     vault: Vault | None = None
     run_keys: RunKeys = field(default_factory=RunKeys)
+    scheduler: Scheduler | None = None
+    profile: BenchProfile | None = None
 
 
 def _options(resolved: Resolved, req: ChatCompletionRequest) -> GenerationOptions:
@@ -97,6 +115,9 @@ def _options(resolved: Resolved, req: ChatCompletionRequest) -> GenerationOption
 
 def create_app(deps: GatewayDeps) -> FastAPI:
     cfg = deps.config
+    if deps.scheduler is None:
+        deps.scheduler = Scheduler({n: b.max_parallel for n, b in cfg.backends.backends.items()})
+    scheduler = deps.scheduler
     port = cfg.main.server.gateway_port
     app = FastAPI(
         title="Cairnward gateway",
@@ -137,8 +158,10 @@ def create_app(deps: GatewayDeps) -> FastAPI:
     async def list_models(request: Request) -> dict[str, Any] | JSONResponse:
         if client_of(request) is None:
             return _error(401, "missing or unknown API key (cairnward client add <name>)", "auth")
-        data = [{"id": mid, "object": "model", "created": 0, "owned_by": "cairnward"}
-                for mid in virtual_model_ids(cfg)]  # fmt: skip
+        data = [
+            {"id": mid, "object": "model", "created": 0, "owned_by": "cairnward"}
+            for mid in virtual_model_ids(cfg)
+        ]
         return {"object": "list", "data": data}
 
     @app.post("/v1/embeddings", response_model=None)
@@ -147,6 +170,10 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         if ident is None:
             return _error(401, "missing or unknown API key (cairnward client add <name>)", "auth")
         client, run_id = ident
+        if run_id and (run_use := deps.run_keys.usage.get(run_id)):
+            if why := run_use.exceeded():
+                return _error(429, why, "budget_exceeded")
+            run_use.requests += 1
         client_cfg = cfg.clients.clients.get(client)
         default_env = client_cfg.default_environment if client_cfg else None
         try:
@@ -176,7 +203,8 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         started = time.monotonic()
         driver = deps.backends.get(resolved.backend, resolved.environment)
         try:
-            vectors, tokens = await driver.embed(resolved.model, inputs)
+            async with scheduler.slot(resolved.backend, "embed"):
+                vectors, tokens = await driver.embed(resolved.model, inputs)
         except BackendError as exc:
             await asyncio.to_thread(
                 deps.engine.audit_post,
@@ -217,12 +245,67 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         except UnknownModel as exc:
             return _error(404, str(exc), "invalid_request_error", "model_not_found")
 
+        usage_of_run = deps.run_keys.usage.get(run_id) if run_id else None
+        if usage_of_run and (why := usage_of_run.exceeded()):
+            if deps.engine.audit:
+                await asyncio.to_thread(
+                    deps.engine.audit.append,
+                    "budget.exceeded",
+                    actor=f"agent:{client}",
+                    run_id=run_id,
+                    client=client,
+                    environment=resolved.environment,
+                    details={"reason": why},
+                )
+            return _error(
+                429, f"{why}; raise the limit with cairnward run --max-...", "budget_exceeded"
+            )
+
+        tool_tokens = estimate_tokens(json.dumps(body.tools)) if body.tools else 0
+        est = scheduler.estimate(resolved.backend, body.messages, tool_tokens)
+        warnings: list[str] = []
+        ctx = resolved.options.context_tokens
+        env_cfg = cfg.environments[resolved.environment]
+        if ctx and est.prompt_tokens > ctx:
+            msg = (
+                f"prompt is about {est.prompt_tokens} tokens but the context is {ctx}; "
+                "the model server would drop the start of the conversation"
+            )
+            if env_cfg.context_overflow == "reject":
+                return _error(
+                    400,
+                    msg + " (context_overflow = reject)",
+                    "invalid_request_error",
+                    "context_length_exceeded",
+                )
+            warnings.append(msg)
+        expected = (
+            deps.profile.expected_seconds(resolved.model, est.new_tokens) if deps.profile else None
+        )
+        if expected and expected > SLOW_SECONDS:
+            warnings.append(
+                f"about {est.new_tokens} new prompt tokens: roughly {expected / 60:.0f} "
+                f"min before the first word on {resolved.model}"
+            )
+
         action = Action(
-            kind="model.call", target=resolved.backend, environment=resolved.environment,
-            client=client, run_id=run_id, actor=f"agent:{client}" if run_id else f"client:{client}",
-            details={"model": resolved.model, "virtual_model": resolved.name,
-                     "effort": resolved.effort, "stream": body.stream},
-        )  # fmt: skip
+            kind="model.call",
+            target=resolved.backend,
+            environment=resolved.environment,
+            client=client,
+            run_id=run_id,
+            actor=f"agent:{client}" if run_id else f"client:{client}",
+            details={
+                "model": resolved.model,
+                "virtual_model": resolved.name,
+                "effort": resolved.effort,
+                "stream": body.stream,
+                "est_prompt_tokens": est.prompt_tokens,
+                "est_new_tokens": est.new_tokens,
+                "expected_wait_s": round(expected) if expected else None,
+                "warnings": warnings,
+            },
+        )
         decision = await asyncio.to_thread(deps.engine.check, action)
         if not decision.allowed:
             await asyncio.to_thread(deps.engine.audit_deny, decision)
@@ -230,14 +313,23 @@ def create_app(deps: GatewayDeps) -> FastAPI:
 
         extra = {k: v for k, v in (body.model_extra or {}).items() if k in PASSTHROUGH}
         chat_req = ChatRequest(
-            model=resolved.model, messages=body.messages, options=_options(resolved, body),
-            tools=body.tools, tool_choice=body.tool_choice, extra=extra,
-        )  # fmt: skip
+            model=resolved.model,
+            messages=body.messages,
+            options=_options(resolved, body),
+            tools=body.tools,
+            tool_choice=body.tool_choice,
+            extra=extra,
+        )
         params = canonical({"model": body.model, "messages": body.messages, "tools": body.tools})
         pre_seq = await asyncio.to_thread(deps.engine.audit_pre, decision, params)
         driver = deps.backends.get(resolved.backend, resolved.environment)
         started = time.monotonic()
         privacy = cfg.privacy(resolved.environment)
+        conv_key = conversation_key(body.messages)
+        queued: dict[str, float] = {"s": 0.0}
+        headers = {"Cache-Control": "no-store"}
+        if warnings:
+            headers["X-Cairnward-Warning"] = " | ".join(warnings)
 
         async def finish(
             reply: dict[str, Any] | None, usage: dict[str, Any], error: str | None
@@ -245,13 +337,25 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             conv_id = None
             if reply is not None and deps.vault is not None and privacy.value("vault") == "full":
                 rec = await asyncio.to_thread(
-                    record_exchange, deps.vault, body.messages, reply,
-                    environment=resolved.environment, client=client, model=resolved.model,
-                    effort=resolved.effort, crypto_shred=privacy.value("crypto_shred") == "on",
+                    record_exchange,
+                    deps.vault,
+                    body.messages,
+                    reply,
+                    environment=resolved.environment,
+                    client=client,
+                    model=resolved.model,
+                    effort=resolved.effort,
+                    crypto_shred=privacy.value("crypto_shred") == "on",
                     completion_tokens=usage.get("completion_tokens"),
-                )  # fmt: skip
+                )
                 conv_id = rec.conversation_id if rec else None
+            if reply is not None:
+                scheduler.served(resolved.backend, [*body.messages, reply])
+                if usage_of_run is not None:
+                    usage_of_run.requests += 1
+                    usage_of_run.tokens += int(usage.get("total_tokens") or 0)
             details: dict[str, Any] = {
+                "queued_s": round(queued["s"], 3),
                 "duration_s": round(time.monotonic() - started, 3),
                 "prompt_tokens": usage.get("prompt_tokens"),
                 "completion_tokens": usage.get("completion_tokens"),
@@ -262,22 +366,31 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             if error:
                 details["error"] = error
             await asyncio.to_thread(
-                deps.engine.audit_post, action, pre_seq, outcome="error" if error else "ok",
-                result_digest=digest(canonical(reply)) if reply else None, details=details,
-            )  # fmt: skip
+                deps.engine.audit_post,
+                action,
+                pre_seq,
+                outcome="error" if error else "ok",
+                result_digest=digest(canonical(reply)) if reply else None,
+                details=details,
+            )
             return conv_id
 
         if not body.stream:
             try:
-                result = await driver.chat(chat_req)
+                async with scheduler.slot(resolved.backend, conv_key) as waited:
+                    queued["s"] = waited
+                    result = await driver.chat(chat_req)
             except BackendError as exc:
                 await finish(None, {}, str(exc)[:300])
-                return _error(502 if exc.status >= 500 or exc.status < 400 else exc.status,
-                              str(exc), "backend_error")  # fmt: skip
+                return _error(
+                    502 if exc.status >= 500 or exc.status < 400 else exc.status,
+                    str(exc),
+                    "backend_error",
+                )
             result["model"] = body.model
             reply = result["choices"][0]["message"]
             await finish(reply, result.get("usage") or {}, None)
-            return result
+            return JSONResponse(result, headers=headers)
 
         async def events() -> AsyncIterator[bytes]:
             content: list[str] = []
@@ -286,25 +399,32 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             usage: dict[str, Any] = {}
             error = None
             try:
-                async for chunk in driver.chat_stream(chat_req):
-                    chunk["model"] = body.model
-                    for choice in chunk.get("choices") or []:
-                        delta = choice.get("delta") or {}
-                        if delta.get("content"):
-                            content.append(delta["content"])
-                        if delta.get("reasoning_content"):
-                            reasoning.append(delta["reasoning_content"])
-                        for tc in delta.get("tool_calls") or []:
-                            slot = calls.setdefault(tc.get("index", 0), {
-                                "id": tc.get("id"), "type": "function",
-                                "function": {"name": "", "arguments": ""}})  # fmt: skip
-                            fn = tc.get("function") or {}
-                            slot["id"] = slot["id"] or tc.get("id")
-                            slot["function"]["name"] += fn.get("name") or ""
-                            slot["function"]["arguments"] += fn.get("arguments") or ""
-                    if chunk.get("usage"):
-                        usage = chunk["usage"]
-                    yield f"data: {json.dumps(chunk)}\n\n".encode()
+                async with scheduler.slot(resolved.backend, conv_key) as waited:
+                    queued["s"] = waited
+                    async for chunk in driver.chat_stream(chat_req):
+                        chunk["model"] = body.model
+                        for choice in chunk.get("choices") or []:
+                            delta = choice.get("delta") or {}
+                            if delta.get("content"):
+                                content.append(delta["content"])
+                            if delta.get("reasoning_content"):
+                                reasoning.append(delta["reasoning_content"])
+                            for tc in delta.get("tool_calls") or []:
+                                slot = calls.setdefault(
+                                    tc.get("index", 0),
+                                    {
+                                        "id": tc.get("id"),
+                                        "type": "function",
+                                        "function": {"name": "", "arguments": ""},
+                                    },
+                                )
+                                fn = tc.get("function") or {}
+                                slot["id"] = slot["id"] or tc.get("id")
+                                slot["function"]["name"] += fn.get("name") or ""
+                                slot["function"]["arguments"] += fn.get("arguments") or ""
+                        if chunk.get("usage"):
+                            usage = chunk["usage"]
+                        yield f"data: {json.dumps(chunk)}\n\n".encode()
                 yield b"data: [DONE]\n\n"
             except BackendError as exc:
                 error = str(exc)[:300]
@@ -323,8 +443,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                         reply["reasoning_content"] = "".join(reasoning)
                 await asyncio.shield(finish(reply, usage, error))
 
-        return StreamingResponse(events(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-store"})  # fmt: skip
+        return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
 
     return app
 

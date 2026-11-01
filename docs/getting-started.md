@@ -36,7 +36,24 @@ uv run cairnward status
 
 ## 4. Connect clients and agents
 - Chat apps: [Open WebUI](clients/open-webui.md), [Jan](clients/jan.md).
-- Coding agents: [Aider](clients/aider.md) (recommended on CPU), or any OpenAI-compatible agent with `--profile generic`.
+- Coding agents: [Aider](clients/aider.md) (recommended on CPU), [Qwen Code](clients/qwen-code.md), [opencode](clients/opencode.md), [Goose](clients/goose.md) (untested), or any OpenAI-compatible agent with `--profile generic`.
+
+Every `cairnward run` takes snapshots of the project before and after, so you can review or undo what the agent did:
+```bash
+uv run cairnward runs list
+```
+```bash
+uv run cairnward runs diff <run-id>
+```
+```bash
+uv run cairnward runs revert <run-id>
+```
+Stop runaway sessions with `--max-requests`, `--max-tokens` or `--max-minutes` on `cairnward run` (or `[run_budget]` in an environment).
+
+Let Cairnward warn you about slow prompts by importing your benchmark results:
+```bash
+uv run cairnward bench import bench-qwen3_30b-*.json bench-qwen3_1.7b-*.json
+```
 
 ## 5. See what happened
 ```bash

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cairnward.config.models import _check_name
+from cairnward.gateway.scheduling import Budget, RunUsage
 
 PREFIX = "cw-"
 
@@ -79,17 +80,21 @@ class ClientKeys:
 
 
 class RunKeys:
-    """Short-lived gateway keys issued to one `cairnward run` (kept in memory only)."""
+    """Short-lived gateway keys issued to one `cairnward run` (kept in memory only), with
+    the run's budget and usage."""
 
     def __init__(self) -> None:
         self._by_hash: dict[str, tuple[str, str]] = {}  # sha256 -> (client, run_id)
+        self.usage: dict[str, RunUsage] = {}
 
-    def issue(self, client: str, run_id: str) -> str:
+    def issue(self, client: str, run_id: str, budget: Budget | None = None) -> str:
         key = PREFIX + "run-" + secrets.token_urlsafe(32)
         self._by_hash[_hash(key)] = (client, run_id)
+        self.usage[run_id] = RunUsage(budget or Budget())
         return key
 
     def revoke_run(self, run_id: str) -> None:
+        self.usage.pop(run_id, None)
         for h, (_, rid) in list(self._by_hash.items()):
             if rid == run_id:
                 del self._by_hash[h]

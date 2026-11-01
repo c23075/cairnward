@@ -1,0 +1,6 @@
+{
+  "name": "fix_failing_test",
+  "prompt": "The test test_add in test_calc.py fails. Fix the bug in calc.py so that all tests pass. Do not change the tests.",
+  "files": ["calc.py", "test_calc.py"],
+  "check": ["python", "-m", "pytest", "-q", "test_calc.py"]
+}

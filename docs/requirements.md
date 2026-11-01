@@ -29,14 +29,14 @@ All security requirements below describe what each protection does **when it is 
 | FR-GW-1 | OpenAI-compatible `/v1/chat/completions` (streaming, tool calls), `/v1/models`, `/v1/embeddings` | M | M0 | integration tests with fake backends; conformance against the OpenAI SDK |
 | FR-GW-2 | Per-client API keys (`cairnward client add`); requests attributed to a client in audit/vault | M | M0 | `test_client_keys.py` |
 | FR-GW-3 | Virtual models `cw/<environment>:<effort>` resolve environment + effort settings | M | M1 | `test_virtual_models.py` |
-| FR-GW-4 | Per-client, per-run and per-environment budgets (tokens, requests, time) | M | M2 | `test_budgets.py` |
-| FR-GW-5 | Context warning: request expected to need > 60 s prompt processing is flagged (dashboard + optional rejection) | S | M2 | unit with benchmark profile |
+| FR-GW-4 | Per-client, per-run and per-environment budgets (tokens, requests, time) | M | M2 | `test_budgets.py` — ✅ runs (requests, tokens, minutes); per-client limits open |
+| FR-GW-5 | Context warning: request expected to need > 60 s prompt processing is flagged (dashboard + optional rejection) | S | M2 | unit with benchmark profile — ✅ |
 | FR-GW-6 | Ollama-compatible endpoint | W | L | — |
 | FR-GW-7 | Gateway never modifies a conversation's prompt prefix (additions go at the end) | M | M0 | `test_prefix_stability.py` (byte-identical prefixes across turns) |
-| FR-GW-8 | Conversation affinity, keep-alive while active, unload after idle | M | M1 | integration with fake backend tracking cache hits |
+| FR-GW-8 | Conversation affinity, keep-alive while active, unload after idle | M | M1 | integration with fake backend tracking cache hits — ✅ affinity queue + keep-alive |
 | FR-GW-9 | KV-cache save/restore per conversation with llama.cpp slots | S | M2 | integration with llama-server |
 | FR-GW-10 | Memory check before loading a model (size + context vs available RAM); warn or queue | M | M1 | unit with mocked meminfo |
-| FR-GW-11 | Waiting-time estimate from stored benchmark profile; `cairnward bench` imports/re-runs the profile | M | M1 | unit |
+| FR-GW-11 | Waiting-time estimate from stored benchmark profile; `cairnward bench` imports/re-runs the profile | M | M1 | unit — ✅ `cairnward bench import` |
 | FR-BACK-1 | Ollama and OpenAI-compatible backend drivers (streaming, tools, embeddings, health) | M | M0 | integration with fake servers; manual against real Ollama + llama-server |
 | FR-BACK-2 | Backends in `backends.toml`; model per role; override order run → client → environment → global | M | M1 | `test_backend_resolution.py` |
 | FR-BACK-3 | Fallback only to local backends, logged | M | M1 | `test_backend_fallback.py` |
@@ -76,8 +76,8 @@ All security requirements below describe what each protection does **when it is 
 ### Coding agents
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-AGT-1 | Profiles for Aider (first, M0), Qwen Code, opencode, Goose + a generic OpenAI-compatible profile; each profile records its typical prompt size and is flagged when it exceeds the virtual model's context or the 60 s threshold | M | M2 (Aider in M0) | compatibility tests with fake model server |
-| FR-AGT-2 | Workspace snapshots before/after each run on hidden refs; `runs diff`, `runs revert` | M | M1 | `test_run_snapshots.py` |
+| FR-AGT-1 | Profiles for Aider (first, M0), Qwen Code, opencode, Goose + a generic OpenAI-compatible profile; each profile records its typical prompt size and is flagged when it exceeds the virtual model's context or the 60 s threshold | M | M2 (Aider in M0) | compatibility tests with fake model server — ✅ Aider, Qwen Code, opencode tested; Goose untested |
+| FR-AGT-2 | Workspace snapshots before/after each run on hidden refs; `runs diff`, `runs revert` | M | M1 | `test_run_snapshots.py` — ✅ |
 | FR-AGT-3 | All model/tool calls of a run linked to the run in audit and vault | M | M0 | integration |
 
 ### Chat clients

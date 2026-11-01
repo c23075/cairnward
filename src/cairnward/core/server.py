@@ -94,8 +94,18 @@ def _core_parts(
 ) -> tuple[Any, Any]:
     engine = PolicyEngine(cfg, approver=approver, audit=audit)
     run_keys = RunKeys()
+    from cairnward.gateway.scheduling import BenchProfile
+
     gateway = create_app(
-        GatewayDeps(cfg, engine, backends, ClientKeys.at(cfg.paths.state_dir), vault, run_keys)
+        GatewayDeps(
+            cfg,
+            engine,
+            backends,
+            ClientKeys.at(cfg.paths.state_dir),
+            vault,
+            run_keys,
+            profile=BenchProfile.at(cfg.paths.state_dir),
+        )
     )
     management = management_app(
         cfg, audit=audit, run_keys=run_keys, egress=egress, isolated=isolated

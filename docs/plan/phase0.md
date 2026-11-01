@@ -49,9 +49,9 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T1.6 | CSL formatting (APA, IEEE) | FR-RES-6 | — | S |
 | T1.7 | Virtual models (environment × effort), `effort.toml`, environments | FR-GW-3, FR-BACK-2, FR-BACK-3 | M0 | M |
 | T1.8 | Vault conversation reconstruction (prefix hashing, branches) | FR-VLT-2 | M0 | M |
-| T1.9 | Artifacts git repos; run workspace snapshots, `runs diff/revert` | FR-ART-1, FR-AGT-2 | M0 | M |
+| T1.9 | Artifacts git repos; run workspace snapshots, `runs diff/revert` | FR-ART-1, FR-AGT-2 | M0 | M ◐ (run snapshots ✅: shadow git store per workspace, `runs list/diff/revert/prune`, conflicts protected, project `.git` untouched; per-conversation artifact repos still to do) |
 | T1.10 | Crypto-shredding purge | FR-ENC-5 | T1.8 | S |
-| T1.11 | Cache-aware scheduling (affinity, keep-alive, idle unload), memory check, waiting-time estimate from benchmark profile | FR-GW-8, FR-GW-10, FR-GW-11 | M0 | M |
+| T1.11 | Cache-aware scheduling (affinity, keep-alive, idle unload), memory check, waiting-time estimate from benchmark profile | FR-GW-8, FR-GW-10, FR-GW-11 | M0 | M ◐ (✅ per-backend queue with conversation affinity, cached-prefix estimate, waiting-time warnings from `cairnward bench import`, keep-alive; ✗ memory check before loading a model (FR-GW-10)) |
 
 **Exit criteria (M1)**: `lit.ask` eval passes with page citations; citation eval shows zero invented references; a review job survives a restart mid-run; picking `cw/coding:low` vs `cw/coding:high` in a client changes model and thinking.
 
@@ -69,9 +69,9 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T2.7 | Locking (age wrapping, recovery key), passphrase-leak tests | FR-ENC-1, FR-ENC-2 | M |
 | T2.8 | Audit anchoring to private git repo | FR-AUD-4 | M |
 | T2.9 | MCP proxy, permissions, pinning, sandboxed servers; research tools via MCP | FR-MCP-1–3, FR-RES-10 | L |
-| T2.10 | All four agent profiles + compatibility tests | FR-AGT-1 | M |
+| T2.10 | All four agent profiles + compatibility tests | FR-AGT-1 | M ◐ (✅ Aider, Qwen Code, opencode tested with the real agents in the sandbox under Strict; Goose profile untested; eval harness `evals/coding/`) |
 | T2.11 | Client guides + container templates: Open WebUI, Jan, third client | FR-CLI-1, FR-CLI-2, FR-ISO-4 | M |
-| T2.12 | Budgets and context warning; llama.cpp KV save/restore | FR-GW-4, FR-GW-5, FR-GW-9 | M |
+| T2.12 | Budgets and context warning; llama.cpp KV save/restore | FR-GW-4, FR-GW-5, FR-GW-9 | M ◐ (✅ run budgets (requests/tokens/minutes) and context-overflow warn/reject; ✗ llama.cpp KV save/restore (FR-GW-9)) |
 | T2.13 | Model download verification via egress | FR-SUP-2 | S |
 | T2.14 | Artifact previews (sandboxed origin) | FR-ART-4 | S |
 

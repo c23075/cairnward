@@ -318,6 +318,14 @@ class EffortConfig(_Strict):
 # --------------------------------------------------------------------------- environments/*.toml
 
 
+class RunBudget(_Strict):
+    """Limits for one `cairnward run` (FR-GW-4); unset = unlimited."""
+
+    max_requests: int | None = Field(default=None, ge=1)
+    max_tokens: int | None = Field(default=None, ge=1)
+    max_minutes: float | None = Field(default=None, gt=0)
+
+
 class EnvironmentConfig(_Strict):
     """environments/<name>.toml (the file name is the environment's name)"""
 
@@ -332,6 +340,10 @@ class EnvironmentConfig(_Strict):
     skills: list[str] = Field(default_factory=list)
     citation_style: str = "apa"
     vault_retention_days: int | None = Field(default=None, ge=1)
+    run_budget: RunBudget = RunBudget()
+    context_overflow: Literal["warn", "reject"] = Field(
+        default="warn", description="a prompt larger than context_tokens: warn, or refuse it"
+    )
     privacy: PrivacyOverrides = PrivacyOverrides()
 
     @field_validator("workspace", mode="before")

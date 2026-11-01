@@ -240,6 +240,53 @@
       },
       "title": "PrivacyOverrides",
       "type": "object"
+    },
+    "RunBudget": {
+      "additionalProperties": false,
+      "description": "Limits for one `cairnward run` (FR-GW-4); unset = unlimited.",
+      "properties": {
+        "max_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Minutes"
+        },
+        "max_requests": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Requests"
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        }
+      },
+      "title": "RunBudget",
+      "type": "object"
     }
   },
   "$id": "https://github.com/c23075/cairnward/schemas/environment.schema.json",
@@ -263,6 +310,16 @@
     "citation_style": {
       "default": "apa",
       "title": "Citation Style",
+      "type": "string"
+    },
+    "context_overflow": {
+      "default": "warn",
+      "description": "a prompt larger than context_tokens: warn, or refuse it",
+      "enum": [
+        "warn",
+        "reject"
+      ],
+      "title": "Context Overflow",
       "type": "string"
     },
     "context_tokens": {
@@ -322,6 +379,14 @@
         "preset": null,
         "redaction": null,
         "vault": null
+      }
+    },
+    "run_budget": {
+      "$ref": "#/$defs/RunBudget",
+      "default": {
+        "max_minutes": null,
+        "max_requests": null,
+        "max_tokens": null
       }
     },
     "schema_version": {

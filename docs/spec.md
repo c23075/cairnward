@@ -194,6 +194,15 @@ Picking a virtual model in any client selects effort (thinking mode and budget, 
   - **workspace snapshots:** before and after each run, Cairnward commits the workspace state to a hidden ref (`refs/cairnward/runs/<id>`), so every change an agent made is reviewable and revertible (`cairnward runs diff <id>`, `cairnward runs revert <id>`),
   - per-run budgets (tokens, time, requests) enforced at the model endpoint.
 
+**Implemented (coding work, 2026-11-01):**
+- **Snapshots:** before and after every run the workspace is committed into a shadow git store in the state folder (one per workspace; the project's own `.git` is never touched; `.gitignore` honoured; dependency/build folders and files over 20 MB left out). `cairnward runs list | diff <id> | revert <id> [--force] | prune`; revert skips files changed again since the run unless forced, takes a safety snapshot first, and is audited (`run.revert`).
+- **Profiles, tested with the real agents** in the sandbox under Strict against a scripted model: Aider 0.86.2 (diff edit format by default, analytics off), Qwen Code 0.26.5, opencode 1.19.5 (per-run config file, removed with the run). Goose's profile is untested. Observed and blocked by the sandbox: Qwen Code's usage telemetry (`*.rum.aliyuncs.com`) and model catalogue (`models.dev`), opencode's provider download (`registry.npmjs.org`), LiteLLM's price-list download inside Aider (`raw.githubusercontent.com`); all three agents keep working without them.
+- **Budgets:** `--max-requests/--max-tokens/--max-minutes` or `[run_budget]` per environment; exceeding returns `429 budget_exceeded` and is audited.
+- **Scheduling (D62):** one queue per backend (`max_parallel`, default 1); the conversation whose prefix the model has cached goes first, at most 3 times in a row. The gateway estimates each request's uncached prompt tokens from the previous request on that backend; with speeds imported by `cairnward bench import`, requests expected to need more than 60 s before the first word carry an `X-Cairnward-Warning` header and audit note. Prompts larger than the context warn, or are refused with `context_overflow = "reject"`.
+- **Evaluations:** `evals/coding/run_eval.py` runs an agent on a task repository through `cairnward run` and reports pass/fail, time, model calls and tokens from the audit log.
+- `CAIRNWARD_SANDBOX_DEBUG=1` makes the sandbox log every allowed and blocked connection, to see what an agent tries to reach.
+- Not yet: approving new hosts during a run (needs the approvals inbox), the MCP tool proxy, the memory check before loading a model, llama.cpp cache save/restore.
+
 ### 4.4 Chat clients (D44)
 - Documented and tested: **Open WebUI** (check its current license's branding terms), **Jan**, and one more chosen at M2 (LibreChat or AnythingLLM). Each gets a setup guide: base URL, per-client API key, MCP endpoint, recommended privacy settings (telemetry off, history minimal or temporary chats, since the vault holds the authoritative copy).
 - Features like chat folders, uploads and artifacts panels come from the client. Effort/environment come from virtual models (§4.1).
