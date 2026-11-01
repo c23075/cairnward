@@ -49,5 +49,22 @@ uv run cairnward audit verify
 uv run cairnward store info
 ```
 
+## 6. A literature library
+Pull the embedding model once:
+```bash
+ollama pull qwen3-embedding:0.6b
+```
+Register a folder of PDFs and index it (re-run `index` after adding papers; only new or changed files are processed):
+```bash
+uv run cairnward library create thesis ~/research/papers
+```
+```bash
+uv run cairnward library index thesis
+```
+Find passages, with pages:
+```bash
+uv run cairnward library search thesis "effect of sleep on working memory"
+```
+
 ## Important: Ollama can still be reached directly
 Ollama listens on `127.0.0.1:11434`. Agents started with `cairnward run` (sandboxed) can only reach Cairnward's gateway, but **any unsandboxed program on your machine can talk to Ollama directly and bypass Cairnward**. Configure chat apps to use Cairnward's gateway, not Ollama, and turn off their own Ollama connection (see the client guides).

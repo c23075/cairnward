@@ -11,6 +11,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from cairnward import __version__
 from cairnward.config import SETTINGS, Config, ConfigError, default_paths, load_config
@@ -108,6 +109,27 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="wait up to this long for Cairnward to come up",
     )
+
+    lib = sub.add_parser("library", help="literature libraries: folders of PDFs, indexed")
+    lib_sub = lib.add_subparsers(dest="library_command", metavar="ACTION", required=True)
+    lc = lib_sub.add_parser("create", help="register a folder of PDFs as a library")
+    lc.add_argument("name")
+    lc.add_argument("folder", type=Path)
+    lc.add_argument("--env", default="litreview-offline", help="environment (privacy, models)")
+    li = lib_sub.add_parser("index", help="parse, chunk and embed new or changed PDFs")
+    li.add_argument("name")
+    li.add_argument("--prune", action="store_true", help="forget PDFs no longer in the folder")
+    li.add_argument("--rebuild", action="store_true", help="re-index everything from scratch")
+    lib_sub.add_parser("list", help="libraries and their size")
+    ls_ = lib_sub.add_parser("show", help="documents in a library")
+    ls_.add_argument("name")
+    lq = lib_sub.add_parser("search", help="find passages (vector + keyword search)")
+    lq.add_argument("name")
+    lq.add_argument("query")
+    lq.add_argument("-k", type=int, default=5, help="number of passages (default 5)")
+    lq.add_argument("--json", action="store_true")
+    lr = lib_sub.add_parser("remove", help="delete a library's index (the PDFs stay)")
+    lr.add_argument("name")
 
     sbx = sub.add_parser("sandbox", help="the OS sandbox (Anthropic sandbox-runtime)")
     sbx_sub = sbx.add_subparsers(dest="sandbox_command", metavar="ACTION", required=True)
@@ -522,6 +544,117 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _embedder(cfg: Config, environment: str) -> tuple[Any, Any, Any]:
+    """(embedder, audit log, backends) for CLI research commands."""
+    from cairnward.audit import AuditLog, enabled_for
+    from cairnward.backends import Backends
+    from cairnward.policy import DenyApprover, PolicyEngine, TerminalApprover
+    from cairnward.research import InProcessEmbedder
+
+    audit = AuditLog.open(cfg.paths, enabled_for(cfg))
+    approver = TerminalApprover() if sys.stdin.isatty() else DenyApprover()
+    backends = Backends(cfg.backends)
+    engine = PolicyEngine(cfg, approver=approver, audit=audit)
+    return InProcessEmbedder(cfg, engine, backends, environment=environment), audit, backends
+
+
+def _cmd_library(args: argparse.Namespace) -> int:
+    import asyncio
+
+    from cairnward.research import EmbeddingDenied, LibraryError, Research
+
+    cfg = _load(args)
+    cmd = args.library_command
+    try:
+        with Research.open(cfg.paths) as research:
+            if cmd == "create":
+                if args.env not in cfg.environments:
+                    _log(f"unknown environment '{args.env}'")
+                    return 2
+                lib = research.create(args.name, args.folder, args.env)
+                print(
+                    f"Created library '{lib.name}' for {lib.folder} "
+                    f"(environment '{lib.environment}')."
+                )
+                print(f"Next: cairnward library index {lib.name}")
+                return 0
+            if cmd == "list":
+                for lib, n_docs, n_chunks in research.list_libraries():
+                    model = lib.embedding_model or "not indexed"
+                    print(
+                        f"{lib.name:20} {n_docs:5} docs {n_chunks:7} chunks  [{lib.environment}] "
+                        f"{model}  {lib.folder}"
+                    )
+                return 0
+            if cmd == "show":
+                for d in research.documents(args.name):
+                    title = (d.title or "")[:60]
+                    print(f"{d.status:8} {d.pages or 0:4}p {d.chunks:4}c  {d.path}  {title}")
+                    if d.error and d.status != "indexed":
+                        print(f"{'':20}{d.error}")
+                return 0
+            if cmd == "remove":
+                research.remove(args.name)
+                print(f"Removed the index of '{args.name}' (your PDFs are untouched).")
+                return 0
+            lib = research.get(args.name)
+            embedder, audit, backends = _embedder(cfg, lib.environment)
+            try:
+                if cmd == "index":
+                    report = asyncio.run(
+                        research.index(
+                            args.name,
+                            embedder,
+                            prune=args.prune,
+                            rebuild=args.rebuild,
+                            progress=print,
+                        )
+                    )
+                    audit.append(
+                        "library.index",
+                        actor="user",
+                        environment=lib.environment,
+                        target=args.name,
+                        details={
+                            k: getattr(report, k)
+                            for k in (
+                                "added",
+                                "updated",
+                                "unchanged",
+                                "no_text",
+                                "failed",
+                                "missing",
+                                "chunks",
+                                "seconds",
+                            )
+                        },
+                    )
+                    print(
+                        f"\nIndexed '{args.name}': {report.added} added, {report.updated} updated, "
+                        f"{report.unchanged} unchanged, {report.no_text} without text, "
+                        f"{report.failed} failed, {report.missing} missing; "
+                        f"{report.chunks} chunks in {report.seconds:.0f}s."
+                    )
+                    return 1 if report.failed else 0
+                hits = asyncio.run(research.search(args.name, args.query, embedder, k=args.k))
+            finally:
+                audit.close()
+                asyncio.run(backends.aclose())
+            if args.json:
+                from dataclasses import asdict
+
+                print(json.dumps([asdict(h) for h in hits], indent=2))
+                return 0
+            for i, h in enumerate(hits, 1):
+                title = h.title or h.path
+                print(f"{i}. {title} ({h.pages})  score {h.score}")
+                print(f"   {h.text[:300]}{'…' if len(h.text) > 300 else ''}\n")
+            return 0
+    except (LibraryError, EmbeddingDenied) as exc:
+        _log(f"cairnward library: {exc}")
+        return 1
+
+
 def _cmd_sandbox(args: argparse.Namespace) -> int:
     from cairnward.sandbox import SRT_VERSION, SandboxUnavailable, install, locate, node_version
 
@@ -642,6 +775,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_run(args)
         if args.command == "sandbox":
             return _cmd_sandbox(args)
+        if args.command == "library":
+            return _cmd_library(args)
         if args.command == "status":
             return _cmd_status(args)
         if args.command == "doctor":
