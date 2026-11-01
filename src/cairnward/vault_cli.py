@@ -19,9 +19,16 @@ from cairnward.store import Vault
 from cairnward.store.vault import Conversation, Message, NotFoundError, VaultError
 
 
+def ask_passphrase(prompt: str) -> str:
+    """Read a passphrase from the terminal, never echoed (tests replace this)."""
+    import getpass
+
+    return getpass.getpass(prompt)
+
+
 def _row(c: Conversation, count: int | None = None) -> str:
-    flags = ("P" if c.pinned else "-") + ("T" if c.deleted_at else "-")
-    title = (c.title or "(untitled)")[:60]
+    flags = ("P" if c.pinned else "-") + ("T" if c.deleted_at else "-") + ("L" if c.locked else "-")
+    title = "(locked)" if c.locked and not c.title else (c.title or "(untitled)")[:60]
     n = f"{count:>4}" if count is not None else ""
     return (
         f"{c.id[:10]}  {c.updated_at[:16]}  {flags}  {(c.environment or '-')[:14]:14} {n} {title}"
@@ -75,7 +82,8 @@ def _run(cfg: Config, vault: Vault, action: str, args: Any, out: TextIO) -> int:
         if not convs:
             out.write("the trash is empty\n" if trash else "no conversations\n")
         for c in convs[: getattr(args, "limit", 50)]:
-            out.write(_row(c, len(vault.messages(c.id))) + "\n")
+            count = None if c.locked and not vault.readable(c.id) else len(vault.messages(c.id))
+            out.write(_row(c, count) + "\n")
         return 0
     if action == "search":
         hits = vault.search(args.text, environment=args.env)
@@ -91,7 +99,40 @@ def _run(cfg: Config, vault: Vault, action: str, args: Any, out: TextIO) -> int:
         out.write(f"purged {total} conversation(s){lines}\n")
         return 0
 
+    if action == "relock":
+        _server(cfg, "/v1/vault/relock", {"conversation_id": None})
+        out.write("locked conversations are closed again in the running server\n")
+        return 0
     conv_id = vault.resolve_id(args.id)
+    if action == "lock":
+        first = ask_passphrase("Passphrase for this conversation: ")
+        if ask_passphrase("Again: ") != first:
+            out.write("the passphrases differ: not locked\n")
+            return 1
+        vault.lock(conv_id, first)
+        _server(cfg, "/v1/vault/relock", {"conversation_id": conv_id})
+        _audit(cfg, "vault.lock", conv_id)
+        out.write(f"locked {conv_id[:10]}: it needs the passphrase to read, is never sent to "
+                  "hosted backends, and can't be recovered without the passphrase\n")  # fmt: skip
+        return 0
+    if action == "unlock":
+        secret = ask_passphrase("Passphrase: ")
+        if args.permanently:
+            vault.unlock(conv_id, secret, permanently=True)
+            _audit(cfg, "vault.unlock", conv_id, permanently=True)
+            out.write(f"removed the lock from {conv_id[:10]}\n")
+            return 0
+        vault.unlock(conv_id, secret, minutes=0.1)  # check the passphrase here first
+        code, detail = _server(cfg, f"/v1/vault/{conv_id}/unlock",
+                               {"passphrase": secret, "minutes": args.minutes})  # fmt: skip
+        if code != 200:
+            out.write(f"cairnward: {detail}\n")
+            return 1
+        out.write(f"{conv_id[:10]} is open in the running server for {args.minutes:g} minutes "
+                  "(cairnward vault relock closes it now)\n")  # fmt: skip
+        return 0
+    if vault.is_locked(conv_id) and not vault.readable(conv_id) and action in ("show", "export"):
+        vault.unlock(conv_id, ask_passphrase("Passphrase: "), minutes=5)
     if action == "show":
         conv, msgs = vault.conversation(conv_id), vault.messages(conv_id)
         out.write(to_json(conv, msgs) + "\n" if args.json else to_markdown(conv, msgs))
@@ -133,6 +174,24 @@ def _run(cfg: Config, vault: Vault, action: str, args: Any, out: TextIO) -> int:
         out.write(f"renamed {conv_id[:10]}\n")
         return 0
     raise VaultError(f"unknown action {action}")
+
+
+def _server(cfg: Config, path: str, body: dict[str, Any]) -> tuple[int, str]:
+    """Tell the running core (if any) over its owner-only management socket."""
+    import httpx
+
+    from cairnward.run.runner import RunError, management
+
+    try:
+        with management(cfg) as mgmt:
+            resp = mgmt.post(path, json=body)
+    except (RunError, httpx.HTTPError):
+        return 0, "Cairnward isn't running (start it with cairnward serve)"
+    try:
+        detail = str(resp.json().get("detail", ""))
+    except ValueError:
+        detail = resp.text
+    return resp.status_code, detail
 
 
 def apply_retention(cfg: Config, vault: Vault) -> dict[str, list[str]]:

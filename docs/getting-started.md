@@ -75,7 +75,7 @@ uv run cairnward vault list
 ```bash
 uv run cairnward vault search "parser"
 ```
-`vault show | export | delete | restore | purge` take an id or its first characters. Deleting here doesn't touch the client's own history.
+`vault show | export | delete | restore | purge` take an id or its first characters. Deleting here doesn't touch the client's own history. Lock a conversation with `vault lock <id>` (passphrase; a locked conversation never goes to hosted models) and open it for a while with `vault unlock <id>`.
 ```bash
 uv run cairnward store info
 ```

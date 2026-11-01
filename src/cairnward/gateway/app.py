@@ -30,7 +30,7 @@ from cairnward.gateway.models import (
     resolve_embedding,
     virtual_model_ids,
 )
-from cairnward.gateway.recorder import record_exchange
+from cairnward.gateway.recorder import matching_conversation, record_exchange
 from cairnward.gateway.scheduling import (
     SLOW_SECONDS,
     BenchProfile,
@@ -39,7 +39,7 @@ from cairnward.gateway.scheduling import (
     estimate_tokens,
     memory_warning,
 )
-from cairnward.policy.engine import Action, PolicyEngine
+from cairnward.policy.engine import Action, Decision, PolicyEngine
 from cairnward.redaction import check_outbound, message_texts
 from cairnward.store import Vault
 from cairnward.sysinfo import meminfo
@@ -115,6 +115,14 @@ def _options(resolved: Resolved, req: ChatCompletionRequest) -> GenerationOption
         min_p=o.min_p,
         keep_alive="10m",
     )
+
+
+def _locked_state(vault: Vault, messages: list[dict[str, Any]]) -> str | None:
+    """None, or "open"/"closed" when the request continues a locked conversation."""
+    conv = matching_conversation(vault, messages)
+    if conv is None or not vault.is_locked(conv):
+        return None
+    return "open" if vault.readable(conv) else "closed"
 
 
 def create_app(deps: GatewayDeps) -> FastAPI:
@@ -350,6 +358,20 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         if not decision.allowed:
             await asyncio.to_thread(deps.engine.audit_deny, decision)
             return _error(403, f"denied by cairnward policy: {decision.reason}", "policy_denied")
+        if deps.vault is not None and (locked := await asyncio.to_thread(
+            _locked_state, deps.vault, body.messages
+        )):  # fmt: skip
+            if cfg.backends.backends[resolved.backend].location != "local":
+                why = "locked conversations never go to hosted backends"
+                denial = Decision(action, "deny", "high", why)
+                await asyncio.to_thread(deps.engine.audit_deny, denial)
+                return _error(403, f"this conversation is locked in Cairnward's vault: {why}",
+                              "locked_conversation")  # fmt: skip
+            if locked == "closed":
+                warnings.append(
+                    "this conversation is locked in the vault: this exchange won't be stored "
+                    "until you unlock it (cairnward vault unlock)"
+                )
         if blocked := await redact(
             resolved.backend, resolved.environment, list(message_texts(body.messages)),
             client, run_id, conversation_key(body.messages), warnings,
@@ -413,6 +435,8 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                     completion_tokens=usage.get("completion_tokens"),
                 )
                 conv_id = rec.conversation_id if rec else None
+                if rec is None:
+                    slot_info["vault_note"] = "locked: not stored"
             if reply is not None:
                 scheduler.served(resolved.backend, [*body.messages, reply])
                 if usage_of_run is not None:

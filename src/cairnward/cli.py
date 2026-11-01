@@ -167,6 +167,13 @@ def build_parser() -> argparse.ArgumentParser:
     v_title.add_argument("id")
     v_title.add_argument("title")
     vlt_sub.add_parser("prune", help="apply retention now and empty old trash")
+    v_lock = vlt_sub.add_parser("lock", help="lock a conversation with a passphrase")
+    v_lock.add_argument("id")
+    v_unlock = vlt_sub.add_parser("unlock", help="open a locked conversation in the server")
+    v_unlock.add_argument("id")
+    v_unlock.add_argument("--minutes", type=float, default=30, help="how long (default 30)")
+    v_unlock.add_argument("--permanently", action="store_true", help="remove the lock")
+    vlt_sub.add_parser("relock", help="close every unlocked conversation in the server now")
 
     appr = sub.add_parser("approvals", help="answer requests Cairnward is waiting on (y/c/e/n)")
     appr_sub = appr.add_subparsers(dest="approvals_command", metavar="ACTION")

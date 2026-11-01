@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -73,6 +74,7 @@ class Conversation:
     archived: bool
     deleted_at: str | None
     purged_at: str | None
+    locked: bool = False
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,8 @@ class Vault:
     def __init__(self, vault_engine: Engine, keys_engine: Engine):
         self._db = vault_engine
         self._keys = keys_engine
+        # Unlocked keys of locked conversations, in memory only: id -> (key, expires)
+        self._unlocked: dict[str, tuple[bytes, float]] = {}
 
     @classmethod
     def open(cls, paths: Paths) -> Self:
@@ -137,9 +141,87 @@ class Vault:
             ).first()
         if row is None:
             raise PurgedError(f"no key for conversation {conversation_id}")
-        if row.kind != "plain":
-            raise LockedError(f"conversation {conversation_id} is locked")
+        if row.kind == "wrapped":
+            held = self._unlocked.get(conversation_id)
+            if held is None or held[1] < time.monotonic():
+                self._unlocked.pop(conversation_id, None)
+                raise LockedError(f"conversation {conversation_id} is locked")
+            return held[0]
         return bytes(row.key)
+
+    def _key_row(self, conversation_id: str) -> Any:
+        with self._keys.connect() as conn:
+            return conn.execute(
+                select(conversation_keys.c.kind, conversation_keys.c.key).where(
+                    conversation_keys.c.conversation_id == conversation_id
+                )
+            ).first()
+
+    def is_locked(self, conversation_id: str) -> bool:
+        row = self._key_row(conversation_id)
+        return row is not None and row.kind == "wrapped"
+
+    def lock(self, conversation_id: str, secret: str) -> None:
+        """Wrap the conversation's key with a passphrase (spec §5.5, FR-ENC-1)."""
+        if len(secret) < 8:
+            raise VaultError("use a passphrase of at least 8 characters")
+        with self._db.connect() as conn:
+            row = self._row(conn, conversation_id)
+        if row.purged_at is not None:
+            raise PurgedError(f"conversation {conversation_id} was purged")
+        if row.enc != "age":
+            raise VaultError("this conversation was stored without encryption "
+                             "(crypto_shred = off), so it can't be locked")  # fmt: skip
+        key_row = self._key_row(conversation_id)
+        if key_row is None:
+            raise PurgedError(f"no key for conversation {conversation_id}")
+        if key_row.kind == "wrapped":
+            raise VaultError("already locked")
+        wrapped = crypto.wrap_key(bytes(key_row.key), secret)
+        with self._keys.begin() as kconn:
+            kconn.execute(
+                update(conversation_keys)
+                .where(conversation_keys.c.conversation_id == conversation_id)
+                .values(kind="wrapped", key=wrapped)
+            )
+        checkpoint(self._keys)  # the plain key is overwritten in the file too
+        self._unlocked.pop(conversation_id, None)
+
+    def unlock(self, conversation_id: str, secret: str, *, minutes: float = 30,
+               permanently: bool = False) -> None:  # fmt: skip
+        """Open a locked conversation for `minutes` (in memory), or remove the lock."""
+        key_row = self._key_row(conversation_id)
+        if key_row is None or key_row.kind != "wrapped":
+            raise VaultError("not locked")
+        try:
+            key = crypto.unwrap_key(bytes(key_row.key), secret)
+        except crypto.DecryptionError:
+            raise LockedError("wrong passphrase") from None
+        if permanently:
+            with self._keys.begin() as kconn:
+                kconn.execute(
+                    update(conversation_keys)
+                    .where(conversation_keys.c.conversation_id == conversation_id)
+                    .values(kind="plain", key=key)
+                )
+            self._unlocked.pop(conversation_id, None)
+            return
+        self._unlocked[conversation_id] = (key, time.monotonic() + minutes * 60)
+
+    def readable(self, conversation_id: str) -> bool:
+        """False for a locked conversation that isn't unlocked right now."""
+        try:
+            self._key(conversation_id)
+        except LockedError:
+            return False
+        return True
+
+    def relock(self, conversation_id: str | None = None) -> None:
+        """Forget unlocked keys (one conversation, or all)."""
+        if conversation_id is None:
+            self._unlocked.clear()
+        else:
+            self._unlocked.pop(conversation_id, None)
 
     def _seal(self, conv: Any, plaintext: bytes) -> bytes:
         return crypto.seal(self._key(conv.id), plaintext) if conv.enc == "age" else plaintext
@@ -202,8 +284,12 @@ class Vault:
 
     def _to_conversation(self, row: Any) -> Conversation:
         title = None
+        locked = row.enc == "age" and row.purged_at is None and self.is_locked(row.id)
         if row.title is not None and row.purged_at is None:
-            title = self._open(row.id, row.enc, bytes(row.title)).decode()
+            try:
+                title = self._open(row.id, row.enc, bytes(row.title)).decode()
+            except LockedError:
+                title = None  # shown as locked
         return Conversation(
             id=row.id,
             created_at=row.created_at,
@@ -217,6 +303,7 @@ class Vault:
             archived=bool(row.archived),
             deleted_at=row.deleted_at,
             purged_at=row.purged_at,
+            locked=locked,
         )
 
     def conversation(self, conversation_id: str) -> Conversation:
@@ -522,6 +609,8 @@ class Vault:
         needle = text.lower()
         found: list[tuple[Conversation, str]] = []
         for conv in self.list_conversations(environment=environment):
+            if conv.locked and not self.readable(conv.id):
+                continue  # locked conversations aren't searched
             if conv.title and needle in conv.title.lower():
                 found.append((conv, conv.title))
             else:

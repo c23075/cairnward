@@ -178,6 +178,7 @@ def _core_parts(
         engine=engine,
         inbox=inbox,
         mcp=hub,
+        vault=vault,
     )
     return gateway, management, hub
 

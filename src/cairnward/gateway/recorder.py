@@ -60,6 +60,16 @@ def _title(messages: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def matching_conversation(vault: Vault, request_messages: list[dict[str, Any]]) -> str | None:
+    """The stored conversation this request continues, if any (longest prefix match)."""
+    hashes = prefix_hashes(request_messages)
+    for k in range(len(hashes), 0, -1):
+        match = vault.find_by_prefix_hash(hashes[k - 1])
+        if match:
+            return match[0]
+    return None
+
+
 @dataclass(frozen=True)
 class Recorded:
     conversation_id: str

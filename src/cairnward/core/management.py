@@ -77,6 +77,15 @@ class AskIn(BaseModel):
     run_id: str | None = None
 
 
+class UnlockIn(BaseModel):
+    passphrase: str = Field(min_length=1, max_length=1024)
+    minutes: float = Field(default=30, gt=0, le=24 * 60)
+
+
+class RelockIn(BaseModel):
+    conversation_id: str | None = None
+
+
 class McpApproveIn(BaseModel):
     environment: str | None = None
     tools: dict[str, str] = Field(description="tool name -> the definition hash you reviewed")
@@ -100,6 +109,7 @@ def management_app(
     engine: PolicyEngine | None = None,
     inbox: ApprovalInbox | None = None,
     mcp: Any = None,
+    vault: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward management", docs_url=None, redoc_url=None)
     runs: dict[str, _Run] = {}
@@ -319,6 +329,32 @@ def management_app(
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         return {"approved": sorted(body.tools)}
+
+    # ------------------------------------------------------------------ vault (locks)
+
+    @app.post("/v1/vault/{conversation_id}/unlock")
+    def vault_unlock(conversation_id: str, body: UnlockIn) -> dict[str, Any]:
+        """Open a locked conversation in the running core for a while (memory only).
+        The passphrase arrives on the owner-only socket and is never stored or logged."""
+        from cairnward.store.vault import VaultError
+
+        if vault is None:
+            raise HTTPException(503, "no vault in this process")
+        try:
+            vault.unlock(conversation_id, body.passphrase, minutes=body.minutes)
+        except VaultError as exc:
+            raise HTTPException(400, str(exc)) from None
+        if audit:
+            audit.append("vault.unlock", actor="user", target=conversation_id,
+                         conversation_id=conversation_id,
+                         details={"minutes": body.minutes, "where": "server"})  # fmt: skip
+        return {"ok": True, "minutes": body.minutes}
+
+    @app.post("/v1/vault/relock")
+    def vault_relock(body: RelockIn) -> dict[str, bool]:
+        if vault is not None:
+            vault.relock(body.conversation_id)
+        return {"ok": True}
 
     # declared last so that /ask and /sandbox above aren't taken for request ids
     @app.post("/v1/approvals/{request_id}")

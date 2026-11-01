@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from pyrage import decrypt, encrypt, x25519
+from pyrage import decrypt, encrypt, passphrase, x25519
 
 
 class DecryptionError(Exception):
@@ -31,3 +31,15 @@ def open_sealed(key: bytes, ciphertext: bytes) -> bytes:
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def wrap_key(key: bytes, secret: str) -> bytes:
+    """Encrypt a conversation key with a passphrase (age scrypt recipient)."""
+    return bytes(passphrase.encrypt(key, secret))
+
+
+def unwrap_key(wrapped: bytes, secret: str) -> bytes:
+    try:
+        return bytes(passphrase.decrypt(wrapped, secret))
+    except Exception as exc:  # pyrage's DecryptError
+        raise DecryptionError("wrong passphrase") from exc
