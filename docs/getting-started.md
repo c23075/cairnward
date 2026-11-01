@@ -126,6 +126,10 @@ Check a draft's quotations and references against the library:
 ```bash
 uv run cairnward library check thesis draft.md
 ```
+Format references exported from Zotero as CSL-JSON (APA 7 or IEEE):
+```bash
+uv run cairnward cite references.json --style apa
+```
 Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
 ## Important: Ollama can still be reached directly

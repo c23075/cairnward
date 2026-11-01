@@ -175,6 +175,11 @@ def build_parser() -> argparse.ArgumentParser:
     v_unlock.add_argument("--permanently", action="store_true", help="remove the lock")
     vlt_sub.add_parser("relock", help="close every unlocked conversation in the server now")
 
+    cite = sub.add_parser("cite", help="format references (APA 7, IEEE, or a .csl style)")
+    cite.add_argument("file", type=Path, help="CSL-JSON (e.g. exported from Zotero)")
+    cite.add_argument("--style", default="apa", help="apa (default), ieee, or a .csl file")
+    cite.add_argument("--plain", action="store_true", help="no Markdown italics")
+
     mdl = sub.add_parser("models", help="model files: verified downloads through egress")
     mdl_sub = mdl.add_subparsers(dest="models_command", metavar="ACTION", required=True)
     pull = mdl_sub.add_parser("pull", help="download a GGUF/safetensors file and verify it")
@@ -252,6 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("-k", type=int, default=8, help="passages to give the model (default 8)")
     la.add_argument("--effort", help="effort level (default: the environment's)")
     la.add_argument("--json", action="store_true")
+    lrf = lib_sub.add_parser("refs", help="CSL-JSON of the library's papers (from PDF metadata)")
+    lrf.add_argument("name")
     lk = lib_sub.add_parser("check", help="check a draft's quotations and references")
     lk.add_argument("name")
     lk.add_argument("draft", type=Path, help="a Markdown or text file")
@@ -1133,6 +1140,12 @@ def _cmd_library(args: argparse.Namespace) -> int:
                 return 0
             if cmd == "ask":
                 return _library_ask(cfg, research, args)
+            if cmd == "refs":
+                from cairnward.research.cite import from_documents
+
+                docs = [d for d in research.documents(args.name) if d.status == "indexed"]
+                print(json.dumps(from_documents(docs), indent=2, ensure_ascii=False))
+                return 0
             if cmd == "check":
                 from cairnward.research.check import check_draft
 
@@ -1337,6 +1350,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_dashboard(args)
         if args.command == "models":
             return _cmd_models(args)
+        if args.command == "cite":
+            from cairnward.research.cite import CiteError, bibliography, load_items
+
+            try:
+                entries = bibliography(load_items(args.file), args.style, md=not args.plain)
+            except (CiteError, ValueError, OSError) as exc:
+                print(f"cairnward cite: {exc}", file=sys.stderr)
+                return 1
+            print("\n\n".join(entries))
+            return 0
         if args.command == "mcp":
             return _cmd_mcp(args)
         if args.command == "vault":
