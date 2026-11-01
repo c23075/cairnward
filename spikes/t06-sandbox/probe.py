@@ -30,7 +30,7 @@ def check(name: str, should_work: bool, fn) -> None:  # type: ignore[no-untyped-
     try:
         detail = fn()
         worked = True
-    except Exception as exc:  # noqa: BLE001 - we want every failure mode
+    except Exception as exc:
         detail = f"{type(exc).__name__}: {exc}"
         worked = False
     results[name] = {"ok": worked == should_work, "worked": worked, "detail": str(detail)[:200]}

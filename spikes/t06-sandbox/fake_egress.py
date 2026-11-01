@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Stand-in for `cairnward-egress`: an HTTP/CONNECT proxy that logs every request and
 decides itself. Allows only plain-HTTP requests to the gateway; refuses everything
-else with 403 so the sandbox sees Cairnward's decision. Usage: fake_egress.py PORT LOG GATEWAY_HOSTPORT
+else with 403 so the sandbox sees Cairnward's decision.
+Usage: fake_egress.py PORT LOG GATEWAY_HOSTPORT
 """
 
 from __future__ import annotations

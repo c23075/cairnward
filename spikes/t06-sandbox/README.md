@@ -7,10 +7,10 @@ Proves that Anthropic's [sandbox-runtime](https://github.com/anthropics/sandbox-
 - `run_chain.sh`: srt forwards allowed traffic to an upstream proxy (`fake_egress.py`, a stand-in for `cairnward-egress`) that logs and makes the final decision; hosts srt itself refuses never reach it.
 
 ## Run it (Debian/Ubuntu, as a normal user)
-Prerequisites: bubblewrap, socat, Node.js ≥ 22.12, Python 3.
+Prerequisites: bubblewrap, socat, ripgrep, Node.js ≥ 22.12, Python 3.
 
 ```bash
-sudo apt install bubblewrap socat
+sudo apt install bubblewrap socat ripgrep
 ```
 Debian 13 ships Node 20; install Node 22, e.g. with [fnm](https://github.com/Schniz/fnm) or NodeSource packages. Then:
 ```bash

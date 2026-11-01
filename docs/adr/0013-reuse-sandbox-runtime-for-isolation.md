@@ -45,7 +45,7 @@ Reuse srt, pinned to an exact version with a lockfile (integrity hashes), and up
 
 ## Consequences
 - **Node.js ≥ 22.12 is required when `isolation = on`.** Debian 13 ships Node 20, so users install Node 22 (NodeSource packages, nvm/fnm, or the official tarball). `cairnward doctor` checks this; with isolation off, Node isn't needed.
-- Linux prerequisites checked by `cairnward doctor`: bubblewrap, socat, unprivileged user namespaces (and `kernel.apparmor_restrict_unprivileged_userns=0` on Ubuntu 24.04+), non-root user preferred.
+- Linux prerequisites checked by `cairnward doctor`: bubblewrap, socat, ripgrep (srt uses it to find git hooks/config to protect), unprivileged user namespaces (and `kernel.apparmor_restrict_unprivileged_userns=0` on Ubuntu 24.04+), non-root user preferred.
 - srt is pre-1.0 (0.0.x) and changes often: pin, read release notes, re-run `spikes/t06-sandbox` (also in CI) before upgrading.
 - macOS and Windows sandboxing come "for free" later, subject to their own documented limits.
 - Cairnward still runs its own isolation self-tests (`cairnward doctor`), independent of srt, so a regression in srt is caught.
