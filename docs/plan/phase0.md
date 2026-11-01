@@ -41,7 +41,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 
 | # | Task | Reqs | Depends | Size |
 |---|---|---|---|---|
-| T1.1 | **PaperQA2 spike** via Cairnward's endpoint on CPU: quality, speed, dependencies; ADR with decision | FR-RES-12 | M0 | M |
+| T1.1 | **PaperQA2 spike** via Cairnward's endpoint on CPU: quality, speed, dependencies; ADR with decision | FR-RES-12 | M0 | M ✅ (ADR-0014: own lean pipeline by default, PaperQA2 optional deep engine later; `/v1/embeddings` added) |
 | T1.2 | PDF library (pypdfium2), chunking, embeddings (sqlite-vec) | FR-RES-1 | T1.1 | M |
 | T1.3 | `lit.ask` with page citations | FR-RES-2 | T1.2 | M |
 | T1.4 | Job queue: persistent, resumable, schedulable; progress in CLI | FR-RES-3 | M0 | M |
@@ -90,6 +90,7 @@ Approach: **walking skeleton first** (M0), then milestones that each add complet
 | T3.6 | Review pipeline + YAML workflows with sub-agent fan-out | FR-RES-4, FR-RES-11 | L |
 | T3.7 | Hosted backends policy; provider tests | FR-BACK-4, FR-BACK-5 | M |
 | T3.8 | Presidio worker; OpenTelemetry export | FR-RED-2, FR-AUD-5 | S |
+| T3.9 | Optional PaperQA2 deep-engine worker, compared on the lean pipeline's evals | FR-RES-13 | M |
 
 **Exit criteria (M3 = Phase 0 done)**: every Must requirement has a passing test; a review of 5+ PDFs produces table + `.bib` with zero invented citations; a purged conversation is absent from every backup snapshot; threat model reviewed.
 

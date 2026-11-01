@@ -1,6 +1,6 @@
 # ADR-0014: Literature question-answering engine
 
-- Status: Proposed (awaiting owner decision)
+- Status: Accepted
 - Date: 2026-11-01
 - Spec: §4.6; FR-RES-1, FR-RES-2, FR-RES-12
 - Evidence: [spikes/t11-paperqa](../../spikes/t11-paperqa/README.md)
@@ -23,4 +23,9 @@ M1 needs `lit.ask` (answers with page citations) and overnight review jobs on a 
 Option 3, built in this order: the lean pipeline first (M1), the PaperQA2 worker as an optional add-on once the lean pipeline's evals exist (so the two can be compared on the same questions with the real model). Borrow PaperQA2's ideas where they help regardless: an optional per-chunk "evidence" pass on the fast model for jobs, explicit "cannot answer from these sources" behaviour, and citation keys tied to page ranges.
 
 ## Decision
-Pending.
+Option 3 (owner decision, 2026-11-01). The lean pipeline is the default engine and is built first in M1 (T1.2–T1.6). PaperQA2 becomes an optional "deep" engine for overnight jobs: a separate, sandboxed worker with its own dependencies, configured by Cairnward (hosted defaults and online metadata lookups off, every call through the gateway), added after the lean pipeline's evals exist so both are compared on the same questions with the real model.
+
+## Consequences
+- Cairnward's core stays free of LiteLLM, huggingface-hub and tiktoken.
+- Interactive questions target ~2–3 minutes on the reference machine.
+- A follow-up task adds the PaperQA2 worker (FR-RES-13, Should, M3), with a guard test that fails if any of its hosted defaults reaches a request.
