@@ -359,3 +359,18 @@ def test_cli_watch_answers(paths: Paths) -> None:
         listed = io.StringIO()
         approvals_cli.list_pending(c, listed, as_json=True)  # type: ignore[arg-type]
         assert json.loads(listed.getvalue()) == []
+
+
+def test_close_releases_waiters() -> None:
+    inbox = ApprovalInbox(60)
+    t, out = ask_in_thread(inbox, req())
+    wait_pending(inbox)
+    started = time.monotonic()
+    poll = threading.Thread(target=lambda: inbox.wait_for_change(inbox.version, 60))
+    poll.start()
+    inbox.close()
+    t.join(5)
+    poll.join(5)
+    assert not t.is_alive() and not poll.is_alive() and time.monotonic() - started < 5
+    assert not out[0].granted and out[0].by == "shutdown"
+    assert inbox.request(req()).by == "shutdown"

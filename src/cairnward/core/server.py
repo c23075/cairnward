@@ -44,6 +44,7 @@ from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_d
 from cairnward.store import Vault
 
 Log = Callable[[str], None]
+GRACE_S = 3  # in-flight requests (e.g. an approval still waiting) don't hold up a stop
 
 
 def sockets(cfg: Config) -> dict[str, Path]:
@@ -127,7 +128,15 @@ def _uds_server(app: Any, path: Path) -> uvicorn.Server:
     private_dir(path.parent)
     with contextlib.suppress(FileNotFoundError):
         path.unlink()
-    return uvicorn.Server(uvicorn.Config(app, uds=str(path), log_level="warning", access_log=False))
+    return uvicorn.Server(
+        uvicorn.Config(
+            app,
+            uds=str(path),
+            log_level="warning",
+            access_log=False,
+            timeout_graceful_shutdown=GRACE_S,
+        )
+    )
 
 
 async def _serve_uds(server: uvicorn.Server, path: Path) -> None:
@@ -235,6 +244,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 port=server.gateway_port,
                 log_level="warning",
                 access_log=False,
+                timeout_graceful_shutdown=GRACE_S,
             )
         )
         mgmt = _uds_server(management, socks["management"])
@@ -245,6 +255,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 port=server.dashboard_port,
                 log_level="warning",
                 access_log=False,
+                timeout_graceful_shutdown=GRACE_S,
             )
         )
 
@@ -270,6 +281,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
             try:
                 await asyncio.gather(*tasks)
             finally:
+                inbox.close()
                 await hub.aclose()
                 await backends.aclose()
 
@@ -432,12 +444,13 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit, Vault.open(cfg.paths) as vault:
         backends = Backends(cfg.backends, proxy_all=srt_proxy or None)
         egress = RemoteEgress(str(egress_control))
+        inbox = inbox_for(cfg, log)
         gateway, management, hub, dashboard = _core_parts(
             cfg,
             audit,
             vault,
             egress,
-            inbox=inbox_for(cfg, log),
+            inbox=inbox,
             backends=backends,
             isolated=True,
             launcher=RemoteLauncher(str(egress_control)),
@@ -467,6 +480,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             finally:
                 dog.cancel()
                 keep.cancel()
+                inbox.close()
                 await hub.aclose()
                 await backends.aclose()
 

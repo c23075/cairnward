@@ -173,6 +173,17 @@ class ApprovalInbox:
         self._retry: dict[tuple[str | None, ...], float] = {}
         self._lock = threading.Condition()
         self._version = 0
+        self._closed = False
+
+    def close(self) -> None:
+        """Shutting down: refuse everything pending and wake every waiter."""
+        with self._lock:
+            self._closed = True
+            for item in self._pending.values():
+                if not item.done.is_set():
+                    item.answer = ApprovalAnswer(False, by="shutdown")
+                    item.done.set()
+            self._changed()
 
     def _changed(self) -> None:
         self._version += 1
@@ -180,6 +191,8 @@ class ApprovalInbox:
 
     def request(self, req: ApprovalRequest) -> ApprovalAnswer:
         now = time.time()
+        if self._closed:
+            return ApprovalAnswer(False, by="shutdown")
         with self._lock:
             self._expire(now)
             key = _retry_key(req)
@@ -262,7 +275,7 @@ class ApprovalInbox:
     def wait_for_change(self, version: int, timeout: float) -> int:
         """Block until the inbox changes after `version` (or timeout); returns the new version."""
         with self._lock:
-            self._lock.wait_for(lambda: self._version != version, timeout)
+            self._lock.wait_for(lambda: self._version != version or self._closed, timeout)
             return self._version
 
     @staticmethod
