@@ -14,7 +14,31 @@ TOPICS = [
     ("Caffeine intake and reaction time in shift workers", "caffeine", "reaction time"),
     ("Mindfulness training and stress in nurses", "mindfulness", "stress"),
 ]
-WORDS = ["participants", "measured", "significant", "cohort", "baseline", "follow-up", "variance", "regression", "effect", "sample", "controlled", "randomised", "outcome", "association", "confidence", "interval", "methodology", "limitation", "dataset", "analysis", "reported", "compared", "intervention"]
+WORDS = [
+    "participants",
+    "measured",
+    "significant",
+    "cohort",
+    "baseline",
+    "follow-up",
+    "variance",
+    "regression",
+    "effect",
+    "sample",
+    "controlled",
+    "randomised",
+    "outcome",
+    "association",
+    "confidence",
+    "interval",
+    "methodology",
+    "limitation",
+    "dataset",
+    "analysis",
+    "reported",
+    "compared",
+    "intervention",
+]
 
 out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)
