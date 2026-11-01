@@ -90,6 +90,41 @@ class Defaults(_Strict):
     effort: str = "medium"
 
 
+class CustomPattern(_Strict):
+    name: str = Field(pattern=r"^[a-z0-9_]{1,40}$")
+    regex: str
+    category: Literal["secret", "personal"] = "personal"
+
+    @field_validator("regex")
+    @classmethod
+    def _compiles(cls, value: str) -> str:
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError(f"not a valid regular expression: {exc}") from None
+        return value
+
+
+class RedactionConfig(_Strict):
+    """What the redaction scanner looks for, besides its built-in patterns (spec §5.4)."""
+
+    custom: list[CustomPattern] = Field(default_factory=list)
+    ignore: list[str] = Field(
+        default_factory=list,
+        description="regular expressions for matches to ignore (e.g. your own public email)",
+    )
+
+    @field_validator("ignore")
+    @classmethod
+    def _ignore_compiles(cls, value: list[str]) -> list[str]:
+        for rx in value:
+            try:
+                re.compile(rx)
+            except re.error as exc:
+                raise ValueError(f"'{rx}' is not a valid regular expression: {exc}") from None
+        return value
+
+
 class MainConfig(_Strict):
     """cairnward.toml"""
 
@@ -98,6 +133,7 @@ class MainConfig(_Strict):
     egress: EgressConfig = EgressConfig()
     privacy: PrivacyOverrides = PrivacyOverrides()
     defaults: Defaults = Defaults()
+    redaction: RedactionConfig = RedactionConfig()
 
 
 # --------------------------------------------------------------------------- backends.toml

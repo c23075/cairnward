@@ -38,6 +38,7 @@ Kind = Literal[
     "fs.write",  # target: path
     "exec",  # target: command line (summary)
     "tool.call",  # target: <mcp server>/<tool>
+    "data.send",  # target: destination; personal data found by redaction (spec §5.4)
     # user-only actions (spec §5.8 / D46)
     "encrypt",
     "decrypt",
@@ -204,6 +205,10 @@ class PolicyEngine:
             if kind == "fs.read":
                 return Rule("ask", "medium", "read outside the workspace")
             return Rule("ask", "high", "write outside the workspace")
+
+        if kind == "data.send":
+            kinds = ", ".join(sorted(action.details.get("kinds", {}))) or "personal data"
+            return Rule("ask", "medium", f"{kinds} would be sent to {target}", explicit_ask=True)
 
         if kind == "tool.call":
             server_name, _, tool = target.partition("/")

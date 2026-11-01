@@ -19,6 +19,7 @@ from cairnward.mcp.jsonrpc import Connection, McpError
 from cairnward.mcp.launch import Launcher, LaunchError, Started
 from cairnward.mcp.pins import PinStore, ToolState
 from cairnward.policy.engine import Action, PolicyEngine
+from cairnward.redaction import check_outbound, value_texts
 
 SEP = "__"
 
@@ -197,6 +198,12 @@ class McpHub:
         if not decision.allowed:
             await asyncio.to_thread(self.engine.audit_deny, decision)
             return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
+        verdict = await asyncio.to_thread(
+            check_outbound, self.engine, list(value_texts(arguments)),
+            destination=f"mcp:{server}", environment=environment, client=client, run_id=run_id,
+        )  # fmt: skip
+        if not verdict.allowed:
+            return _tool_error(f"Cairnward withheld this call: {verdict.reason}")
         args_text = canonical(arguments)
         pre = await asyncio.to_thread(self.engine.audit_pre, decision, args_text)
         started = time.monotonic()

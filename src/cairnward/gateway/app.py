@@ -40,6 +40,7 @@ from cairnward.gateway.scheduling import (
     memory_warning,
 )
 from cairnward.policy.engine import Action, PolicyEngine
+from cairnward.redaction import check_outbound, message_texts
 from cairnward.store import Vault
 from cairnward.sysinfo import meminfo
 
@@ -128,6 +129,8 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         description="OpenAI-compatible endpoint. Every call is policy-checked and audited.",
     )
 
+    app.state.deps = deps
+
     @app.middleware("http")
     async def loopback_host_only(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -152,6 +155,29 @@ def create_app(deps: GatewayDeps) -> FastAPI:
     def client_of(request: Request) -> str | None:
         ident = identity(request)
         return ident[0] if ident else None
+
+    async def redact(
+        backend: str,
+        environment: str,
+        texts: list[str],
+        client: str,
+        run_id: str | None,
+        conversation: str | None,
+        warnings: list[str],
+    ) -> JSONResponse | None:
+        """Redaction for content leaving the machine (non-local backends, spec §5.4)."""
+        if cfg.backends.backends[backend].location == "local":
+            return None
+        verdict = await asyncio.to_thread(
+            check_outbound, deps.engine, texts, destination=f"backend:{backend}",
+            environment=environment, client=client, run_id=run_id, conversation_id=conversation,
+        )  # fmt: skip
+        if not verdict.allowed:
+            return _error(403, f"withheld by cairnward redaction: {verdict.reason}",
+                          "redaction_blocked")  # fmt: skip
+        if verdict.warning:
+            warnings.append(verdict.warning)
+        return None
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -202,6 +228,10 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         if not decision.allowed:
             await asyncio.to_thread(deps.engine.audit_deny, decision)
             return _error(403, f"denied by cairnward policy: {decision.reason}", "policy_denied")
+        if blocked := await redact(
+            resolved.backend, resolved.environment, inputs, client, run_id, None, []
+        ):
+            return blocked
         pre_seq = await asyncio.to_thread(deps.engine.audit_pre, decision, canonical(inputs))
         started = time.monotonic()
         driver = deps.backends.get(resolved.backend, resolved.environment)
@@ -320,6 +350,11 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         if not decision.allowed:
             await asyncio.to_thread(deps.engine.audit_deny, decision)
             return _error(403, f"denied by cairnward policy: {decision.reason}", "policy_denied")
+        if blocked := await redact(
+            resolved.backend, resolved.environment, list(message_texts(body.messages)),
+            client, run_id, conversation_key(body.messages), warnings,
+        ):  # fmt: skip
+            return blocked
 
         extra = {k: v for k, v in (body.model_extra or {}).items() if k in PASSTHROUGH}
         chat_req = ChatRequest(

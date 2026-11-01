@@ -1,5 +1,34 @@
 {
   "$defs": {
+    "CustomPattern": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "default": "personal",
+          "enum": [
+            "secret",
+            "personal"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-z0-9_]{1,40}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "regex": {
+          "title": "Regex",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "regex"
+      ],
+      "title": "CustomPattern",
+      "type": "object"
+    },
     "Defaults": {
       "additionalProperties": false,
       "properties": {
@@ -294,6 +323,29 @@
       "title": "PrivacyOverrides",
       "type": "object"
     },
+    "RedactionConfig": {
+      "additionalProperties": false,
+      "description": "What the redaction scanner looks for, besides its built-in patterns (spec \u00a75.4).",
+      "properties": {
+        "custom": {
+          "items": {
+            "$ref": "#/$defs/CustomPattern"
+          },
+          "title": "Custom",
+          "type": "array"
+        },
+        "ignore": {
+          "description": "regular expressions for matches to ignore (e.g. your own public email)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ignore",
+          "type": "array"
+        }
+      },
+      "title": "RedactionConfig",
+      "type": "object"
+    },
     "ServerConfig": {
       "additionalProperties": false,
       "properties": {
@@ -388,6 +440,13 @@
         "preset": null,
         "redaction": null,
         "vault": null
+      }
+    },
+    "redaction": {
+      "$ref": "#/$defs/RedactionConfig",
+      "default": {
+        "custom": [],
+        "ignore": []
       }
     },
     "schema_version": {

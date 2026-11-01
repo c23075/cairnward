@@ -438,3 +438,23 @@ def test_runs_get_the_mcp_endpoint(paths: Paths, tmp_path: Path) -> None:
     assert oc["mcp"]["cairnward"] == {"type": "remote", "url": "http://127.0.0.1:8484/mcp",
                                       "enabled": True,
                                       "headers": {"Authorization": "Bearer cw-run-k"}}  # fmt: skip
+
+
+@unix_only
+async def test_redaction_on_tool_arguments(paths: Paths) -> None:
+    cfg = setup(paths, privacy='isolation = "off"\nmcp_pinning = "off"\napprovals = "off"\n'
+                'redaction = "enforce"')  # fmt: skip
+    with AuditLog.open(paths) as audit:
+        hub = make_hub(cfg, audit, answer=False)
+        try:
+            res = await hub.call("e", "fake__echo", {"text": "key AKIAABCDEFGHIJKLMNOP"},
+                                 client="cli")  # fmt: skip
+            assert res["isError"] and "secret" in res["content"][0]["text"]
+            res = await hub.call("e", "fake__echo", {"text": "mail a@b.org"}, client="cli")
+            assert res["isError"] and "not approved" in res["content"][0]["text"]
+            ok = await hub.call("e", "fake__echo", {"text": "plain"}, client="cli")
+            assert ok["content"][0]["text"] == "plain"
+        finally:
+            await hub.aclose()
+        posts = [r for r in audit.records() if r.action == "tool.call" and r.phase == "post"]
+        assert len(posts) == 1  # only the clean call reached the server
