@@ -25,7 +25,15 @@ from cairnward.config.loader import Config
 from cairnward.core.server import sockets
 from cairnward.run.profiles import PROFILES, Profile, home_dirs
 from cairnward.run.snapshots import SnapshotError, Snapshots
-from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
+from cairnward.sandbox import (
+    SandboxSpec,
+    SandboxUnavailable,
+    require,
+    secret_dirs,
+    srt_hosts,
+    wrap,
+    wrap_with_ask,
+)
 from cairnward.sandbox.srt import install_dir
 
 BASE_ENV = (
@@ -86,6 +94,7 @@ def plan_run(
     srt: list[str] | None,
     settings_file: Path,
     tmp_dir: Path,
+    ask_socket: Path | None = None,
 ) -> Plan:
     eff = cfg.privacy(environment)
     gw_port, eg_port = run["gateway_port"], run["egress_port"]
@@ -111,14 +120,23 @@ def plan_run(
         hosts = [f"127.0.0.1:{gw_port}"]
         if network in ("allowlist", "ask", "open"):
             hosts += srt_hosts(eff.network_allow_hosts) + profile.extra_hosts
-        if network == "open":
+        argv = None
+        if network in ("ask", "open") and ask_socket is not None:
+            # other hosts: the sandbox asks Cairnward's policy (and so the user)
+            argv = wrap_with_ask(srt, settings_file, command, ask_socket=ask_socket,
+                                 run_id=run["run_id"], tmp_dir=tmp_dir)  # fmt: skip
+        if argv is None and network == "open":
             warnings.append(
                 "network = open, but the sandbox only reaches listed hosts (network_allow_hosts)"
             )
-        if network == "ask":
+        if argv is None and network == "ask":
             warnings.append(
-                "network = ask: hosts not yet allowed are blocked by the sandbox; "
-                "approvals for new hosts arrive with the dashboard inbox (M2)"
+                "network = ask: this srt install can't ask (needs `cairnward sandbox install`); "
+                "hosts not yet allowed are blocked"
+            )
+        elif network == "ask":
+            warnings.append(
+                "network = ask: answer requests for new hosts with `cairnward approvals`"
             )
         p = cfg.paths
         spec = SandboxSpec(
@@ -133,7 +151,8 @@ def plan_run(
             env.update(HTTP_PROXY=egress, HTTPS_PROXY=egress)  # srt's parent proxy
         if os.environ.get("CAIRNWARD_SANDBOX_DEBUG"):
             env["SRT_DEBUG"] = "1"  # srt logs every allow/deny decision to stderr
-        return Plan(wrap(srt, settings_file, command, tmp_dir=tmp_dir), env, True, spec, warnings)
+        argv = argv or wrap(srt, settings_file, command, tmp_dir=tmp_dir)
+        return Plan(argv, env, True, spec, warnings)
 
     warnings.append("isolation = off: the agent runs unsandboxed and could bypass Cairnward")
     if egress:
@@ -215,6 +234,7 @@ def run_agent(
                     srt=srt,
                     settings_file=Path(tmp) / "srt.json",
                     tmp_dir=Path(tmp),
+                    ask_socket=sockets(cfg)["management"],
                 )
                 for w in plan.warnings:
                     log(f"cairnward: {w}")

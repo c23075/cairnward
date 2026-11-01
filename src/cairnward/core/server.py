@@ -34,7 +34,7 @@ from cairnward.egress import EgressProxy, Session, Sessions
 from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, control_app
 from cairnward.gateway import ClientKeys, GatewayDeps, create_app
 from cairnward.gateway.clients import RunKeys
-from cairnward.policy import Approver, DenyApprover, PolicyEngine, TerminalApprover
+from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
 
@@ -51,8 +51,16 @@ def sockets(cfg: Config) -> dict[str, Path]:
     }
 
 
-def _approver() -> Approver:
-    return TerminalApprover() if sys.stdin.isatty() else DenyApprover()
+def inbox_for(cfg: Config, log: Log) -> ApprovalInbox:
+    """Pending approvals, answered with `cairnward approvals` (spec §5.3, M2)."""
+
+    def notify(item: dict[str, object]) -> None:
+        log(
+            f"approval needed: {item['kind']} {item['target']} ({item['reason']}); "
+            "answer with `cairnward approvals`"
+        )
+
+    return ApprovalInbox(cfg.main.egress.approval_timeout_s, notify=notify)
 
 
 def private_dir(path: Path) -> None:
@@ -88,11 +96,11 @@ def _core_parts(
     vault: Vault,
     egress: EgressControl | None,
     *,
-    approver: Approver,
+    inbox: ApprovalInbox,
     backends: Backends,
     isolated: bool,
 ) -> tuple[Any, Any]:
-    engine = PolicyEngine(cfg, approver=approver, audit=audit)
+    engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     run_keys = RunKeys()
     from cairnward.gateway.scheduling import BenchProfile
 
@@ -108,7 +116,13 @@ def _core_parts(
         )
     )
     management = management_app(
-        cfg, audit=audit, run_keys=run_keys, egress=egress, isolated=isolated
+        cfg,
+        audit=audit,
+        run_keys=run_keys,
+        egress=egress,
+        isolated=isolated,
+        engine=engine,
+        inbox=inbox,
     )
     return gateway, management
 
@@ -121,7 +135,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
     socks = sockets(cfg)
     with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit, Vault.open(cfg.paths) as vault:
         sync = record_settings(cfg, audit)
-        approver = _approver()
+        inbox = inbox_for(cfg, log)
         sessions = Sessions()
         egress_ctl = LocalEgress(sessions) if with_egress else None
         core_token = sessions.create(
@@ -132,7 +146,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
         )
         backends = Backends(cfg.backends, egress_url=egress_url)
         gateway, management = _core_parts(
-            cfg, audit, vault, egress_ctl, approver=approver, backends=backends, isolated=False
+            cfg, audit, vault, egress_ctl, inbox=inbox, backends=backends, isolated=False
         )
         gw = uvicorn.Server(
             uvicorn.Config(
@@ -148,9 +162,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
         async def run() -> None:
             tasks = [gw.serve(), _serve_uds(mgmt, socks["management"])]
             if with_egress:
-                proxy = EgressProxy(
-                    cfg, PolicyEngine(cfg, approver=approver, audit=audit), sessions
-                )
+                proxy = EgressProxy(cfg, PolicyEngine(cfg, approver=inbox, audit=audit), sessions)
                 await proxy.start()
                 tasks.append(proxy.serve_forever())
                 log(f"cairnward-egress on 127.0.0.1:{proxy.port}")
@@ -229,7 +241,9 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
         core_token = sessions.create(
             Session(environment=cfg.main.defaults.environment, trusted_core=True)
         )
-        engine = PolicyEngine(cfg, approver=_approver(), audit=audit)
+        # Asks go to the inbox in the core (its management socket).
+        asker = RemoteApprover(str(socks["management"]), cfg.main.egress.approval_timeout_s)
+        engine = PolicyEngine(cfg, approver=asker, audit=audit)
         proxy = EgressProxy(cfg, engine, sessions)
         ctl = _uds_server(control_app(sessions), socks["egress"])
 
@@ -305,11 +319,16 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     if srt_proxy and "://" not in srt_proxy:
         srt_proxy = f"http://{srt_proxy}"
     with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit, Vault.open(cfg.paths) as vault:
-        # No terminal in here; asks are refused until the dashboard inbox exists (M2).
         backends = Backends(cfg.backends, proxy_all=srt_proxy or None)
         egress = RemoteEgress(str(egress_control))
         gateway, management = _core_parts(
-            cfg, audit, vault, egress, approver=DenyApprover(), backends=backends, isolated=True
+            cfg,
+            audit,
+            vault,
+            egress,
+            inbox=inbox_for(cfg, log),
+            backends=backends,
+            isolated=True,
         )
         gw = _uds_server(gateway, socks["gateway"])
         mgmt = _uds_server(management, socks["management"])

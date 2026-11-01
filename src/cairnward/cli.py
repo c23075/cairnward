@@ -104,6 +104,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="install the sandbox if the preset needs it and it's missing",
     )
 
+    appr = sub.add_parser("approvals", help="answer requests Cairnward is waiting on (y/c/e/n)")
+    appr_sub = appr.add_subparsers(dest="approvals_command", metavar="ACTION")
+    appr_sub.add_parser("watch", help="wait for requests and answer them (default)")
+    appr_list = appr_sub.add_parser("list", help="show pending requests and exit")
+    appr_list.add_argument("--json", action="store_true", help="machine-readable output")
+    appr_ans = appr_sub.add_parser("answer", help="answer one request by id")
+    appr_ans.add_argument("id")
+    appr_ans.add_argument("reply", choices=["y", "c", "e", "n"])
+    appr.add_argument("--no-notify", action="store_true", help="no desktop notifications")
+
     st = sub.add_parser("status", help="is Cairnward running, and how")
     st.add_argument(
         "--wait",
@@ -574,6 +584,32 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_approvals(args: argparse.Namespace) -> int:
+    from cairnward import approvals_cli as ac
+    from cairnward.run.runner import RunError, management
+
+    cfg = _load(args)
+    try:
+        mgmt = management(cfg)
+    except RunError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    with mgmt:
+        action = args.approvals_command or "watch"
+        if action == "list":
+            return ac.list_pending(mgmt, sys.stdout, as_json=args.json)
+        if action == "answer":
+            granted, scope = ac.ANSWERS[args.reply]
+            if ac.send(mgmt, args.id, granted, scope):
+                return 0
+            print(f"no pending request {args.id} (answered or timed out)", file=sys.stderr)
+            return 1
+        try:
+            return ac.watch(mgmt, sys.stdin, sys.stdout, notify=not args.no_notify)
+        except KeyboardInterrupt:
+            return 0
+
+
 def _cmd_bench(args: argparse.Namespace) -> int:
     from cairnward.gateway.scheduling import BenchProfile
 
@@ -889,6 +925,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_bench(args)
         if args.command == "status":
             return _cmd_status(args)
+        if args.command == "approvals":
+            return _cmd_approvals(args)
         if args.command == "doctor":
             return _cmd_doctor(args)
         if args.command == "setup":

@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 import httpx
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cairnward.egress.proxy import Session, Sessions
 
@@ -19,6 +19,7 @@ from cairnward.egress.proxy import Session, Sessions
 class EgressControl(Protocol):
     def create(self, session: Session) -> str: ...
     def revoke_run(self, run_id: str) -> None: ...
+    def approve(self, run_id: str, target: str) -> None: ...
 
 
 class LocalEgress:
@@ -31,6 +32,9 @@ class LocalEgress:
     def revoke_run(self, run_id: str) -> None:
         self.sessions.revoke_run(run_id)
 
+    def approve(self, run_id: str, target: str) -> None:
+        self.sessions.approve(run_id, target)
+
 
 class SessionIn(BaseModel):
     environment: str
@@ -42,6 +46,11 @@ class SessionIn(BaseModel):
 
 class RevokeIn(BaseModel):
     run_id: str
+
+
+class ApproveIn(BaseModel):
+    run_id: str
+    target: str = Field(max_length=300)
 
 
 def control_app(sessions: Sessions) -> FastAPI:
@@ -58,6 +67,11 @@ def control_app(sessions: Sessions) -> FastAPI:
     @app.post("/v1/sessions/revoke")
     def revoke(body: RevokeIn) -> dict[str, bool]:
         sessions.revoke_run(body.run_id)
+        return {"ok": True}
+
+    @app.post("/v1/sessions/approve")
+    def approve(body: ApproveIn) -> dict[str, bool]:
+        sessions.approve(body.run_id, body.target)
         return {"ok": True}
 
     return app
@@ -80,6 +94,9 @@ class RemoteEgress:
 
     def revoke_run(self, run_id: str) -> None:
         self._post("/v1/sessions/revoke", {"run_id": run_id})
+
+    def approve(self, run_id: str, target: str) -> None:
+        self._post("/v1/sessions/approve", {"run_id": run_id, "target": target})
 
     def alive(self) -> bool:
         try:

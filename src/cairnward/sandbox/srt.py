@@ -163,3 +163,28 @@ def wrap(
     if tmp_dir is not None:
         inner.append(f"TMPDIR={tmp_dir}")
     return [*srt_cmd, "--settings", str(settings_file), *inner, *command]
+
+
+ASK_SHIM = Path(__file__).with_name("srt_ask.mjs")
+
+
+def wrap_with_ask(
+    srt_cmd: list[str],
+    settings_file: Path,
+    command: list[str],
+    *,
+    ask_socket: Path,
+    run_id: str,
+    tmp_dir: Path | None = None,
+) -> list[str] | None:
+    """Like `wrap`, but hosts not on the allow list are referred to Cairnward (srt's ask
+    callback, through a small Node wrapper around srt's library). Needs srt as
+    `node .../dist/cli.js`; returns None otherwise (the caller falls back to `wrap`)."""
+    if len(srt_cmd) != 2 or Path(srt_cmd[1]).name != "cli.js":
+        return None
+    pkg_dir = Path(srt_cmd[1]).parent.parent
+    if not (pkg_dir / "dist" / "index.js").exists():
+        return None
+    inner = wrap([], settings_file, command, tmp_dir=tmp_dir)[2:]  # drop "--settings <file>"
+    return [srt_cmd[0], str(ASK_SHIM), str(pkg_dir), str(settings_file), str(ask_socket),
+            run_id, "--", *inner]  # fmt: skip

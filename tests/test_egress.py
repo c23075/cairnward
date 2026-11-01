@@ -245,6 +245,20 @@ def test_ask_approved_and_refused(start: Callable[..., Running], origin: int) ->
     assert resp.startswith(b"HTTP/1.1 403") and b"not approved" in resp
 
 
+def test_run_approval_covers_later_connections(start: Callable[..., Running], echo: int) -> None:
+    """A "yes" for a run (from the sandbox, or asked here) isn't asked again in that run."""
+    target = f"127.0.0.1:{echo}"
+    r = start('network = "ask"\nnetwork_allow_hosts = ["127.0.0.1"]',
+              answer=lambda req: ApprovalAnswer(True))  # fmt: skip
+    r.proxy.sessions._by_token[r.token] = Session("e", "test", "run-9", "agent:test")
+    req = f"CONNECT {target} HTTP/1.1\r\nProxy-Authorization: {r.auth}\r\n\r\n".encode()
+    r.proxy.sessions.approve("run-9", target)
+    assert r.raw(req, then=b"x").startswith(b"HTTP/1.1 200")
+    assert r.approver.asked == []
+    pre = wait_records(r.log, 1)[0]
+    assert pre.details["reason"] == "approved for this run when the sandbox asked"
+
+
 def test_approval_timeout_denies(start: Callable[..., Running]) -> None:
     def slow(req: ApprovalRequest) -> ApprovalAnswer:
         time.sleep(3)

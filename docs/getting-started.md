@@ -48,6 +48,12 @@ uv run cairnward runs diff <run-id>
 ```bash
 uv run cairnward runs revert <run-id>
 ```
+With `network = "ask"` (the Balanced preset), a sandboxed agent that contacts a host not on your list waits while Cairnward asks you. Answer in a second terminal (a desktop notification appears if `notify-send` is installed; the serve terminal also prints a line):
+```bash
+uv run cairnward approvals
+```
+`y` allows that host for the rest of the run, `c` for the conversation, `e` for the environment (until Cairnward restarts), `n` refuses. Nobody answering within `approval_timeout_s` (default 120 s, `[egress]` in `cairnward.toml`) counts as no. Addresses of this machine (`localhost`, `127.x`, link-local) are refused without asking unless listed exactly in `network_allow_hosts`.
+
 Stop runaway sessions with `--max-requests`, `--max-tokens` or `--max-minutes` on `cairnward run` (or `[run_budget]` in an environment).
 
 Let Cairnward warn you about slow prompts by importing your benchmark results:

@@ -50,6 +50,8 @@ class Sessions:
     """Proxy credentials. A client uses http://<anything>:<token>@127.0.0.1:<port>."""
 
     _by_token: dict[str, Session] = field(default_factory=dict)
+    # Hosts the user approved for a run when the sandbox asked (run_id -> {"host:port"}).
+    _approved: dict[str, set[str]] = field(default_factory=dict)
 
     def create(self, session: Session) -> str:
         token = secrets.token_urlsafe(24)
@@ -63,6 +65,14 @@ class Sessions:
         for token, s in list(self._by_token.items()):
             if s.run_id == run_id:
                 del self._by_token[token]
+        self._approved.pop(run_id, None)
+
+    def approve(self, run_id: str, target: str) -> None:
+        """The user allowed `target` (host:port) for this run (sandbox prompt)."""
+        self._approved.setdefault(run_id, set()).add(target.lower())
+
+    def approved(self, run_id: str | None, target: str) -> bool:
+        return run_id is not None and target.lower() in self._approved.get(run_id, set())
 
     def lookup(self, header: str | None) -> Session | None:
         if not header or not header.lower().startswith("basic "):
@@ -248,8 +258,15 @@ class EgressProxy:
         )  # fmt: skip
         if session.trusted_core:
             decision = Decision(action, "allow", "low", "requested by the core (already checked)")
+        elif self.sessions.approved(session.run_id, display):
+            decision = Decision(action, "allow", self.engine.rule_for(action).risk,
+                                "approved for this run when the sandbox asked",
+                                approved_by="user", scope="run")  # fmt: skip
         else:
             decision = await self._decide(action)
+            if decision.allowed and decision.asked and session.run_id:
+                # a run's "yes" covers its later connections to this host too
+                self.sessions.approve(session.run_id, display)
         if not decision.allowed:
             await self._deny(writer, decision)
             return

@@ -2,10 +2,12 @@
 
 from cairnward.policy.approvals import (
     ApprovalAnswer,
+    ApprovalInbox,
     ApprovalMemory,
     ApprovalRequest,
     Approver,
     DenyApprover,
+    RemoteApprover,
     ScriptedApprover,
     TerminalApprover,
 )
@@ -23,6 +25,7 @@ __all__ = [
     "USER_ONLY",
     "Action",
     "ApprovalAnswer",
+    "ApprovalInbox",
     "ApprovalMemory",
     "ApprovalRequest",
     "Approver",
@@ -30,6 +33,7 @@ __all__ = [
     "DenyApprover",
     "PolicyDenied",
     "PolicyEngine",
+    "RemoteApprover",
     "Rule",
     "ScriptedApprover",
     "TerminalApprover",

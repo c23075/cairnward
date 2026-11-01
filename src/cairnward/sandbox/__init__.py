@@ -12,6 +12,7 @@ from cairnward.sandbox.srt import (
     secret_dirs,
     srt_hosts,
     wrap,
+    wrap_with_ask,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "secret_dirs",
     "srt_hosts",
     "wrap",
+    "wrap_with_ask",
 ]

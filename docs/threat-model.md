@@ -59,6 +59,7 @@ The model is **not** a trusted component: anything it decides passes through the
 | T-18 | Info disclosure | Conversation copies persist in a client's own database outside Cairnward's control (no lock, no purge) | Setup guides minimise client history; vault UI states it; clients run in containers whose data volumes the user controls | §4.4, §4.5 | FR-CLI-1 |
 | T-19 | Tampering / EoP | Sandbox misconfiguration silently gives a tool network or file access | `cairnward doctor` isolation self-tests at start and on demand; CI isolation suite | §3.2 | FR-ISO-5, NFR-S4 |
 | T-20 | Spoofing | Compromised or malicious client update (e.g. a chat app adds telemetry) | Client runs sandboxed with network only via egress; new hosts require approval and appear in the egress report | §3.2 | FR-ISO-4, FR-NET-1 |
+| T-21 | Elevation of privilege | A sandboxed agent asks for a host that is really this machine (`localhost`, `127.1`, a metadata address) to reach local services (Ollama, other apps) around egress, since the sandbox connects to loopback directly | The core applies egress's address guard to sandbox asks: such addresses are refused unasked unless listed exactly; names that resolve to them later still go through egress and its DNS check | §3.2, §5.3 | FR-NET-1 |
 
 ## 4. LINDDUN privacy threats
 
@@ -96,3 +97,4 @@ The model is **not** a trusted component: anything it decides passes through the
 - Copies of conversations inside clients' own databases (T-18).
 - Records newer than the last audit anchor can be altered by someone with full control of the machine (T-03).
 - Traffic-analysis of sync timing/size by cloud providers (P-04).
+- With isolation off, an agent runs as the user and could answer its own approvals through the management socket; isolation off is advisory throughout (spec §5.0).

@@ -244,6 +244,7 @@ class PolicyEngine:
             environment=action.environment, conversation_id=action.conversation_id,
             client=action.client, initiated_by=action.initiated_by,
             provenance=action.provenance,
+            run_id=action.run_id,
             rememberable=rule.risk != "high" and action.kind not in USER_ONLY,
         )  # fmt: skip
         remembered = self.memory.granted(req)
