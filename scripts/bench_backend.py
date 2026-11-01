@@ -58,6 +58,8 @@ class RunResult:
     gen_tps: float | None
     load_s: float | None = None
     note: str = ""
+    mem_available_gb: float | None = None
+    swap_used_gb: float | None = None
 
 
 @dataclass
@@ -75,6 +77,9 @@ class Report:
     tokens_per_char: float | None = None
     runs: list[RunResult] = field(default_factory=list)
     cache_test: dict[str, Any] | None = None
+    timeouts: list[dict[str, Any]] = field(default_factory=list)
+    stopped_early: str | None = None
+    swap_used_gb_at_start: float | None = None
     summary: dict[str, Any] = field(default_factory=dict)
 
 
@@ -134,6 +139,21 @@ def system_info() -> dict[str, Any]:
         "logical_cpus": os.cpu_count(),
         "ram_gb": round(ram / 2**30, 1) if ram else None,
     }
+
+
+def memory_snapshot() -> tuple[float | None, float | None]:
+    """(available RAM GB, swap used GB) on Linux; (None, None) elsewhere."""
+    try:
+        info: dict[str, int] = {}
+        with Path("/proc/meminfo").open() as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                info[key] = int(rest.split()[0]) * 1024
+        avail = info["MemAvailable"] / 2**30
+        swap = (info["SwapTotal"] - info["SwapFree"]) / 2**30
+        return round(avail, 2), round(swap, 2)
+    except (OSError, KeyError, ValueError, IndexError):
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +457,8 @@ def print_report(report: Report) -> None:
         )
     if "gen_tps_median" in s:
         print(f"Median generation speed: {s['gen_tps_median']} tok/s")
+    if report.stopped_early:
+        print(f"Stopped early: {report.stopped_early}")
     if report.cache_test:
         c = report.cache_test
         print(
@@ -479,7 +501,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=os.environ.get("CAIRN_BENCH_API_KEY"),
         help="API key for OpenAI-compatible servers (or env CAIRN_BENCH_API_KEY)",
     )
-    ap.add_argument("--timeout", type=float, default=1800, help="seconds per request")
+    ap.add_argument(
+        "--timeout",
+        type=float,
+        default=900,
+        help="seconds to wait for a reply to start; larger sizes are skipped after a timeout",
+    )
     ap.add_argument("--out", help="JSON output path (default: bench-<model>-<time>.json)")
     ap.add_argument("--seed", type=int, default=None, help="random seed for filler text")
     return ap.parse_args(argv)
@@ -523,42 +550,113 @@ def main(argv: list[str] | None = None) -> int:
         system=system_info(),
     )
 
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    safe_model = "".join(c if c.isalnum() or c in "-._" else "_" for c in args.model)
+    out = Path(args.out or f"bench-{safe_model}-{stamp}.json")
+
+    def save() -> None:
+        report.summary = summarise(report)
+        out.write_text(json.dumps(asdict(report), indent=2) + "\n")
+
+    _, report.swap_used_gb_at_start = memory_snapshot()
+
+    def timed_chat(msgs: list[dict[str, str]], gen: int, size: int) -> RunResult:
+        result = backend.chat(msgs, gen, size)
+        result.mem_available_gb, result.swap_used_gb = memory_snapshot()
+        return result
+
+    def check_swap(result: RunResult) -> None:
+        start_swap = report.swap_used_gb_at_start
+        if result.swap_used_gb is not None and start_swap is not None:
+            grown = result.swap_used_gb - start_swap
+            if grown > 0.5:
+                print(
+                    f"    WARNING: swap use grew by {grown:.1f} GB during the run; the machine is "
+                    "short of RAM, so these numbers are much slower than normal.",
+                    file=sys.stderr,
+                )
+
     try:
         print("Warm-up (loads the model if needed)...", file=sys.stderr)
-        warm = backend.chat([{"role": "user", "content": "Say OK."}], gen=4, target=0)
+        warm = timed_chat([{"role": "user", "content": "Say OK."}], 4, 0)
         report.warmup_load_s = warm.load_s if warm.load_s is not None else warm.total_s
         report.model_memory = backend.model_memory()
         tpc = calibrate(backend, rng)
         report.tokens_per_char = round(tpc, 4)
+        save()
         for size in usable:
+            if report.stopped_early:
+                break
             for i in range(args.runs):
-                print(f"  size {size}, run {i + 1}/{args.runs}...", file=sys.stderr)
-                prompt = make_prompt(size, tpc, rng)
-                report.runs.append(
-                    backend.chat([{"role": "user", "content": prompt}], args.gen, size)
+                print(
+                    f"  size {size}, run {i + 1}/{args.runs} "
+                    f"(waits up to {args.timeout:.0f} s for the reply to start)...",
+                    file=sys.stderr,
                 )
-        if args.cache_test and usable:
-            size = (
-                max(s for s in usable if s <= 8192) if any(s <= 8192 for s in usable) else usable[0]
-            )
+                prompt = make_prompt(size, tpc, rng)
+                try:
+                    result = timed_chat([{"role": "user", "content": prompt}], args.gen, size)
+                except (TimeoutError, urllib.error.URLError) as exc:
+                    if isinstance(exc, urllib.error.URLError) and not isinstance(
+                        exc.reason, TimeoutError
+                    ):
+                        raise
+                    avail, swap = memory_snapshot()
+                    report.timeouts.append(
+                        {
+                            "size": size,
+                            "timeout_s": args.timeout,
+                            "mem_available_gb": avail,
+                            "swap_used_gb": swap,
+                        }
+                    )
+                    report.stopped_early = (
+                        f"no reply within {args.timeout:.0f} s at {size} tokens; "
+                        "larger sizes skipped"
+                    )
+                    print(f"    timed out: {report.stopped_early}", file=sys.stderr)
+                    save()
+                    break
+                report.runs.append(result)
+                p = f"{result.prompt_tps:.1f}" if result.prompt_tps else "-"
+                g = f"{result.gen_tps:.1f}" if result.gen_tps else "-"
+                print(
+                    f"    TTFT {result.ttft_s:.1f} s | prompt {p} tok/s | gen {g} tok/s"
+                    + (
+                        f" | RAM free {result.mem_available_gb} GB, swap used "
+                        f"{result.swap_used_gb} GB"
+                        if result.mem_available_gb is not None
+                        else ""
+                    ),
+                    file=sys.stderr,
+                )
+                check_swap(result)
+                save()
+        if args.cache_test and report.runs:
+            done = sorted({r.target_tokens for r in report.runs})
+            size = max((s for s in done if s <= 8192), default=done[0])
             print(f"  prefix-cache test at {size}...", file=sys.stderr)
-            report.cache_test = cache_test(backend, size, args.gen, tpc, rng)
+            try:
+                report.cache_test = cache_test(backend, size, args.gen, tpc, rng)
+            except (TimeoutError, urllib.error.URLError) as exc:
+                print(f"    cache test skipped: {exc}", file=sys.stderr)
     except urllib.error.URLError as exc:
         print(f"Could not reach {url}: {exc.reason}. Is the server running?", file=sys.stderr)
+        if report.runs:
+            save()
+            print(f"Partial results saved to {out}", file=sys.stderr)
         return 2
     except (RuntimeError, urllib.error.HTTPError) as exc:
         print(f"Server error: {exc}", file=sys.stderr)
+        if report.runs:
+            save()
+            print(f"Partial results saved to {out}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print("Interrupted; saving partial results.", file=sys.stderr)
 
-    report.summary = summarise(report)
+    save()
     print_report(report)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    safe_model = "".join(c if c.isalnum() or c in "-._" else "_" for c in args.model)
-    out = Path(args.out or f"bench-{safe_model}-{stamp}.json")
-    payload = asdict(report)
-    out.write_text(json.dumps(payload, indent=2) + "\n")
     print(f"\nSaved {out}")
     return 0
 

@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -64,6 +65,8 @@ class FakeHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         body = self._body()
         n_prompt = _prompt_tokens(body)
+        if n_prompt > 1500:  # simulate a machine too slow for large prompts
+            time.sleep(2)
         if self.path == "/api/chat":
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson")
@@ -236,3 +239,34 @@ def test_prompt_nonce_differs_between_runs() -> None:
     a = bench.make_prompt(100, 0.3, rng)
     b = bench.make_prompt(100, 0.3, rng)
     assert a[:30] != b[:30]
+
+
+def test_timeout_keeps_partial_results_and_skips_larger_sizes(server: str, tmp_path: Path) -> None:
+    out = tmp_path / "r.json"
+    code = bench.main(
+        [
+            "--model",
+            "fake:1b",
+            "--url",
+            server,
+            "--sizes",
+            "512,2048,3000",
+            "--ctx",
+            "4096",
+            "--gen",
+            "8",
+            "--runs",
+            "1",
+            "--timeout",
+            "1",
+            "--cache-test",
+            "--out",
+            str(out),
+        ]
+    )
+    assert code == 0
+    report = json.loads(out.read_text())
+    assert [r["target_tokens"] for r in report["runs"]] == [512]
+    assert report["timeouts"][0]["size"] == 2048
+    assert "larger sizes skipped" in report["stopped_early"]
+    assert report["cache_test"]["size"] == 512
