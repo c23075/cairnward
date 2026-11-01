@@ -20,5 +20,6 @@ ADRs are never edited after acceptance except to change their status; a changed 
 | [0012](0012-optional-privacy-controls-and-presets.md) | Optional privacy controls with presets and per-environment overrides | Accepted |
 | [0013](0013-reuse-sandbox-runtime-for-isolation.md) | Reuse Anthropic's sandbox-runtime for OS-level isolation | Accepted |
 | [0014](0014-literature-engine.md) | Literature question-answering engine | Accepted |
+| [0015](0015-mcp-proxy.md) | MCP tool proxy: own minimal protocol layer, manifests, pinning | Accepted |
 
 Template: copy [`template.md`](template.md).

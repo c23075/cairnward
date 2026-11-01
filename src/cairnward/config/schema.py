@@ -14,6 +14,7 @@ from cairnward.config.models import (
     EffortConfig,
     EnvironmentConfig,
     MainConfig,
+    McpConfig,
 )
 
 FILES: dict[str, type[BaseModel]] = {
@@ -22,6 +23,7 @@ FILES: dict[str, type[BaseModel]] = {
     "clients.schema.json": ClientsConfig,
     "effort.schema.json": EffortConfig,
     "environment.schema.json": EnvironmentConfig,
+    "mcp.schema.json": McpConfig,
 }
 
 

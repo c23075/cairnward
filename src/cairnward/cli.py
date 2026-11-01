@@ -104,6 +104,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="install the sandbox if the preset needs it and it's missing",
     )
 
+    mcp = sub.add_parser(
+        "mcp", help="MCP tools: stdio bridge for clients (default), servers, review and approve"
+    )
+    mcp.add_argument("--env", help="environment (default: the client's or the default one)")
+    mcp.add_argument("--url", help="MCP endpoint (default: $CAIRNWARD_MCP_URL or the gateway)")
+    mcp.add_argument("--key", help="API key (default: $CAIRNWARD_API_KEY)")
+    mcp_sub = mcp.add_subparsers(dest="mcp_command", metavar="ACTION")
+    mcp_sub.add_parser("list", help="configured MCP servers and their permissions")
+    mcp_tools = mcp_sub.add_parser("tools", help="a server's tools, pin state and warnings")
+    mcp_tools.add_argument("server")
+    mcp_appr = mcp_sub.add_parser("approve", help="review and pin a server's tool definitions")
+    mcp_appr.add_argument("server")
+    mcp_appr.add_argument("--yes", action="store_true", help="approve without asking")
+    mcp_sub.add_parser("connect", help="stdio bridge to the MCP endpoint (same as no ACTION)")
+
     appr = sub.add_parser("approvals", help="answer requests Cairnward is waiting on (y/c/e/n)")
     appr_sub = appr.add_subparsers(dest="approvals_command", metavar="ACTION")
     appr_sub.add_parser("watch", help="wait for requests and answer them (default)")
@@ -610,6 +625,93 @@ def _cmd_approvals(args: argparse.Namespace) -> int:
             return 0
 
 
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    import os
+
+    action = args.mcp_command or "connect"
+    cfg = _load(args)
+    if action == "connect":
+        from cairnward.mcp.shim import run_shim
+
+        key = args.key or os.environ.get("CAIRNWARD_API_KEY")
+        if not key:
+            print("cairnward mcp: no API key (--key or CAIRNWARD_API_KEY; "
+                  "`cairnward client add <name>` makes one)", file=sys.stderr)  # fmt: skip
+            return 2
+        url = args.url or os.environ.get("CAIRNWARD_MCP_URL") or (
+            f"http://127.0.0.1:{cfg.main.server.gateway_port}/mcp"
+            + (f"/{args.env}" if args.env else ""))  # fmt: skip
+        return run_shim(url, key, sys.stdin, sys.stdout)
+
+    from cairnward.run.runner import RunError, management
+
+    try:
+        mgmt = management(cfg)
+    except RunError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    mgmt.timeout = httpx_timeout()
+    with mgmt:
+        if action == "list":
+            servers = mgmt.get("/v1/mcp/servers").json()
+            if not servers:
+                print("no MCP servers configured (mcp.toml)")
+            for s in servers:
+                p = s["permissions"]
+                print(f"{s['name']}  {s['version'] or '(no version noted)'}  {s['description']}")
+                print(f"  command : {' '.join(s['command'])}")
+                print(f"  enabled : {', '.join(s['environments']) or 'nowhere (mcp_servers)'}")
+                print(f"  network : {', '.join(p['network']) or 'none'}")
+                print(f"  write   : {', '.join(p['write']) or '{data} only'}")
+                read = "everything except secrets" if p["read"] is None else ", ".join(p["read"])
+                print(f"  read    : {read}")
+            return 0
+        params = {"environment": args.env} if args.env else {}
+        resp = mgmt.get(f"/v1/mcp/{args.server}/tools", params=params)
+        if resp.status_code != 200:
+            print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
+            return 1
+        data = resp.json()
+        tools = data["tools"]
+        for t in tools:
+            mark = {"approved": "ok", "new": "NEW", "changed": "CHANGED"}[t["status"]]
+            print(f"[{mark:7}] {t['name']}{'' if t['offered'] else '  (not offered)'}")
+            if (action == "approve" and t["status"] != "approved") or (
+                action == "tools" and t["flags"]
+            ):
+                print("    " + (t["description"] or "(no description)").replace("\n", "\n    "))
+                if action == "approve":
+                    schema = json.dumps(t["input_schema"], ensure_ascii=False)
+                    print(f"    input: {schema[:400]}")
+            for flag in t["flags"]:
+                print(f"    WARNING: {flag}")
+        if action == "tools":
+            return 0
+        todo = {t["name"]: t["hash"] for t in tools if t["status"] != "approved"}
+        if not todo:
+            print("all tools already approved")
+            return 0
+        if not args.yes:
+            print(f"Approve these {len(todo)} definition(s) for '{args.server}'? [y/N] ", end="")
+            sys.stdout.flush()
+            if sys.stdin.readline().strip().lower() not in ("y", "yes"):
+                print("not approved")
+                return 1
+        resp = mgmt.post(f"/v1/mcp/{args.server}/approve",
+                         json={"environment": data["environment"], "tools": todo})  # fmt: skip
+        if resp.status_code != 200:
+            print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
+            return 1
+        print(f"approved: {', '.join(resp.json()['approved'])}")
+        return 0
+
+
+def httpx_timeout() -> Any:
+    import httpx
+
+    return httpx.Timeout(180, connect=10)  # starting a server can take a while (npx, uvx)
+
+
 def _cmd_bench(args: argparse.Namespace) -> int:
     from cairnward.gateway.scheduling import BenchProfile
 
@@ -927,6 +1029,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_status(args)
         if args.command == "approvals":
             return _cmd_approvals(args)
+        if args.command == "mcp":
+            return _cmd_mcp(args)
         if args.command == "doctor":
             return _cmd_doctor(args)
         if args.command == "setup":

@@ -1,0 +1,191 @@
+{
+  "$defs": {
+    "McpPermissions": {
+      "additionalProperties": false,
+      "description": "What a third-party MCP server may do (its manifest), within the environment's\nprivacy settings. Paths may use {workspace} (the environment's first workspace) and\n{data} (the server's own folder, also its HOME).",
+      "properties": {
+        "env": {
+          "description": "environment variables passed through from yours",
+          "items": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "array"
+        },
+        "network": {
+          "description": "hosts it may reach (through egress), e.g. api.x.org",
+          "items": {
+            "type": "string"
+          },
+          "title": "Network",
+          "type": "array"
+        },
+        "read": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "if set, only these folders (plus system folders) are readable; otherwise everything except secrets and Cairnward's own folders",
+          "title": "Read"
+        },
+        "write": {
+          "description": "writable folders: inside {workspace} or {data}",
+          "items": {
+            "type": "string"
+          },
+          "title": "Write",
+          "type": "array"
+        }
+      },
+      "title": "McpPermissions",
+      "type": "object"
+    },
+    "McpServer": {
+      "additionalProperties": false,
+      "properties": {
+        "call_timeout_s": {
+          "default": 120,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Call Timeout S",
+          "type": "integer"
+        },
+        "command": {
+          "description": "stdio server command and arguments",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "cwd": {
+          "default": "{data}",
+          "description": "working folder: {data} or {workspace}",
+          "title": "Cwd",
+          "type": "string"
+        },
+        "default_tool": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "ask",
+                "deny"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "policy for its tools: allow / ask / deny; unset = by the approvals level",
+          "title": "Default Tool"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "fixed environment variables",
+          "title": "Env",
+          "type": "object"
+        },
+        "permissions": {
+          "$ref": "#/$defs/McpPermissions",
+          "default": {
+            "env": [],
+            "network": [],
+            "read": null,
+            "write": []
+          }
+        },
+        "pin_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "a file whose SHA-256 must match `sha256` before starting",
+          "title": "Pin File"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "tools": {
+          "additionalProperties": {
+            "enum": [
+              "allow",
+              "ask",
+              "deny"
+            ],
+            "type": "string"
+          },
+          "description": "per-tool policy",
+          "title": "Tools",
+          "type": "object"
+        },
+        "version": {
+          "default": "",
+          "description": "the version you reviewed (shown, audited)",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "McpServer",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/c23075/cairnward/schemas/mcp.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "mcp.toml: third-party MCP servers, offered to clients through Cairnward (spec \u00a74.2)",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "servers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/McpServer"
+      },
+      "title": "Servers",
+      "type": "object"
+    }
+  },
+  "title": "McpConfig",
+  "type": "object"
+}

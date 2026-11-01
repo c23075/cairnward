@@ -86,15 +86,20 @@ class RunKeys:
     def __init__(self) -> None:
         self._by_hash: dict[str, tuple[str, str]] = {}  # sha256 -> (client, run_id)
         self.usage: dict[str, RunUsage] = {}
+        self.environment: dict[str, str] = {}  # run_id -> environment
 
-    def issue(self, client: str, run_id: str, budget: Budget | None = None) -> str:
+    def issue(self, client: str, run_id: str, budget: Budget | None = None,
+              environment: str | None = None) -> str:  # fmt: skip
         key = PREFIX + "run-" + secrets.token_urlsafe(32)
         self._by_hash[_hash(key)] = (client, run_id)
         self.usage[run_id] = RunUsage(budget or Budget())
+        if environment:
+            self.environment[run_id] = environment
         return key
 
     def revoke_run(self, run_id: str) -> None:
         self.usage.pop(run_id, None)
+        self.environment.pop(run_id, None)
         for h, (_, rid) in list(self._by_hash.items()):
             if rid == run_id:
                 del self._by_hash[h]

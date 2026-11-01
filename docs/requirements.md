@@ -69,8 +69,8 @@ All security requirements below describe what each protection does **when it is 
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
 | FR-MCP-1 | MCP proxy (streamable HTTP + stdio shim) aggregating enabled servers per environment | M | M2 | integration |
-| FR-MCP-2 | Permissions = manifest ∩ environment; third-party servers sandboxed | M | M2 | `test_tool_permissions.py` |
-| FR-MCP-3 | Version/hash pinning; tool-definition hashes; change → disabled until re-approved | M | M2 | `tests/security/test_mcp_rugpull.py` |
+| FR-MCP-2 | Permissions = manifest ∩ environment; third-party servers sandboxed | M | M2 | `tests/test_mcp.py`, `tests/isolation/test_mcp_sandbox.py` |
+| FR-MCP-3 | Version/hash pinning; tool-definition hashes; change → disabled until re-approved | M | M2 | `tests/test_mcp.py::test_rug_pull_disables_the_tool` |
 | FR-MCP-4 | Skills (SKILL.md) served to clients and used by research workflows | S | M2 | integration |
 
 ### Coding agents

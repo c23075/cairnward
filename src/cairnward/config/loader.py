@@ -16,6 +16,7 @@ from cairnward.config.models import (
     EffortLevel,
     EnvironmentConfig,
     MainConfig,
+    McpConfig,
     _check_name,
     builtin_environments,
     default_effort_levels,
@@ -41,6 +42,7 @@ class Config:
     effort: dict[str, EffortLevel]
     environments: dict[str, EnvironmentConfig]
     files_loaded: list[Path] = field(default_factory=list)
+    mcp: McpConfig = field(default_factory=McpConfig)
 
     def privacy(self, environment: str | None = None) -> EffectivePrivacy:
         """Effective privacy settings globally, or for one environment."""
@@ -120,7 +122,8 @@ def load_config(paths: Paths | None = None) -> Config:
             if env is not None:
                 environments[name] = env
 
-    cfg = Config(paths, main, backends, clients, effort, environments, loaded)
+    mcp = load(McpConfig, paths.mcp_config)
+    cfg = Config(paths, main, backends, clients, effort, environments, loaded, mcp)
     problems.extend(_cross_check(cfg))
     if problems:
         raise ConfigError(problems)
@@ -160,6 +163,9 @@ def _cross_check(cfg: Config) -> list[str]:
             out.append(f"{src}: backend: unknown backend '{env.backend}'")
         if env.effort_default and env.effort_default not in cfg.effort:
             out.append(f"{src}: effort_default: unknown effort level '{env.effort_default}'")
+        for server in env.mcp_servers:
+            if server not in cfg.mcp.servers:
+                out.append(f"{src}: mcp_servers: unknown MCP server '{server}' (mcp.toml)")
     for name, client in cfg.clients.clients.items():
         if client.default_environment and client.default_environment not in cfg.environments:
             out.append(

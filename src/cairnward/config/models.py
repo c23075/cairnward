@@ -346,6 +346,9 @@ class EnvironmentConfig(_Strict):
     effort_default: str | None = None
     context_tokens: int = Field(default=8192, ge=512, le=1_048_576, description="spec D60")
     tools: list[str] = Field(default_factory=list)
+    mcp_servers: list[str] = Field(
+        default_factory=list, description="MCP servers (mcp.toml) offered in this environment"
+    )
     skills: list[str] = Field(default_factory=list)
     citation_style: str = "apa"
     vault_retention_days: int | None = Field(default=None, ge=1)
@@ -364,6 +367,77 @@ class EnvironmentConfig(_Strict):
     @classmethod
     def _expand(cls, value: list[Path]) -> list[Path]:
         return [p.expanduser() for p in value]
+
+
+# --------------------------------------------------------------------------- mcp.toml
+
+_MCP_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
+ToolSetting = Literal["allow", "ask", "deny"]
+
+
+class McpPermissions(_Strict):
+    """What a third-party MCP server may do (its manifest), within the environment's
+    privacy settings. Paths may use {workspace} (the environment's first workspace) and
+    {data} (the server's own folder, also its HOME)."""
+
+    network: list[str] = Field(
+        default_factory=list, description="hosts it may reach (through egress), e.g. api.x.org"
+    )
+    read: list[str] | None = Field(
+        default=None,
+        description="if set, only these folders (plus system folders) are readable; "
+        "otherwise everything except secrets and Cairnward's own folders",
+    )
+    write: list[str] = Field(
+        default_factory=list, description="writable folders: inside {workspace} or {data}"
+    )
+    env: list[str] = Field(
+        default_factory=list, description="environment variables passed through from yours"
+    )
+
+
+class McpServer(_Strict):
+    description: str = ""
+    command: list[str] = Field(min_length=1, description="stdio server command and arguments")
+    env: dict[str, str] = Field(default_factory=dict, description="fixed environment variables")
+    cwd: str = Field(default="{data}", description="working folder: {data} or {workspace}")
+    version: str = Field(default="", description="the version you reviewed (shown, audited)")
+    pin_file: Path | None = Field(
+        default=None, description="a file whose SHA-256 must match `sha256` before starting"
+    )
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    permissions: McpPermissions = McpPermissions()
+    default_tool: ToolSetting | None = Field(
+        default=None,
+        description="policy for its tools: allow / ask / deny; unset = by the approvals level",
+    )
+    tools: dict[str, ToolSetting] = Field(default_factory=dict, description="per-tool policy")
+    call_timeout_s: int = Field(default=120, ge=1, le=3600)
+
+    @model_validator(mode="after")
+    def _pin_pair(self) -> McpServer:
+        if (self.pin_file is None) != (self.sha256 is None):
+            raise ValueError("pin_file and sha256 go together")
+        if self.cwd not in ("{data}", "{workspace}"):
+            raise ValueError("cwd must be {data} or {workspace}")
+        return self
+
+
+class McpConfig(_Strict):
+    """mcp.toml: third-party MCP servers, offered to clients through Cairnward (spec §4.2)"""
+
+    schema_version: Literal[1] = SCHEMA_VERSION
+    servers: dict[str, McpServer] = Field(default_factory=dict)
+
+    @field_validator("servers")
+    @classmethod
+    def _names(cls, value: dict[str, McpServer]) -> dict[str, McpServer]:
+        for name in value:
+            if not _MCP_NAME.match(name):
+                raise ValueError(
+                    f"MCP server name '{name}' must be lowercase letters, digits or '-' (max 31)"
+                )
+        return value
 
 
 def builtin_environments() -> dict[str, EnvironmentConfig]:

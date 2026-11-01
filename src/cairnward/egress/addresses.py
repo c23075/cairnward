@@ -57,3 +57,21 @@ def is_ip_literal(host: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def literal_address(host: str) -> str | None:
+    """The address a host string denotes without DNS: IP literals, inet_aton shorthand
+    such as 127.1 or 2130706433, and localhost names; None for ordinary names."""
+    import socket
+
+    host = host.lower().rstrip(".")
+    if is_ip_literal(host):
+        return host.strip("[]")
+    if host == "localhost" or host.endswith(".localhost"):
+        return "127.0.0.1"
+    if host.replace(".", "").replace("x", "").isalnum() and host[:1].isdigit():
+        try:
+            return socket.inet_ntoa(socket.inet_aton(host))
+        except OSError:
+            return None
+    return None

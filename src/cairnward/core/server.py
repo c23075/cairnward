@@ -34,6 +34,9 @@ from cairnward.egress import EgressProxy, Session, Sessions
 from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, control_app
 from cairnward.gateway import ClientKeys, GatewayDeps, create_app
 from cairnward.gateway.clients import RunKeys
+from cairnward.mcp.hub import McpHub
+from cairnward.mcp.launch import BridgeLauncher, Launcher, LocalLauncher, RemoteLauncher
+from cairnward.mcp.pins import PinStore
 from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
@@ -61,6 +64,16 @@ def inbox_for(cfg: Config, log: Log) -> ApprovalInbox:
         )
 
     return ApprovalInbox(cfg.main.egress.approval_timeout_s, notify=notify)
+
+
+def _srt_if_wanted(cfg: Config) -> list[str] | None:
+    """The sandbox command when any environment wants isolation and it's installed."""
+    if not any(cfg.privacy(e).value("isolation") == "on" for e in [None, *cfg.environments]):
+        return None
+    try:
+        return require(cfg.paths)
+    except SandboxUnavailable:
+        return None
 
 
 def private_dir(path: Path) -> None:
@@ -99,8 +112,10 @@ def _core_parts(
     inbox: ApprovalInbox,
     backends: Backends,
     isolated: bool,
-) -> tuple[Any, Any]:
+    launcher: Launcher,
+) -> tuple[Any, Any, McpHub]:
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
+    hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit)
     run_keys = RunKeys()
     from cairnward.gateway.scheduling import BenchProfile
 
@@ -113,6 +128,7 @@ def _core_parts(
             vault,
             run_keys,
             profile=BenchProfile.at(cfg.paths.state_dir),
+            mcp=hub,
         )
     )
     management = management_app(
@@ -123,8 +139,9 @@ def _core_parts(
         isolated=isolated,
         engine=engine,
         inbox=inbox,
+        mcp=hub,
     )
-    return gateway, management
+    return gateway, management, hub
 
 
 # ------------------------------------------------------------------ single process
@@ -145,8 +162,22 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
             f"http://cw:{core_token}@127.0.0.1:{server.egress_port}" if with_egress else None
         )
         backends = Backends(cfg.backends, egress_url=egress_url)
-        gateway, management = _core_parts(
-            cfg, audit, vault, egress_ctl, inbox=inbox, backends=backends, isolated=False
+        launcher = LocalLauncher(
+            cfg,
+            srt=_srt_if_wanted(cfg),
+            create_session=sessions.create,
+            revoke_session=sessions.revoke,
+            egress_port=server.egress_port if with_egress else None,
+        )
+        gateway, management, hub = _core_parts(
+            cfg,
+            audit,
+            vault,
+            egress_ctl,
+            inbox=inbox,
+            backends=backends,
+            isolated=False,
+            launcher=launcher,
         )
         gw = uvicorn.Server(
             uvicorn.Config(
@@ -175,6 +206,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
             try:
                 await asyncio.gather(*tasks)
             finally:
+                await hub.aclose()
                 await backends.aclose()
 
         asyncio.run(run())
@@ -245,7 +277,17 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
         asker = RemoteApprover(str(socks["management"]), cfg.main.egress.approval_timeout_s)
         engine = PolicyEngine(cfg, approver=asker, audit=audit)
         proxy = EgressProxy(cfg, engine, sessions)
-        ctl = _uds_server(control_app(sessions), socks["egress"])
+        bridge = BridgeLauncher(
+            LocalLauncher(
+                cfg,
+                srt=srt,
+                create_session=sessions.create,
+                revoke_session=sessions.revoke,
+                egress_port=server.egress_port,
+            ),
+            cfg.paths.state_dir / "mcp",
+        )
+        ctl = _uds_server(control_app(sessions, mcp=bridge), socks["egress"])
 
         with tempfile.TemporaryDirectory(prefix="cairnward-core-") as tmp:
             settings = core_sandbox(cfg).write(Path(tmp) / "srt.json")
@@ -298,6 +340,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                     fwd.close()
                     ctl.should_exit = True
                     serve_task.cancel()
+                    await bridge.aclose()
                     await proxy.close()
                     with contextlib.suppress(asyncio.CancelledError, Exception):
                         await ctl_task
@@ -321,7 +364,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit, Vault.open(cfg.paths) as vault:
         backends = Backends(cfg.backends, proxy_all=srt_proxy or None)
         egress = RemoteEgress(str(egress_control))
-        gateway, management = _core_parts(
+        gateway, management, hub = _core_parts(
             cfg,
             audit,
             vault,
@@ -329,6 +372,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             inbox=inbox_for(cfg, log),
             backends=backends,
             isolated=True,
+            launcher=RemoteLauncher(str(egress_control)),
         )
         gw = _uds_server(gateway, socks["gateway"])
         mgmt = _uds_server(management, socks["management"])
@@ -350,6 +394,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
                 )
             finally:
                 dog.cancel()
+                await hub.aclose()
                 await backends.aclose()
 
         asyncio.run(run())

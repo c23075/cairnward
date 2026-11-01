@@ -5,7 +5,6 @@ Not reachable over TCP, so web pages and other users can't use it (spec §3.1, F
 
 from __future__ import annotations
 
-import socket
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -17,7 +16,7 @@ from pydantic import BaseModel, Field
 from cairnward import __version__
 from cairnward.audit.log import AuditLog
 from cairnward.config.loader import Config
-from cairnward.egress.addresses import is_ip_literal, special_reason
+from cairnward.egress.addresses import literal_address, special_reason
 from cairnward.egress.control import EgressControl
 from cairnward.egress.proxy import Session
 from cairnward.gateway.clients import RunKeys
@@ -78,19 +77,9 @@ class AskIn(BaseModel):
     run_id: str | None = None
 
 
-def _literal_ip(host: str) -> str | None:
-    """The address a host string denotes without DNS: IP literals, inet_aton shorthand
-    such as 127.1 or 2130706433, and localhost names."""
-    if is_ip_literal(host):
-        return host.strip("[]")
-    if host == "localhost" or host.endswith(".localhost"):
-        return "127.0.0.1"
-    if host.replace(".", "").replace("x", "").isalnum() and host[:1].isdigit():
-        try:
-            return socket.inet_ntoa(socket.inet_aton(host))
-        except OSError:
-            return None
-    return None
+class McpApproveIn(BaseModel):
+    environment: str | None = None
+    tools: dict[str, str] = Field(description="tool name -> the definition hash you reviewed")
 
 
 @dataclass
@@ -110,6 +99,7 @@ def management_app(
     isolated: bool,
     engine: PolicyEngine | None = None,
     inbox: ApprovalInbox | None = None,
+    mcp: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward management", docs_url=None, redoc_url=None)
     runs: dict[str, _Run] = {}
@@ -137,7 +127,7 @@ def management_app(
             max_tokens=body.max_tokens or env_budget.max_tokens,
             max_minutes=body.max_minutes or env_budget.max_minutes,
         )
-        key = run_keys.issue(body.client, run_id, budget)
+        key = run_keys.issue(body.client, run_id, budget, body.environment)
         token = None
         if egress is not None:
             token = egress.create(
@@ -243,7 +233,7 @@ def management_app(
         )  # fmt: skip
         # The sandbox connects to this machine's addresses directly, not through egress,
         # so egress's guard is applied here: only addresses listed exactly (spec §3.2).
-        ip = _literal_ip(host)
+        ip = literal_address(host)
         why = special_reason(ip) if ip else None
         if ip and why:
             listed = engine.privacy_for(action).network_allow_hosts
@@ -270,6 +260,65 @@ def management_app(
                          "approved_by": decision.approved_by},
             )  # fmt: skip
         return {"allow": True}
+
+    # ------------------------------------------------------------------ MCP servers
+
+    def _mcp_env(server: str, environment: str | None) -> str:
+        if server not in cfg.mcp.servers:
+            raise HTTPException(404, f"unknown MCP server '{server}' (mcp.toml)")
+        envs = [n for n, e in cfg.environments.items() if server in e.mcp_servers]
+        if environment is None:
+            if not envs:
+                raise HTTPException(400, f"'{server}' isn't enabled in any environment "
+                                    "(mcp_servers in environments/<name>.toml)")  # fmt: skip
+            return envs[0]
+        if environment not in envs:
+            raise HTTPException(400, f"'{server}' isn't enabled in '{environment}'")
+        return environment
+
+    @app.get("/v1/mcp/servers")
+    def mcp_servers() -> list[dict[str, Any]]:
+        out = []
+        for name, s in cfg.mcp.servers.items():
+            out.append({
+                "name": name, "description": s.description, "version": s.version,
+                "command": s.command, "environments": [
+                    n for n, e in cfg.environments.items() if name in e.mcp_servers],
+                "permissions": s.permissions.model_dump(), "default_tool": s.default_tool,
+                "tools": s.tools,
+            })  # fmt: skip
+        return out
+
+    @app.get("/v1/mcp/{server}/tools")
+    async def mcp_tools(server: str, environment: str | None = None) -> dict[str, Any]:
+        from cairnward.mcp.jsonrpc import McpError
+
+        env = _mcp_env(server, environment)
+        if mcp is None:
+            raise HTTPException(503, "the MCP proxy isn't running")
+        try:
+            views = await mcp.server_tools(server, env)
+        except McpError as exc:
+            raise HTTPException(502, str(exc)) from None
+        return {"environment": env, "tools": [{
+            "name": v.definition["name"], "description": v.definition.get("description", ""),
+            "input_schema": v.definition.get("inputSchema"), "hash": v.state.hash,
+            "status": v.state.status, "flags": v.state.flags, "offered": v.offered,
+            "why": v.why,
+        } for v in views]}  # fmt: skip
+
+    @app.post("/v1/mcp/{server}/approve")
+    async def mcp_approve(server: str, body: McpApproveIn) -> dict[str, Any]:
+        """User-only (FR-POL-4): reachable only on the owner's management socket."""
+        env = _mcp_env(server, body.environment)
+        if mcp is None:
+            raise HTTPException(503, "the MCP proxy isn't running")
+        views = await mcp.server_tools(server, env)
+        try:
+            mcp.approve(server, env, body.tools, views)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {"approved": sorted(body.tools)}
 
     # declared last so that /ask and /sandbox above aren't taken for request ids
     @app.post("/v1/approvals/{request_id}")

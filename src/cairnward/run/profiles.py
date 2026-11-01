@@ -63,6 +63,10 @@ def _opencode_config(base: str, key: str, model: str, fast: str, run_dir: Path) 
         }},
         "model": f"cairnward/{model}",
         "small_model": f"cairnward/{fast}",
+        "mcp": {"cairnward": {
+            "type": "remote", "url": base.removesuffix("/v1") + "/mcp", "enabled": True,
+            "headers": {"Authorization": f"Bearer {key}"},
+        }},
         "autoupdate": False,
         "share": "disabled",
     }  # fmt: skip

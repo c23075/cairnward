@@ -37,6 +37,7 @@ Kind = Literal[
     "fs.read",  # target: path
     "fs.write",  # target: path
     "exec",  # target: command line (summary)
+    "tool.call",  # target: <mcp server>/<tool>
     # user-only actions (spec §5.8 / D46)
     "encrypt",
     "decrypt",
@@ -203,6 +204,21 @@ class PolicyEngine:
             if kind == "fs.read":
                 return Rule("ask", "medium", "read outside the workspace")
             return Rule("ask", "high", "write outside the workspace")
+
+        if kind == "tool.call":
+            server_name, _, tool = target.partition("/")
+            server = self.config.mcp.servers.get(server_name)
+            env = self.config.environments.get(action.environment or "")
+            if server is None or env is None or server_name not in env.mcp_servers:
+                return Rule("deny", "high", f"MCP server '{server_name}' isn't enabled here")
+            setting = server.tools.get(tool, server.default_tool)
+            if setting == "deny":
+                return Rule("deny", "high", f"{tool} is denied in mcp.toml")
+            if setting == "allow":
+                return Rule("allow", "low", f"{tool} is allowed in mcp.toml")
+            if setting == "ask":
+                return Rule("ask", "medium", f"{tool}: mcp.toml says ask", explicit_ask=True)
+            return Rule("ask", "medium", f"MCP tool {server_name}/{tool}")
 
         if kind == "exec":
             if eff.value("isolation") == "on":

@@ -45,6 +45,10 @@ class Paths:
         return self.config_dir / "effort.toml"
 
     @property
+    def mcp_config(self) -> Path:
+        return self.config_dir / "mcp.toml"
+
+    @property
     def environments_dir(self) -> Path:
         return self.config_dir / "environments"
 

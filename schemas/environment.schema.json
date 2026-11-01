@@ -347,6 +347,14 @@
       "default": null,
       "title": "Effort Default"
     },
+    "mcp_servers": {
+      "description": "MCP servers (mcp.toml) offered in this environment",
+      "items": {
+        "type": "string"
+      },
+      "title": "Mcp Servers",
+      "type": "array"
+    },
     "models": {
       "additionalProperties": {
         "type": "string"

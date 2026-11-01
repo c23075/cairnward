@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from cairnward.egress.proxy import Session, Sessions
@@ -53,7 +53,12 @@ class ApproveIn(BaseModel):
     target: str = Field(max_length=300)
 
 
-def control_app(sessions: Sessions) -> FastAPI:
+class McpStartIn(BaseModel):
+    server: str = Field(max_length=31)
+    environment: str = Field(max_length=63)
+
+
+def control_app(sessions: Sessions, mcp: Any = None) -> FastAPI:
     app = FastAPI(title="cairnward-egress control", docs_url=None, redoc_url=None)
 
     @app.get("/v1/health")
@@ -73,6 +78,19 @@ def control_app(sessions: Sessions) -> FastAPI:
     def approve(body: ApproveIn) -> dict[str, bool]:
         sessions.approve(body.run_id, body.target)
         return {"ok": True}
+
+    @app.post("/v1/mcp/start")
+    async def mcp_start(body: McpStartIn) -> dict[str, Any]:
+        """Start a configured MCP server (from this process's own config) for the core."""
+        from cairnward.mcp.launch import LaunchError
+
+        if mcp is None:
+            raise HTTPException(404, "MCP servers aren't started here")
+        try:
+            result: dict[str, Any] = await mcp.start(body.server, body.environment)
+        except (LaunchError, OSError) as exc:
+            raise HTTPException(400, str(exc)) from None
+        return result
 
     return app
 

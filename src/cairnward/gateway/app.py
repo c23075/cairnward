@@ -94,6 +94,7 @@ class GatewayDeps:
     run_keys: RunKeys = field(default_factory=RunKeys)
     scheduler: Scheduler | None = None
     profile: BenchProfile | None = None
+    mcp: Any = None  # McpHub: the MCP proxy (spec §4.2), when configured
 
 
 def _options(resolved: Resolved, req: ChatCompletionRequest) -> GenerationOptions:
@@ -475,6 +476,16 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                 await asyncio.shield(finish(reply, usage, error))
 
         return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
+
+    if deps.mcp is not None:
+        from cairnward.mcp.http import add_mcp_routes
+
+        def default_environment(client: str) -> str:
+            c = cfg.clients.clients.get(client)
+            return (c.default_environment if c else None) or cfg.main.defaults.environment
+
+        add_mcp_routes(app, deps.mcp, identity, default_environment=default_environment,
+                       run_environment=deps.run_keys.environment.get)  # fmt: skip
 
     return app
 

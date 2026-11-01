@@ -104,7 +104,13 @@ def plan_run(
     env.update(profile.env(base_url, run["gateway_key"], model, fast))
     if profile.config is not None:
         env.update(profile.config(base_url, run["gateway_key"], model, fast, tmp_dir))
-    env.update(CAIRNWARD_RUN_ID=run["run_id"], TMPDIR=str(tmp_dir))
+    env.update(
+        CAIRNWARD_RUN_ID=run["run_id"],
+        TMPDIR=str(tmp_dir),
+        # MCP tools of the environment, through Cairnward (`cairnward mcp` uses these)
+        CAIRNWARD_MCP_URL=f"http://127.0.0.1:{gw_port}/mcp",
+        CAIRNWARD_API_KEY=run["gateway_key"],
+    )
     egress = (
         f"http://cw:{run['egress_token']}@127.0.0.1:{eg_port}" if run.get("egress_token") else None
     )
