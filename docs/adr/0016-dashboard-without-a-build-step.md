@@ -1,6 +1,6 @@
 # ADR-0016: Dashboard as plain ES modules, without a build step
 
-- Status: Provisional, pending owner review (pinned 2026-11-01; see spec §12). Built and in use; easy to revisit
+- Status: Accepted (owner review 2026-11-02). Svelte was reconsidered: the framework itself is sound, but its npm build toolchain would put a supply chain into the page where approvals are given; revisit only if the dashboard grows a lot
 - Date: 2026-11-01
 - Spec: §3.1, §4.9; FR-DASH-1..3, FR-VLT-3; supersedes the "Svelte, built offline" line in §6
 

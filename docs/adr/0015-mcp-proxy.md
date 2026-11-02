@@ -1,6 +1,6 @@
 # ADR-0015: MCP tool proxy
 
-- Status: Provisional, pending owner review (pinned 2026-11-01; see spec §12). Built and in use; easy to revisit
+- Status: Accepted with amendment (2026-11-02): decision 1 is replaced, see "Amendment" below; decisions 2-6 stand
 - Date: 2026-11-01
 - Spec: §4.2; FR-MCP-1, FR-MCP-2, FR-MCP-3; threat model T-04, T-07, T-12
 
@@ -18,3 +18,8 @@ Clients and agents should reach third-party MCP tools only through Cairnward, so
 ## Consequences
 - No dependency on the MCP SDK; protocol versions 2024-11-05 to 2025-11-25 accepted at the tools level.
 - Not yet: remote (HTTP) MCP servers, resources/prompts, sampling, built-in Cairnward tools (`lit.*`, `vault.search`) on the same endpoint, redaction of tool arguments and results (comes with the redaction work), stopping idle servers.
+
+## Amendment (2026-11-02, owner review)
+Decision 1 is replaced: the protocol plumbing moves to the **official MCP Python SDK** (MIT), so protocol updates (authorisation, transports, new versions) are maintained upstream rather than by Cairnward. FastMCP was considered and not chosen: its proxy re-models definitions and its request flow fits approvals that hold a call open less well, and it brings a larger dependency tree on top of the SDK.
+- The SDK may re-serialise definitions, so pinning hashes the **canonical JSON** of each definition (sorted keys, no insignificant whitespace) instead of the bytes received; any change to meaning still changes the hash. Existing pins are migrated once, after checking they still match.
+- Policy, approvals, pinning, provenance and audit stay in the hub; only transport and message handling are swapped. The current layer stays until the SDK version passes the same tests (including the end-to-end client tests).

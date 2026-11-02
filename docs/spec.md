@@ -76,6 +76,13 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D62 | Cache-aware gateway | Never alter a conversation's prompt prefix; keep the main model loaded while in use; **conversation affinity** so follow-up turns reuse the cache (measured 18.6× faster); save/restore caches per conversation where the backend supports it (llama.cpp slots) | — |
 | D63 | Tiered research pipeline | Fast model screens titles/abstracts; main model reads only included papers; full-text reading is an overnight job (~5–8 papers/hour) | — |
 | D64 | Coding agents on this hardware | Lean agents first (**Aider**); heavy-prompt agents (Qwen Code, opencode, Goose) supported but flagged as slow on CPU (first turn of a ~10K-token prompt ≈ 8 min) | — |
+| D65 | MCP protocol layer (2026-11-02) | Move the proxy's protocol plumbing to the **official MCP Python SDK**; Cairnward's policy, approvals, pinning and audit stay as they are; definitions are pinned by a hash of their canonical JSON so re-serialisation can't hide or fake a change | [0015](adr/0015-mcp-proxy.md) (amended) |
+| D66 | Dashboard code (2026-11-02) | **Keep plain ES modules without a build step** (no npm supply chain in the page where approvals happen); revisit only if the dashboard grows a lot | [0016](adr/0016-dashboard-without-a-build-step.md) |
+| D67 | Reference formatting | **citeproc-py with the official CSL styles** (APA 7, IEEE; vendored, hash-pinned) replaces the hand-written formatter | — |
+| D68 | Richer PDF parsing | Optional sandboxed workers with **split roles**: **Docling** for body text, tables and OCR; **GROBID** for title/authors/DOI and the reference list; pypdfium2 stays the default and fallback; switched on per library | — (extends D53) |
+| D69 | Third-party timestamps | Audit checkpoints can also be timestamped by an **RFC 3161 timestamp authority** (opt-in; only the checkpoint's hash leaves the machine) | 0008 |
+| D70 | Hosted providers | OpenRouter, DeepSeek API, Alibaba Model Studio, Groq, Cerebras, Gemini; denied by default, never for locked conversations. Backends that **may train on prompts** (most free tiers) are marked so and by default allowed **only in environments marked scratch**; the restriction can be switched off (visible and audited, like every weakening) | — |
+| D71 | M3 scope and order (2026-11-02) | Hardening first (server-mode test matrix, fuzzing, one-command eval/checklist runner, OpenShell review), then MCP SDK + citeproc-py, restic backups, Zotero + academic APIs, full review pipeline, Docling/GROBID, hosted providers, Drive mirror. Presidio and OpenTelemetry export included. **Deferred:** multi-device replication, multi-agent YAML workflows | [plan/m3.md](plan/m3.md) |
 | D5, D19 | Model backends | Pluggable: Ollama (default), llama.cpp, any OpenAI-compatible server; per role / environment / effort | [0004](adr/0004-pluggable-backends.md) |
 | D29 | Hosted providers | Denied by default; tested first: Alibaba Model Studio, DeepSeek API, OpenRouter; Claude API later (separate API key) | 0004 |
 | D7, D25 | Literature sources, citations | Local PDFs, Zotero, arXiv/Semantic Scholar/OpenAlex/PubMed/Crossref; CSL styles (APA, IEEE default) | — |
@@ -402,7 +409,7 @@ Details in [plan/phase0.md](plan/phase0.md).
 - **M0 — Gateway skeleton:** privacy settings model with presets and per-environment overrides (each protection added later plugs into it); model endpoint pass-through to Ollama with policy + audit + vault write; `cairnward run` sandbox with no direct network; `cairnward-egress`; one coding agent and one chat client working through it.
 - **M1 — Research core:** PDF library, `lit.ask` with page citations, citation check, CSL formatting, research job queue; PaperQA2 spike.
 - **M2 — Security features and dashboard:** approvals inbox, risk tiers, provenance dialog, redaction, egress report, vault browser, locking, audit anchoring, MCP proxy with pinning, all four coding agents and 2–3 clients tested.
-- **M3 — Sync, connectors, orchestration:** backup with purge rewrite, replication, Zotero, academic APIs, Drive mirror, research workflows with sub-agents, hosted backends.
+- **M3 — Sync, connectors, orchestration:** hardening, MCP SDK and CSL formatting, backup with purge rewrite, Zotero, academic APIs, full review pipeline, Docling/GROBID, hosted backends, Drive mirror ([plan/m3.md](plan/m3.md)). Multi-device replication and multi-agent workflows deferred (D71).
 - **Later:** Windows via WSL2, Ollama-compatible endpoint, Rust egress proxy, Merkle checkpoints.
 
 ## 10. Testing strategy
@@ -419,7 +426,7 @@ As v0.5 §10 (pydantic-validated TOML with JSON Schema, Alembic migrations, Open
 3. ~~PaperQA2 as engine or own pipeline~~: own pipeline, PaperQA2 optional ([ADR-0014](adr/0014-literature-engine.md)).
 4. Repo rename to `cairnward` (owner action, with the default-branch fix).
 5. Drive folders for the first mirror (setup time).
-6. **Pinned for owner review (2026-11-01):** own minimal MCP JSON-RPC layer instead of the MCP Python SDK ([ADR-0015](adr/0015-mcp-proxy.md)); dashboard as plain ES modules instead of Svelte ([ADR-0016](adr/0016-dashboard-without-a-build-step.md)). Both are built and in use; switching later is contained (the MCP layer is ~300 lines behind the hub; the dashboard talks to a JSON API).
+6. ~~Own MCP layer vs MCP SDK; plain ES modules vs Svelte~~: decided 2026-11-02 (D65: move to the MCP SDK; D66: keep plain ES modules).
 
 ## 13. History
 - v0.1–v0.5: all-in-one local agent with Claude-app features (see git history of this file).
