@@ -1,0 +1,3 @@
+# Vendored CSL files are hash-checked when loaded: never convert their line endings
+src/cairnward/research/csl/styles/** -text
+src/cairnward/research/csl/locales/** -text
