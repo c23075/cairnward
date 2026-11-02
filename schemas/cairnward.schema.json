@@ -380,6 +380,26 @@
       "title": "RedactionConfig",
       "type": "object"
     },
+    "ResearchConfig": {
+      "additionalProperties": false,
+      "description": "Research workflows (spec \u00a74.6).",
+      "properties": {
+        "citation_engine": {
+          "default": "auto",
+          "description": "reference formatting: auto = citeproc-js if installed, else pandoc, else the built-in APA/IEEE formatter",
+          "enum": [
+            "auto",
+            "builtin",
+            "citeproc-js",
+            "pandoc"
+          ],
+          "title": "Citation Engine",
+          "type": "string"
+        }
+      },
+      "title": "ResearchConfig",
+      "type": "object"
+    },
     "ServerConfig": {
       "additionalProperties": false,
       "properties": {
@@ -489,6 +509,12 @@
       "default": {
         "custom": [],
         "ignore": []
+      }
+    },
+    "research": {
+      "$ref": "#/$defs/ResearchConfig",
+      "default": {
+        "citation_engine": "auto"
       }
     },
     "schema_version": {

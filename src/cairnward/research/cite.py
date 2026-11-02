@@ -3,8 +3,9 @@
 Input is CSL-JSON, what Zotero and most reference managers export. Output is Markdown
 (*italics*) or plain text. The two shipped styles are implemented here directly, for
 the common item types: journal articles, books, chapters, conference papers, reports,
-theses, web pages and preprints. Other CSL styles (`.csl` files) work through the
-optional citeproc-py package.
+theses, web pages and preprints. This built-in formatter is the fallback: with a CSL
+engine installed (citeproc-js or pandoc, see research.csl), the official CSL style files
+are used instead, and any other `.csl` style works too.
 
 Titles are used as given: converting to APA's sentence case automatically would break
 proper nouns, so keep them in sentence case in your reference manager.
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,18 @@ def _year(item: Item) -> str | None:
 def _month(item: Item) -> int | None:
     parts = (item.get("issued") or {}).get("date-parts") or [[]]
     return int(parts[0][1]) if parts and len(parts[0]) > 1 else None
+
+
+APA_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+              "September", "October", "November", "December"]  # fmt: skip
+
+
+def _apa_date(item: Item) -> str | None:
+    parts = ((item.get("issued") or {}).get("date-parts") or [[]])[0]
+    if len(parts) < 2 or not 1 <= int(parts[1]) <= 12:
+        return None
+    out = f"{parts[0]}, {APA_MONTHS[int(parts[1]) - 1]}"
+    return f"{out} {int(parts[2])}" if len(parts) > 2 else out
 
 
 def _initials(given: str, *, spaced: bool) -> str:
@@ -117,6 +131,8 @@ def apa(item: Item, *, md: bool = True) -> str:
     authors = item.get("author") or []
     title = str(item.get("title", "")).strip()
     year = _year(item) or "n.d."
+    if kind in ("webpage", "post", "post-weblog", "article-newspaper", "article-magazine"):
+        year = _apa_date(item) or year  # APA 7: (2024, June 26) for dated web pages
     lead = _apa_authors(authors)
     head = f"{_end(lead)} ({year})." if lead else f"{_it(title, md)}. ({year})."
     doi = _doi(item)
@@ -312,38 +328,48 @@ def load_items(path: Path) -> list[Item]:
     return [x for x in data if isinstance(x, dict)]
 
 
-def bibliography(items: Iterable[Item], style: str = "apa", *, md: bool = True) -> list[str]:
+def bibliography(items: Iterable[Item], style: str = "apa", *, md: bool = True,
+                 engine: str = "builtin", paths: Any = None) -> list[str]:  # fmt: skip
+    return format_references(items, style, md=md, engine=engine, paths=paths)[0]
+
+
+def format_references(
+    items: Iterable[Item],
+    style: str = "apa",
+    *,
+    md: bool = True,
+    engine: str = "auto",
+    paths: Any = None,
+) -> tuple[list[str], str]:
+    """Formatted entries and the engine that made them (see research.csl). With
+    engine = "auto", a CSL engine that fails falls back to the built-in formatter for
+    APA and IEEE rather than leaving the bibliography empty."""
+    from cairnward.config.paths import default_paths
+    from cairnward.research import csl
+
     items = list(items)
+    paths = paths or default_paths()
+    try:
+        chosen = csl.choose(engine, style, paths)
+    except csl.CslError as exc:
+        raise CiteError(str(exc)) from None
+    if chosen == "builtin":
+        return _builtin(items, style, md), "builtin"
+    try:
+        return csl.format_with(chosen, items, style, paths, md=md), chosen
+    except (csl.CslError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        if engine == "auto" and style.lower() in csl.SHIPPED:
+            return _builtin(items, style, md), f"builtin ({chosen} failed: {str(exc)[:120]})"
+        raise CiteError(str(exc)) from None
+
+
+def _builtin(items: list[Item], style: str, md: bool) -> list[str]:
     s = style.lower()
     if s == "apa":
         return [apa(i, md=md) for i in sorted(items, key=apa_sort_key)]
     if s == "ieee":
         return [ieee(i, n, md=md) for n, i in enumerate(items, 1)]
-    if s.endswith(".csl"):
-        return _citeproc(items, Path(style))
     raise CiteError(f"unknown style '{style}': apa, ieee, or a .csl file")
-
-
-def _citeproc(items: list[Item], csl: Path) -> list[str]:
-    try:
-        from citeproc import (  # type: ignore[import-not-found, unused-ignore]
-            Citation,
-            CitationItem,
-            CitationStylesBibliography,
-            CitationStylesStyle,
-            formatter,
-        )
-        from citeproc.source.json import CiteProcJSON  # type: ignore[import-not-found, unused-ignore]
-    except ImportError:
-        raise CiteError(".csl styles need the optional citeproc-py package "
-                        "(uv pip install citeproc-py)") from None  # fmt: skip
-    for n, item in enumerate(items):
-        item.setdefault("id", f"item{n}")
-    style = CitationStylesStyle(str(csl), validate=False)
-    bib = CitationStylesBibliography(style, CiteProcJSON(items), formatter.plain)
-    for item in items:
-        bib.register(Citation([CitationItem(item["id"])]))
-    return [str(entry) for entry in bib.bibliography()]
 
 
 def from_documents(rows: Iterable[Any]) -> list[Item]:

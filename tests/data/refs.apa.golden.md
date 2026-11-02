@@ -8,4 +8,4 @@ Nguyen, T., & Patel, R. (2024). Fast hybrid retrieval for scientific question an
 
 Walker, M. P., & Stickgold, R. (2022). Sleep and working memory in older adults. *Journal of Sleep Research*, *31*(4), e13540–e13552. https://doi.org/10.1111/jsr.13540
 
-World Health Organization. (2024). *Physical activity*. WHO fact sheets. https://www.who.int/news-room/fact-sheets/detail/physical-activity
+World Health Organization. (2024, June 26). *Physical activity*. WHO fact sheets. https://www.who.int/news-room/fact-sheets/detail/physical-activity

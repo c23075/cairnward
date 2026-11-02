@@ -130,6 +130,10 @@ Format references exported from Zotero as CSL-JSON (APA 7 or IEEE):
 ```bash
 uv run cairnward cite references.json --style apa
 ```
+For output identical to Zotero's, and any of the 10,000+ CSL styles (`--style path/to/style.csl`), install the citeproc-js engine (needs Node.js 20 or newer; pinned and hash-checked), or have pandoc installed; Cairnward then uses it automatically (`[research] citation_engine = "auto"`):
+```bash
+uv run cairnward research engine install citeproc-js
+```
 Run a review overnight: notes per paper and a comparison table with references (it picks up where it left off if Cairnward restarts):
 ```bash
 uv run cairnward research review thesis --question "Does sleep affect working memory?" --at 23:30

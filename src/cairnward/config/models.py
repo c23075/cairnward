@@ -135,6 +135,16 @@ class AnchorConfig(_Strict):
     interval_minutes: int = Field(default=60, ge=5, le=1440)
 
 
+class ResearchConfig(_Strict):
+    """Research workflows (spec §4.6)."""
+
+    citation_engine: Literal["auto", "builtin", "citeproc-js", "pandoc"] = Field(
+        default="auto",
+        description="reference formatting: auto = citeproc-js if installed, else pandoc, "
+        "else the built-in APA/IEEE formatter",
+    )
+
+
 class MainConfig(_Strict):
     """cairnward.toml"""
 
@@ -145,6 +155,7 @@ class MainConfig(_Strict):
     defaults: Defaults = Defaults()
     redaction: RedactionConfig = RedactionConfig()
     anchor: AnchorConfig = AnchorConfig()
+    research: ResearchConfig = ResearchConfig()
 
 
 # --------------------------------------------------------------------------- backends.toml

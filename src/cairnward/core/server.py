@@ -215,7 +215,8 @@ def _core_parts(
                       executor=deep_executor or LocalExecutor(cfg, log))  # fmt: skip
     jobs = JobRunner(JobStore(cfg.paths.data_dir), research=lambda: Research.open(cfg.paths),
                      ask=research_ask, chat_for=chat_for, audit=audit, log=log,
-                     deep=deep, index=index_library)  # fmt: skip
+                     deep=deep, index=index_library, paths=cfg.paths,
+                     cite_engine=cfg.main.research.citation_engine)  # fmt: skip
 
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
                  provenance=tracker, vault=vault, backends=backends,

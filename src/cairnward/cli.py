@@ -195,9 +195,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rv.add_argument("--files-from", type=Path, metavar="LIST",
                     help="like --files, read from a file with one path per line")  # fmt: skip
-    eng = rs_sub.add_parser("engine", help="optional research engines (PaperQA2)")
+    eng = rs_sub.add_parser("engine", help="optional engines (PaperQA2, citeproc-js, pandoc)")
     eng.add_argument("action", choices=["install", "status"])
-    eng.add_argument("name", choices=["paperqa"])
+    eng.add_argument("name", choices=["paperqa", "citeproc-js", "pandoc"])
     rb = rs_sub.add_parser("ask", help="answer every question in a file (one per line)")
     rb.add_argument("library")
     rb.add_argument("file", type=Path)
@@ -244,6 +244,8 @@ def build_parser() -> argparse.ArgumentParser:
     cite.add_argument("file", type=Path, help="CSL-JSON (e.g. exported from Zotero)")
     cite.add_argument("--style", default="apa", help="apa (default), ieee, or a .csl file")
     cite.add_argument("--plain", action="store_true", help="no Markdown italics")
+    cite.add_argument("--engine", choices=["auto", "builtin", "citeproc-js", "pandoc"],
+                      help="CSL engine (default: [research] citation_engine, auto)")  # fmt: skip
 
     mdl = sub.add_parser("models", help="model files: verified downloads through egress")
     mdl_sub = mdl.add_subparsers(dest="models_command", metavar="ACTION", required=True)
@@ -1039,8 +1041,31 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
 
     cfg = _load(args)
     if args.command == "research" and args.research_command == "engine":
+        import subprocess
+
+        from cairnward.research import csl
         from cairnward.research.engines import paperqa
 
+        if args.name == "citeproc-js":
+            if args.action == "install":
+                try:
+                    lib = csl.install_citeproc_js(cfg.paths)
+                except (csl.CslError, subprocess.CalledProcessError) as exc:
+                    print(f"cairnward: {exc}", file=sys.stderr)
+                    return 1
+                print(f"citeproc-js installed ({lib}); with citation_engine = \"auto\" it now "
+                      "formats references")  # fmt: skip
+                return 0
+            found = csl.citeproc_js(cfg.paths)
+            print(f"citeproc-js: {'installed (' + str(found) + ')' if found else 'not installed'}")
+            return 0 if found else 1
+        if args.name == "pandoc":
+            pandoc_exe = csl.pandoc()
+            if args.action == "install":
+                print("pandoc isn't installed by Cairnward: install it with your package "
+                      "manager (e.g. sudo apt install pandoc); version 2.11 or newer")  # fmt: skip
+            print(f"pandoc: {'found (' + pandoc_exe + ')' if pandoc_exe else 'not found'}")
+            return 0 if pandoc_exe else 1
         if args.action == "install":
             print("Installing PaperQA2 (about 250 MB, hash-checked) in its own environment...")
             paperqa.install(cfg.paths)
@@ -1587,14 +1612,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "artifacts":
             return _cmd_artifacts(args)
         if args.command == "cite":
-            from cairnward.research.cite import CiteError, bibliography, load_items
+            from cairnward.research.cite import CiteError, format_references, load_items
 
+            paths = default_paths(args.config_dir)
+            engine = args.engine
+            if engine is None:
+                try:
+                    engine = load_config(paths).main.research.citation_engine
+                except ConfigError:  # an unreadable config shouldn't stop formatting
+                    engine = "auto"
             try:
-                entries = bibliography(load_items(args.file), args.style, md=not args.plain)
+                entries, used = format_references(load_items(args.file), args.style,
+                                                  md=not args.plain, engine=engine,
+                                                  paths=paths)  # fmt: skip
             except (CiteError, ValueError, OSError) as exc:
                 print(f"cairnward cite: {exc}", file=sys.stderr)
                 return 1
             print("\n\n".join(entries))
+            print(f"(formatted with {used})", file=sys.stderr)
             return 0
         if args.command == "mcp":
             return _cmd_mcp(args)

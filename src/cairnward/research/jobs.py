@@ -225,9 +225,11 @@ class JobRunner:
     def __init__(self, store: JobStore, *, research: Callable[[], Any], ask: Ask,
                  chat_for: Callable[[str], Any], audit: Any = None,
                  log: Callable[[str], None] = lambda m: None, deep: Any = None,
-                 index: Index | None = None):  # fmt: skip
+                 index: Index | None = None, cite_engine: str = "builtin",
+                 paths: Any = None):  # fmt: skip
         self.store, self.research, self.ask, self.chat_for = store, research, ask, chat_for
         self.index = index  # indexes a library (or some of its files) before a review
+        self.cite_engine, self.paths = cite_engine, paths  # reference formatting (research.csl)
         self.deep = deep  # research.engines.deep.DeepEngine (PaperQA2), optional
         self.audit, self.log = audit, log
         self.wake = asyncio.Event()
@@ -344,7 +346,7 @@ class JobRunner:
             ], max_tokens=700)  # fmt: skip
             return {"title": step.params["title"], **parse_notes(reply.text)}
         if step.name == "table":
-            from cairnward.research.cite import bibliography, from_documents
+            from cairnward.research.cite import format_references, from_documents
 
             research = self.research()
             try:
@@ -354,7 +356,11 @@ class JobRunner:
             ids = [s.params["document_id"] for s in job.steps if s.name == "notes"
                    and s.status == "done"]  # fmt: skip
             items = from_documents([docs[i] for i in ids if i in docs])
-            return {"bibliography": bibliography(items, job.params.get("style", "apa"))}
+            style = job.params.get("style", "apa")
+            entries, used = await asyncio.to_thread(format_references, items, style,
+                                                    engine=self.cite_engine,
+                                                    paths=self.paths)  # fmt: skip
+            return {"bibliography": entries, "engine": used}
         raise ValueError(f"unknown step {step.name}")
 
     async def _prepare(self, job: Job, step: Step) -> dict[str, Any]:

@@ -15,7 +15,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -404,4 +404,23 @@ def run_checks(paths: Paths) -> list[Check]:
     checks += check_isolation(cfg)
     checks += check_data(cfg)
     checks.append(check_disk_encryption())
+    checks.append(check_citation_engine(cfg))
     return checks
+
+
+def check_citation_engine(cfg: Any) -> Check:
+    from cairnward.research import csl
+
+    setting = cfg.main.research.citation_engine
+    found = csl.available(cfg.paths)
+    try:
+        used = csl.choose(setting, "apa", cfg.paths)
+    except csl.CslError as exc:
+        return Check("citation engine", "fail", f"{setting}: {exc}")
+    if used == "builtin":
+        return Check("citation engine", "warn" if setting == "auto" else "ok",
+                     f"{setting}: built-in APA/IEEE only",
+                     "for Zotero-identical output and other styles: cairnward research engine "
+                     "install citeproc-js (or install pandoc)")  # fmt: skip
+    return Check("citation engine", "ok",
+                 f"{setting}: {used} (installed: {', '.join(found)})")  # fmt: skip

@@ -1,0 +1,18 @@
+{
+  "comment": "Vendored CSL files, checked against these hashes when loaded. To update: copy newer files from upstream, then record their SHA-256 and the commit here.",
+  "styles": {
+    "source": "https://github.com/citation-style-language/styles",
+    "commit": "aa7ce48",
+    "files": {
+      "styles/apa.csl": "3917def5fc951b104d64216c3373096042368b9704ba269ca83c14ebaba889fc",
+      "styles/ieee.csl": "b4c7619fc16c45a31e4cc3271eab94ffe83192d3b4c7fc729470a3b459448de3"
+    }
+  },
+  "locales": {
+    "source": "https://github.com/citation-style-language/locales",
+    "commit": "8bef426",
+    "files": {
+      "locales/locales-en-US.xml": "ac864c7c21166b4390d82c31792cdc509400727fa0060b43d8aa17e07f9cb079"
+    }
+  }
+}
