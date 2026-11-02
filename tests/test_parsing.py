@@ -222,7 +222,7 @@ async def test_control_endpoint_runs_docling_for_the_core() -> None:
                                  base_url="http://egress") as c:  # fmt: skip
         r = await c.post("/v1/engines/docling/parse",
                          json={"environment": "e", "files": ["/x/a.pdf"]})  # fmt: skip
-        assert r.json() == {"results": [{"file": "/x/a.pdf", "pages": ["e"]}]}
+        assert r.json() == {"results": [{"file": str(Path("/x/a.pdf")), "pages": ["e"]}]}
     bare = control_app(Sessions())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=bare),
                                  base_url="http://egress") as c:  # fmt: skip
