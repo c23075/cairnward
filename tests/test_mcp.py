@@ -218,8 +218,16 @@ async def test_proxy_end_to_end(paths: Paths) -> None:
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=mcp_app(hub)),
                                          base_url="http://127.0.0.1") as c:  # fmt: skip
                 rpc = Rpc(c)
-                init = await rpc("initialize", {"protocolVersion": "2025-06-18"})
-                assert init["result"]["protocolVersion"] == "2025-06-18" and rpc.sid
+                init = await rpc(
+                    "initialize",
+                    {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1"},
+                    },
+                )
+                assert init["result"]["protocolVersion"] == "2025-06-18"
+                assert rpc.sid is None  # stateless: each request stands on its own key
                 # pinning on: nothing offered until approved
                 assert (await rpc("tools/list"))["result"]["tools"] == []
                 views = await hub.server_tools("fake", "e")
@@ -241,11 +249,12 @@ async def test_proxy_end_to_end(paths: Paths) -> None:
                 # a run key: the run's environment; another environment is refused
                 run = Rpc(c, "/mcp/other", key="run")
                 assert (await run("ping"))["error"]["message"].startswith("this run is in")
-                # sessions belong to their client; bad origins and keys are refused
-                bad = await c.post("/mcp", headers={"Authorization": "Bearer run",
-                                                    "Mcp-Session-Id": rpc.sid}, json={
-                    "jsonrpc": "2.0", "id": 1, "method": "ping"})  # fmt: skip
-                assert bad.status_code == 403
+                # no sessions to borrow: a session header changes nothing, the key decides;
+                # bad origins and keys are refused
+                other = await c.post("/mcp", headers={"Authorization": "Bearer run",
+                                                      "Mcp-Session-Id": "someone-elses"}, json={
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/list"})  # fmt: skip
+                assert other.status_code == 200 and "result" in other.json()
                 evil = await c.post("/mcp", headers={"Authorization": "Bearer good",
                                                      "Origin": "https://evil.example"},
                                     json={"jsonrpc": "2.0", "id": 1, "method": "ping"})  # fmt: skip
@@ -365,7 +374,8 @@ def test_stdio_shim(paths: Paths) -> None:
     hub = make_hub(cfg, None)
     lines = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-         "params": {"protocolVersion": "2099-01-01"}},
+         "params": {"protocolVersion": "2099-01-01", "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
          "params": {"name": "fake__echo", "arguments": {"text": "via stdio"}}},
@@ -377,7 +387,7 @@ def test_stdio_shim(paths: Paths) -> None:
         client.portal.call(hub.aclose)  # type: ignore[union-attr]
     replies = [json.loads(x) for x in out.getvalue().splitlines()]
     assert len(replies) == 2  # the notification gets no reply
-    assert replies[0]["result"]["protocolVersion"] == "2025-06-18"  # unknown -> ours
+    assert replies[0]["result"]["protocolVersion"] == "2025-11-25"  # unknown -> newest we have
     assert replies[1]["result"]["content"][0]["text"] == "via stdio"
     # nobody listening: a JSON-RPC error for requests
     out = io.StringIO()

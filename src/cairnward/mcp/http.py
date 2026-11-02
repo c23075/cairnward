@@ -1,34 +1,46 @@
-"""The MCP endpoint on the gateway: streamable HTTP, JSON responses (spec §4.2, FR-MCP-1).
+"""The MCP endpoint on the gateway: streamable HTTP with JSON responses (spec §4.2,
+FR-MCP-1), on the official MCP Python SDK (ADR-0015 amendment).
 
 POST /mcp/<environment> (or /mcp: the client's default environment; for a
-`cairnward run` key, the run's environment) with a client or run API key. Each POST
-carries one JSON-RPC message; requests get a JSON reply, notifications 202. No
-server-to-client stream is offered (GET answers 405, which the transport allows).
+`cairnward run` key, the run's environment) with a client or run API key. Cairnward's
+checks come first (Origin, API key, environment) on every request; then the SDK handles
+the protocol (versions, initialize, message validation) in stateless mode: there are no
+server-side sessions to hijack or exhaust, since each request is authorised by its own
+key. No server-to-client stream is offered (GET answers 405, which the transport allows).
+
+What clients can do is unchanged: tools (`<server>__<tool>` and Cairnward's own
+`cairnward__*`), skills as prompts and resources; every call goes through the hub
+(policy, approvals, pinning, audit).
 """
 
 from __future__ import annotations
 
-import secrets
-from collections.abc import Callable
+import asyncio
+import contextlib
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+import mcp_types as types
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
+from mcp.server.lowlevel import Server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.shared.exceptions import MCPError
+from starlette.types import Receive, Scope, Send
 
 from cairnward import __version__
 from cairnward.config.models import LOOPBACK_HOSTS
 from cairnward.mcp.hub import McpHub
 from cairnward.mcp.jsonrpc import McpError
 
-MAX_SESSIONS = 1000  # oldest dropped first; a client re-initialises after a 404
-PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
     "Tools from MCP servers enabled in this Cairnward environment, named "
     "<server>__<tool>. Every call is checked against your privacy settings and audited; "
     "some may wait for the user's approval."
 )
+_SCOPE_KEY = "cairnward.mcp"
 
 
 @dataclass(frozen=True)
@@ -46,6 +58,123 @@ def _rpc_error(rid: Any, code: int, message: str, status: int = 200) -> JSONResp
                         status_code=status)  # fmt: skip
 
 
+class _Asgi(Response):
+    """Hands the request to an ASGI callable (the SDK's session manager)."""
+
+    def __init__(self, call: Callable[[Scope, Receive, Send], Awaitable[None]]) -> None:
+        super().__init__()
+        self._call = call
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await self._call(scope, receive, send)
+
+
+def _who(ctx: Any) -> _McpSession:
+    request = getattr(ctx, "request", None)
+    who = request.scope.get(_SCOPE_KEY) if request is not None else None
+    if not isinstance(who, _McpSession):
+        raise MCPError(types.INVALID_REQUEST, "no Cairnward identity on this request")
+    return who
+
+
+def _models(model: Any, items: list[dict[str, Any]]) -> list[Any]:
+    """Standard objects only: an item that isn't valid MCP is left out, not an error."""
+    out = []
+    for item in items:
+        with contextlib.suppress(ValueError, TypeError):
+            out.append(model.model_validate(item))
+    return out
+
+
+def build_server(hub: McpHub) -> Server[Any]:
+    async def list_tools(ctx: Any, params: Any) -> types.ListToolsResult:
+        who = _who(ctx)
+        tools, _problems = await hub.list_tools(who.environment)
+        return types.ListToolsResult(tools=_models(types.Tool, tools))
+
+    async def call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+        who = _who(ctx)
+        try:
+            result = await hub.call(who.environment, params.name, dict(params.arguments or {}),
+                                    client=who.client, run_id=who.run_id)  # fmt: skip
+        except McpError as exc:
+            raise MCPError(exc.code or types.INTERNAL_ERROR, str(exc)) from None
+        except (ValueError, TypeError) as exc:  # arguments a built-in tool can't use
+            raise MCPError(types.INVALID_PARAMS, f"invalid arguments: {str(exc)[:200]}") from None
+        try:
+            return types.CallToolResult.model_validate(result)
+        except ValueError:
+            return types.CallToolResult(is_error=True, content=[types.TextContent(
+                type="text", text="the tool's answer wasn't valid MCP")])  # fmt: skip
+
+    def guarded(fn: Callable[[], Any]) -> Any:
+        try:
+            return fn()
+        except McpError as exc:
+            raise MCPError(exc.code or types.INTERNAL_ERROR, str(exc)) from None
+
+    async def list_prompts(ctx: Any, params: Any) -> types.ListPromptsResult:
+        who = _who(ctx)
+        return types.ListPromptsResult(prompts=_models(types.Prompt, guarded(
+            lambda: hub.list_prompts(who.environment))))  # fmt: skip
+
+    async def get_prompt(ctx: Any, params: types.GetPromptRequestParams) -> types.GetPromptResult:
+        who = _who(ctx)
+        raw = guarded(lambda: hub.get_prompt(who.environment, params.name, who.client))
+        return types.GetPromptResult.model_validate(raw)
+
+    async def list_resources(ctx: Any, params: Any) -> types.ListResourcesResult:
+        who = _who(ctx)
+        return types.ListResourcesResult(resources=_models(types.Resource, guarded(
+            lambda: hub.list_resources(who.environment))))  # fmt: skip
+
+    async def read_resource(
+        ctx: Any, params: types.ReadResourceRequestParams
+    ) -> types.ReadResourceResult:
+        who = _who(ctx)
+        raw = guarded(lambda: hub.read_resource(who.environment, str(params.uri)))
+        return types.ReadResourceResult.model_validate(raw)
+
+    async def list_templates(ctx: Any, params: Any) -> types.ListResourceTemplatesResult:
+        return types.ListResourceTemplatesResult(resource_templates=[])
+
+    return Server(
+        "cairnward", version=__version__, title="Cairnward", instructions=INSTRUCTIONS,
+        on_list_tools=list_tools, on_call_tool=call_tool, on_list_prompts=list_prompts,
+        on_get_prompt=get_prompt, on_list_resources=list_resources,
+        on_read_resource=read_resource, on_list_resource_templates=list_templates,
+    )  # fmt: skip
+
+
+class _Manager:
+    """The SDK's session manager, started on first use (so it also runs under test
+    transports that don't send ASGI lifespan events) and stopped with the app."""
+
+    def __init__(self, server: Server[Any]) -> None:
+        # Stateless: every request carries the client's key and is checked on its own, so
+        # server-side sessions would add no protection, only state to exhaust.
+        self.manager = StreamableHTTPSessionManager(server, json_response=True, stateless=True)
+        self._task: asyncio.Task[None] | None = None
+        self._ready = asyncio.Event()
+        self._stop = asyncio.Event()
+
+    async def ensure(self) -> None:
+        if self._task is None:
+            self._task = asyncio.create_task(self._run())
+        await self._ready.wait()
+
+    async def _run(self) -> None:
+        async with self.manager.run():
+            self._ready.set()
+            await self._stop.wait()
+
+    async def aclose(self) -> None:
+        self._stop.set()
+        if self._task is not None:
+            with contextlib.suppress(BaseException):
+                await asyncio.wait_for(self._task, 5)
+
+
 def add_mcp_routes(
     app: FastAPI,
     hub: McpHub,
@@ -54,10 +183,11 @@ def add_mcp_routes(
     default_environment: Callable[[str], str],
     run_environment: Callable[[str], str | None],
 ) -> None:
-    sessions: dict[str, _McpSession] = {}
     cfg = hub.cfg
+    managed = _Manager(build_server(hub))
+    app.state.mcp_manager = managed
 
-    async def handle(request: Request, path_env: str | None) -> Response:
+    def check(request: Request, path_env: str | None) -> _McpSession | JSONResponse:
         origin = request.headers.get("origin")
         if origin and (urlsplit(origin).hostname or "").lower() not in {
             h.strip("[]") for h in LOOPBACK_HOSTS
@@ -76,80 +206,18 @@ def add_mcp_routes(
             environment = path_env or default_environment(client)
         if environment not in cfg.environments:
             return _rpc_error(None, -32600, f"unknown environment '{environment}'", 404)
-        sid = request.headers.get("mcp-session-id")
-        if sid is not None:
-            known = sessions.get(sid)
-            if known is None:
-                return _rpc_error(None, -32600, "unknown session; initialize again", 404)
-            if (known.client, known.environment, known.run_id) != (client, environment, run_id):
-                return _rpc_error(None, -32600, "session belongs to another client", 403)
-        try:
-            msg = await request.json()
-        except ValueError:
-            return _rpc_error(None, -32700, "parse error", 400)
-        if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
-            return _rpc_error(None, -32600, "one JSON-RPC 2.0 message per request", 400)
-        method, rid = msg.get("method"), msg.get("id")
-        if method is None or "id" not in msg:  # notification, or a response to us
-            return Response(status_code=202)
-        if isinstance(rid, bool) or not isinstance(rid, str | int | None):
-            return _rpc_error(None, -32600, "id must be a string or a number", 400)
-        if not isinstance(method, str):
-            return _rpc_error(rid, -32600, "method must be a string", 400)
-        params = msg.get("params")
-        if params is None:
-            params = {}
-        if not isinstance(params, dict):
-            return _rpc_error(rid, -32602, "params must be an object")
-        headers: dict[str, str] = {}
+        return _McpSession(client, environment, run_id)
 
-        def ok(result: Any) -> JSONResponse:
-            return JSONResponse({"jsonrpc": "2.0", "id": rid, "result": result}, headers=headers)
+    async def handle(request: Request, path_env: str | None) -> Response:
+        who = check(request, path_env)
+        if isinstance(who, JSONResponse):
+            return who
+        await managed.ensure()
 
-        if method == "initialize":
-            asked = params.get("protocolVersion")
-            new_sid = secrets.token_urlsafe(24)
-            sessions[new_sid] = _McpSession(client, environment, run_id)
-            while len(sessions) > MAX_SESSIONS:  # clients that never say goodbye
-                sessions.pop(next(iter(sessions)))
-            headers["Mcp-Session-Id"] = new_sid
-            return ok({
-                "protocolVersion": asked if asked in PROTOCOLS else PROTOCOLS[1],
-                "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False},
-                                 "resources": {"listChanged": False}},
-                "serverInfo": {"name": "cairnward", "title": f"Cairnward ({environment})",
-                               "version": __version__},
-                "instructions": INSTRUCTIONS,
-            })  # fmt: skip
-        if method == "ping":
-            return ok({})
-        if method == "tools/list":
-            tools, _problems = await hub.list_tools(environment)
-            return ok({"tools": tools})
-        if method == "tools/call":
-            name, args = params.get("name"), params.get("arguments") or {}
-            if not isinstance(name, str) or not isinstance(args, dict):
-                return _rpc_error(rid, -32602, "tools/call needs a name and object arguments")
-            try:
-                return ok(await hub.call(environment, name, args, client=client, run_id=run_id))
-            except McpError as exc:
-                return _rpc_error(rid, exc.code or -32603, str(exc))
-            except (ValueError, TypeError) as exc:  # arguments a built-in tool can't use
-                return _rpc_error(rid, -32602, f"invalid arguments: {str(exc)[:200]}")
-        try:
-            if method == "prompts/list":
-                return ok({"prompts": hub.list_prompts(environment)})
-            if method == "prompts/get":
-                return ok(hub.get_prompt(environment, str(params.get("name", "")), client))
-            if method == "resources/list":
-                return ok({"resources": hub.list_resources(environment)})
-            if method == "resources/read":
-                return ok(hub.read_resource(environment, str(params.get("uri", ""))))
-        except McpError as exc:
-            return _rpc_error(rid, exc.code or -32603, str(exc))
-        if method == "resources/templates/list":
-            return ok({"resourceTemplates": []})
-        return _rpc_error(rid, -32601, f"method not found: {method}")
+        async def delegate(scope: Scope, receive: Receive, send: Send) -> None:
+            await managed.manager.handle_request({**scope, _SCOPE_KEY: who}, receive, send)
+
+        return _Asgi(delegate)
 
     @app.post("/mcp", include_in_schema=False)
     async def mcp_default(request: Request) -> Response:
@@ -165,11 +233,9 @@ def add_mcp_routes(
         return Response(status_code=405, headers={"Allow": "POST, DELETE"})
 
     @app.delete("/mcp", include_in_schema=False)
+    async def mcp_end_default(request: Request) -> Response:
+        return await handle(request, None)
+
     @app.delete("/mcp/{environment}", include_in_schema=False)
-    async def mcp_end(request: Request) -> Response:
-        sid = request.headers.get("mcp-session-id")
-        ident = identify(request)
-        known = sessions.get(sid or "")
-        if ident and known and known.client == ident[0]:
-            sessions.pop(sid or "", None)
-        return Response(status_code=204)
+    async def mcp_end(environment: str, request: Request) -> Response:
+        return await handle(request, environment)

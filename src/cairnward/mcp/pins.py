@@ -1,8 +1,9 @@
 """MCP tool pinning and change detection (spec §4.2, FR-MCP-3; v0.5 D38).
 
-Each tool's whole definition (name, description, input/output schema, annotations) is
-hashed. With `mcp_pinning = "on"`, a tool is offered only once you approved exactly that
-hash (`cairnward mcp approve`); a changed definition (a "rug pull") disables it until
+Each tool's whole definition as clients get it (the standard MCP fields: name, title,
+description, input/output schema, annotations, icons, _meta) is hashed. With
+`mcp_pinning = "on"`, a tool is offered only once you approved exactly that hash
+(`cairnward mcp approve`); a changed definition (a "rug pull") disables it until
 re-approved. Descriptions are also scanned for instruction-like text (tool poisoning),
 shown when you review them. With pinning off, every tool is offered and changes are only
 recorded.
@@ -96,9 +97,20 @@ class PinStore:
         tmp.chmod(0o600)
         tmp.replace(self.path)
 
-    def state(self, server: str, tool: dict[str, Any]) -> ToolState:
+    def state(self, server: str, tool: dict[str, Any],
+              raw: dict[str, Any] | None = None) -> ToolState:  # fmt: skip
+        """`tool` as clients get it (standard fields); `raw` as the server sent it.
+
+        Pins made before the MCP SDK (format 1) hashed the raw definition: one that still
+        matches what the server sends now is carried over to the new hash automatically
+        (the same definition the user approved); anything else counts as changed."""
         h = tool_hash(tool)
         pinned = self._data.get(server, {}).get("tools", {}).get(tool["name"])
+        legacy = pinned is not None and pinned.get("format", 1) < 2 and pinned["hash"] != h
+        if legacy and raw is not None and pinned is not None and pinned["hash"] == tool_hash(raw):
+            with self._lock:
+                pinned.update(hash=h, format=2, migrated_at=int(time.time()))
+                self._save()
         if pinned is None:
             status: Status = "new"
         elif pinned["hash"] == h:
@@ -112,7 +124,7 @@ class PinStore:
         with self._lock:
             entry = self._data.setdefault(server, {"tools": {}})
             for name, h in approvals.items():
-                entry["tools"][name] = {"hash": h, "approved_at": int(time.time())}
+                entry["tools"][name] = {"hash": h, "approved_at": int(time.time()), "format": 2}
             if server_version:
                 entry["server_version"] = server_version
             self._save()

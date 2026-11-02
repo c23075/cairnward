@@ -254,20 +254,6 @@ def test_fuzz_mcp_from_clients(mcp_client: Any, msg: Any, raw: bytes | None) -> 
         assert reply.get("jsonrpc") == "2.0" and ("result" in reply or "error" in reply)
 
 
-def test_mcp_sessions_are_bounded(mcp_client: Any) -> None:
-    from cairnward.mcp import http as mcp_http
-
-    loop, client = mcp_client
-    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
-    first = loop.run_until_complete(client.post("/mcp", json=init)).headers["mcp-session-id"]
-    for _ in range(mcp_http.MAX_SESSIONS):
-        loop.run_until_complete(client.post("/mcp", json=init))
-    ping = {"jsonrpc": "2.0", "id": 2, "method": "ping"}
-    old = loop.run_until_complete(client.post("/mcp", json=ping,
-                                              headers={"mcp-session-id": first}))  # fmt: skip
-    assert old.status_code == 404  # the oldest session was dropped, not kept forever
-
-
 # ------------------------------------------------------------------ MCP from servers
 
 
@@ -285,8 +271,10 @@ def test_mcp_sessions_are_bounded(mcp_client: Any) -> None:
     st.text(max_size=40).map(lambda t: t.replace("\n", " ") + "\n"),
 ), max_size=8))  # fmt: skip
 def test_fuzz_mcp_from_servers(lines: list[str]) -> None:
-    """Whatever an upstream server sends, a request ends with a result or McpError."""
-    from cairnward.mcp.jsonrpc import Connection, McpError
+    """Whatever an upstream server sends, a request ends with a result or McpError (the
+    SDK parses it; Cairnward's adapter must not crash or hang)."""
+    from cairnward.mcp.jsonrpc import McpError
+    from cairnward.mcp.upstream import Connection
 
     async def go() -> None:
         reader = asyncio.StreamReader()
@@ -310,8 +298,8 @@ def test_fuzz_mcp_from_servers(lines: list[str]) -> None:
             reader.feed_data(line.encode())
         reader.feed_eof()
         with contextlib.suppress(McpError):
-            await asyncio.wait_for(conn.request("tools/list", {}, timeout=2), 5)
-        await conn.close()
+            await asyncio.wait_for(conn.list_tools(timeout=2), 5)
+        await asyncio.wait_for(conn.close(), 10)
 
     asyncio.run(go())
 

@@ -16,9 +16,10 @@ from typing import Any
 
 from cairnward.audit.log import AuditLog, canonical, digest
 from cairnward.config.loader import Config
-from cairnward.mcp.jsonrpc import Connection, McpError
+from cairnward.mcp.jsonrpc import McpError
 from cairnward.mcp.launch import Launcher, LaunchError, Started
 from cairnward.mcp.pins import PinStore, ToolState
+from cairnward.mcp.upstream import Connection
 from cairnward.policy.engine import Action, PolicyEngine
 from cairnward.policy.provenance import ProvenanceTracker
 from cairnward.redaction import check_outbound, value_texts
@@ -132,7 +133,13 @@ class McpHub:
         pinning = self.cfg.privacy(environment).value("mcp_pinning") == "on"
         views = []
         for tool in entry.tools:
-            state = self.pins.state(server, tool)
+            state = self.pins.state(server, tool, entry.conn.raw_tools.get(tool["name"]))
+            dropped = entry.conn.dropped_fields(tool)
+            if dropped and (server, environment, f"dropped:{tool['name']}") not in self._reported:
+                self._reported.add((server, environment, f"dropped:{tool['name']}"))
+                self._audit("mcp.nonstandard", actor="cairnward",
+                            target=f"{server}/{tool['name']}", environment=environment,
+                            details={"dropped_fields": dropped[:20]})  # fmt: skip
             rule = self.engine.rule_for(Action("tool.call", f"{server}/{tool['name']}",
                                                environment=environment))  # fmt: skip
             offered, why = True, ""

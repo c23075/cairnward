@@ -106,7 +106,15 @@ async def rpc(c: httpx.AsyncClient, method: str, params: dict[str, Any] | None =
 async def test_prompts_resources_and_lit_search(paths: Paths) -> None:
     c, hub, audit, tracker = await setup(paths)
     try:
-        init = await rpc(c, "initialize", {"protocolVersion": "2025-06-18"})
+        init = await rpc(
+            c,
+            "initialize",
+            {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1"},
+            },
+        )
         assert {"tools", "prompts", "resources"} <= set(init["result"]["capabilities"])
         prompts = (await rpc(c, "prompts/list"))["result"]["prompts"]
         assert [p["name"] for p in prompts] == ["apa-review"]  # "other" isn't enabled here

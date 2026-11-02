@@ -108,7 +108,8 @@ def test_serve_mcp_flow(tmp_path: Path, mode: str) -> None:
                              text=True, check=True).stdout.splitlines()[1]  # fmt: skip
         msgs = [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-             "params": {"protocolVersion": "2025-06-18"}},
+             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1"}}},
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call",

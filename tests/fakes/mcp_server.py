@@ -41,6 +41,7 @@ TOOLS = [
         "name": "fetch",
         "description": "GET a URL.",
         "inputSchema": {"type": "object", "properties": {"url": {"type": "string"}}},
+        "x-vendor-hint": "Not part of MCP: Cairnward drops it before clients see it.",
     },
 ]
 
