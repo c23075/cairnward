@@ -54,7 +54,7 @@ export function clear(el) { while (el.firstChild) el.removeChild(el.firstChild);
 
 export function table(columns, rows, { onRow, selected } = {}) {
   const head = h("thead", {}, h("tr", {}, columns.map(c =>
-    h("th", { scope: "col", class: c.num ? "num" : null }, c.label))));
+    h("th", { scope: "col", class: c.num ? "num" : null }, c.label || h("span", { class: "sr" }, c.srLabel || "")))));
   const body = h("tbody", {}, rows.map((r, i) => {
     const tr = h("tr", { class: selected === i ? "selected" : null },
       columns.map(c => h("td", { class: [c.num ? "num" : "", c.mono ? "mono" : ""].join(" ").trim() || null },

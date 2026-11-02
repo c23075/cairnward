@@ -27,7 +27,13 @@ from sqlalchemy import Connection, Engine, delete, func, insert, select, update
 from cairnward.config.paths import Paths
 from cairnward.store import crypto
 from cairnward.store.db import checkpoint, current_revision, head_revision, make_engine, upgrade
-from cairnward.store.schema import conversation_keys, conversations, folders, messages
+from cairnward.store.schema import (
+    conversation_keys,
+    conversations,
+    folders,
+    messages,
+    recovery_key,
+)
 
 TRASH_DAYS = 30
 
@@ -179,11 +185,13 @@ class Vault:
         if key_row.kind == "wrapped":
             raise VaultError("already locked")
         wrapped = crypto.wrap_key(bytes(key_row.key), secret)
+        recipient = self.recovery_recipient()
+        recovery = crypto.wrap_for_recipient(bytes(key_row.key), recipient) if recipient else None
         with self._keys.begin() as kconn:
             kconn.execute(
                 update(conversation_keys)
                 .where(conversation_keys.c.conversation_id == conversation_id)
-                .values(kind="wrapped", key=wrapped)
+                .values(kind="wrapped", key=wrapped, recovery=recovery)
             )
         checkpoint(self._keys)  # the plain key is overwritten in the file too
         self._unlocked.pop(conversation_id, None)
@@ -203,11 +211,100 @@ class Vault:
                 kconn.execute(
                     update(conversation_keys)
                     .where(conversation_keys.c.conversation_id == conversation_id)
-                    .values(kind="plain", key=key)
+                    .values(kind="plain", key=key, recovery=None)
                 )
             self._unlocked.pop(conversation_id, None)
             return
+        self._cover(conversation_id, key)
         self._unlocked[conversation_id] = (key, time.monotonic() + minutes * 60)
+
+    # ------------------------------------------------------------------ recovery key
+
+    def recovery_recipient(self) -> str | None:
+        with self._keys.connect() as conn:
+            row = conn.execute(select(recovery_key.c.recipient)).first()
+        return str(row.recipient) if row else None
+
+    def recovery_status(self) -> dict[str, Any]:
+        """Is a recovery key set up, and how many locked conversations does it cover?"""
+        with self._keys.connect() as conn:
+            row = conn.execute(select(recovery_key.c.created_at)).first()
+            locked = conn.execute(
+                select(conversation_keys.c.recovery).where(conversation_keys.c.kind == "wrapped")
+            ).all()
+        covered = sum(r.recovery is not None for r in locked)
+        return {"set_up": row is not None, "created_at": row.created_at if row else None,
+                "locked": len(locked), "covered": covered}  # fmt: skip
+
+    def create_recovery_key(self) -> str:
+        """Set up a recovery key and return its secret half (shown once, never stored).
+        Conversations locked from now on are covered; ones locked before are covered the
+        next time they're unlocked."""
+        if self.recovery_recipient() is not None:
+            raise VaultError("a recovery key is already set up (remove it first)")
+        secret, recipient = crypto.new_recovery_identity()
+        with self._keys.begin() as kconn:
+            kconn.execute(insert(recovery_key).values(recipient=recipient, created_at=_now()))
+        for conv_id, (key, expires) in list(self._unlocked.items()):
+            if expires > time.monotonic():
+                self._cover(conv_id, key)
+        return secret
+
+    def remove_recovery_key(self) -> int:
+        """Forget the recovery key and every copy wrapped to it; returns how many."""
+        with self._keys.begin() as kconn:
+            n = kconn.execute(
+                update(conversation_keys)
+                .where(conversation_keys.c.recovery.is_not(None))
+                .values(recovery=None)
+            ).rowcount
+            kconn.execute(delete(recovery_key))
+        checkpoint(self._keys)
+        return int(n or 0)
+
+    def _cover(self, conversation_id: str, key: bytes) -> None:
+        """Add the recovery wrap to a locked conversation that doesn't have one yet."""
+        recipient = self.recovery_recipient()
+        if recipient is None:
+            return
+        with self._keys.begin() as kconn:
+            kconn.execute(
+                update(conversation_keys)
+                .where(conversation_keys.c.conversation_id == conversation_id,
+                       conversation_keys.c.kind == "wrapped",
+                       conversation_keys.c.recovery.is_(None))
+                .values(recovery=crypto.wrap_for_recipient(key, recipient))
+            )  # fmt: skip
+
+    def recover(self, conversation_id: str, identity: str, new_secret: str) -> None:
+        """A forgotten passphrase: open the key with the recovery key and lock it again
+        with a new passphrase."""
+        if len(new_secret) < 8:
+            raise VaultError("use a passphrase of at least 8 characters")
+        with self._keys.connect() as conn:
+            row = conn.execute(
+                select(conversation_keys.c.kind, conversation_keys.c.recovery).where(
+                    conversation_keys.c.conversation_id == conversation_id
+                )
+            ).first()
+        if row is None or row.kind != "wrapped":
+            raise VaultError("not locked")
+        if row.recovery is None:
+            raise VaultError(
+                "this conversation was locked before the recovery key was set up and hasn't "
+                "been unlocked since: only its passphrase opens it"
+            )
+        try:
+            key = crypto.unwrap_with_identity(bytes(row.recovery), identity)
+        except crypto.DecryptionError as exc:
+            raise LockedError(str(exc)) from None
+        with self._keys.begin() as kconn:
+            kconn.execute(
+                update(conversation_keys)
+                .where(conversation_keys.c.conversation_id == conversation_id)
+                .values(key=crypto.wrap_key(key, new_secret))
+            )
+        checkpoint(self._keys)
 
     def readable(self, conversation_id: str) -> bool:
         """False for a locked conversation that isn't unlocked right now."""

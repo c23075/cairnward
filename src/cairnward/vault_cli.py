@@ -99,6 +99,8 @@ def _run(cfg: Config, vault: Vault, action: str, args: Any, out: TextIO) -> int:
         out.write(f"purged {total} conversation(s){lines}\n")
         return 0
 
+    if action == "recovery-key":
+        return _recovery_key(cfg, vault, args.what, out)
     if action == "relock":
         _server(cfg, "/v1/vault/relock", {"conversation_id": None})
         out.write("locked conversations are closed again in the running server\n")
@@ -112,8 +114,20 @@ def _run(cfg: Config, vault: Vault, action: str, args: Any, out: TextIO) -> int:
         vault.lock(conv_id, first)
         _server(cfg, "/v1/vault/relock", {"conversation_id": conv_id})
         _audit(cfg, "vault.lock", conv_id)
-        out.write(f"locked {conv_id[:10]}: it needs the passphrase to read, is never sent to "
-                  "hosted backends, and can't be recovered without the passphrase\n")  # fmt: skip
+        rescue = ("the recovery key can also open it" if vault.recovery_recipient()
+                  else "it can't be recovered without the passphrase")  # fmt: skip
+        out.write(f"locked {conv_id[:10]}: it needs the passphrase to read and is never sent "
+                  f"to hosted backends; {rescue}\n")  # fmt: skip
+        return 0
+    if action == "recover":
+        identity = ask_passphrase("Recovery key (AGE-SECRET-KEY-1...): ")
+        first = ask_passphrase("New passphrase for this conversation: ")
+        if ask_passphrase("Again: ") != first:
+            out.write("the passphrases differ: nothing changed\n")
+            return 1
+        vault.recover(conv_id, identity, first)
+        _audit(cfg, "vault.recover", conv_id)
+        out.write(f"{conv_id[:10]} has a new passphrase (still locked)\n")
         return 0
     if action == "unlock":
         secret = ask_passphrase("Passphrase: ")
@@ -174,6 +188,40 @@ def _run(cfg: Config, vault: Vault, action: str, args: Any, out: TextIO) -> int:
         out.write(f"renamed {conv_id[:10]}\n")
         return 0
     raise VaultError(f"unknown action {action}")
+
+
+def _recovery_key(cfg: Config, vault: Vault, what: str, out: TextIO) -> int:
+    st = vault.recovery_status()
+    if what == "status":
+        if not st["set_up"]:
+            out.write("no recovery key: a forgotten passphrase can't be recovered "
+                      "(cairnward vault recovery-key create)\n")  # fmt: skip
+        else:
+            out.write(f"recovery key set up {st['created_at'][:16]}; it opens {st['covered']} "
+                      f"of {st['locked']} locked conversation(s)\n")  # fmt: skip
+            if st["covered"] < st["locked"]:
+                out.write("the others were locked before it existed: unlocking each once "
+                          "adds them\n")  # fmt: skip
+        return 0
+    if what == "create":
+        secret = vault.create_recovery_key()
+        with AuditLog.open(cfg.paths) as log:
+            log.append("vault.recovery_key", actor="user", details={"created": True})
+        out.write(
+            "Recovery key (shown only now; Cairnward keeps only its public half):\n\n"
+            f"    {secret}\n\n"
+            "Store it away from this computer (a password manager, or printed). Anyone who "
+            "has it and this computer's data folder can open every locked conversation it "
+            "covers. It covers conversations locked from now on; ones locked before are "
+            "added the next time you unlock them.\n"
+        )
+        return 0
+    n = vault.remove_recovery_key()
+    with AuditLog.open(cfg.paths) as log:
+        log.append("vault.recovery_key", actor="user", details={"removed": True, "copies": n})
+    out.write(f"recovery key removed ({n} conversation copies destroyed); only passphrases "
+              "open locked conversations now\n")  # fmt: skip
+    return 0
 
 
 def _server(cfg: Config, path: str, body: dict[str, Any]) -> tuple[int, str]:

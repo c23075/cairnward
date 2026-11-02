@@ -91,6 +91,17 @@ conversation_keys = Table(
     Column("kind", String(8), nullable=False),  # "plain" now; "wrapped" when locked (M2)
     Column("key", LargeBinary, nullable=False),
     Column("created_at", String(32), nullable=False),
+    # when locked and a recovery key is set up: the key, also encrypted to its recipient
+    Column("recovery", LargeBinary),
+)
+
+# The optional recovery key's public half (FR-ENC-1); the secret half is shown once.
+recovery_key = Table(
+    "recovery_key",
+    KEYS_METADATA,
+    Column("id", Integer, primary_key=True),
+    Column("recipient", Text, nullable=False),
+    Column("created_at", String(32), nullable=False),
 )
 
 audit_records = Table(

@@ -199,7 +199,7 @@ export async function vault(main, params) {
     clear(listBox);
     if (!rows.length) { put(listBox, h("p", {}, trash ? "The trash is empty." : "No conversations.")); return; }
     put(listBox, table([
-      { label: "", render: r => [r.pinned ? h("span", { title: "pinned", "aria-label": "pinned" }, "📌") : null,
+      { label: "", srLabel: "Status", render: r => [r.pinned ? h("span", { title: "pinned", "aria-label": "pinned" }, "📌") : null,
                                  r.locked ? h("span", { title: "locked", "aria-label": "locked" }, "🔒") : null] },
       { label: "Title", render: r => r.locked && !r.title ? "(locked)" : (r.title || "(untitled)") },
       { label: "Environment", key: "environment" },
@@ -315,7 +315,7 @@ export async function jobs(main, params) {
       ["queued", "running"].includes(j.status) ? h("button", { type: "button", class: "danger", onclick: async () => {
         await api(`/api/jobs/${j.id}/cancel`, { method: "POST" }); location.reload(); } }, "Cancel") : null,
       table([
-        { label: "Step", key: "name" }, { label: "", render: r => r.label || "" },
+        { label: "Step", key: "name" }, { label: "", srLabel: "Details", render: r => r.label || "" },
         { label: "Status", render: r => h("span", { class: r.status === "failed" ? "bad" : r.status === "done" ? "ok" : null }, r.status) },
         { label: "Time", num: true, render: r => r.seconds ? `${Math.round(r.seconds)} s` : "" },
         { label: "Error", render: r => r.error || "" },
@@ -381,27 +381,94 @@ export async function settingsView(main) {
   const s = await api("/api/settings");
   const prefs = settings();
   const keysBox = h("input", { type: "checkbox", checked: !prefs.noKeys, onchange: ev => { prefs.noKeys = !ev.target.checked; saveSettings(prefs); toast("Saved."); } });
-  const privacyTable = p => table([
+  const reload = () => settingsView(clear(main));
+
+  // one setting: a select that writes the file (weakening asks first)
+  const change = async (scope, setting, value, select, previous) => {
+    const send = confirm => api("/api/settings/privacy", { method: "POST", body: { scope, setting, value: value || null, confirm } });
+    try {
+      let r;
+      try { r = await send(false); } catch (e) {
+        if (e.status !== 409) throw e;
+        const ok = await ask("Weaken a protection?", { warn: e.message.replace(/^needs confirmation: /, ""),
+          text: "This is recorded in the audit log and takes effect when Cairnward restarts.", confirm: "Save anyway", danger: true });
+        if (!ok) { select.value = previous; return; }
+        r = await send(true);
+      }
+      toast(r.changes.length ? "Saved. Restart Cairnward (cairnward serve) to apply it." : "Saved (no effective change).");
+      reload();
+    } catch (e) { select.value = previous; toast(`Not saved: ${e.message}`); }
+  };
+  const picker = (scope, setting, current, inherits, explicit = true) => {
+    const opts = s.options[setting] || [];
+    const sel = h("select", { "aria-label": `${setting} (${scope === "global" ? "all environments" : scope})` },
+      inherits ? h("option", { value: "" }, scope === "global" ? "from the preset" : "as globally / preset") : null,
+      opts.map(o => h("option", { value: o, selected: o === current }, o)));
+    if (inherits && (!explicit || !opts.includes(current))) sel.value = "";
+    const previous = sel.value;
+    sel.addEventListener("change", () => change(scope, setting, sel.value, sel, previous));
+    return sel;
+  };
+  const privacyTable = (scope, p) => table([
     { label: "Setting", render: r => r[0] },
     { label: "Value", render: r => h("span", { class: r[1].weaker_than_strict ? "bad" : null }, r[1].value) },
     { label: "From", render: r => r[1].source },
+    { label: "Change", render: r => picker(scope, r[0], r[1].value, true,
+      r[1].source === (scope === "global" ? "global setting" : `environment '${scope}'`)) },
   ], Object.entries(p.settings));
+  const presetOf = p => (p.label || "").split(" ")[0].toLowerCase();
+  const saved = s.saved_since_start.length ? h("div", { class: "warnbox", role: "status" },
+    h("strong", {}, "Saved, not yet in effect: "), "restart Cairnward to apply ",
+    s.saved_since_start.map(c => `${c.setting} ${c.before} → ${c.after} (${c.scope})`).join("; "), ".") : null;
+  const rk = s.recovery_key;
   put(main, h("h1", {}, "Settings"),
-    h("p", { class: "muted" }, "Read-only here: edit the files in your configuration folder and restart Cairnward. Weaker-than-Strict values are highlighted."),
+    h("p", { class: "muted" }, "Privacy settings can be changed here: each change is written to the configuration file, recorded in the audit log, and takes effect when Cairnward restarts. Anything weaker than Strict asks first and stays highlighted. Other settings: edit the files in your configuration folder."),
+    saved,
     h("h2", {}, "This browser"), h("label", {}, keysBox, " Single-key shortcuts in the vault"),
     h("h2", {}, `Privacy: ${s.global.label}`),
-    s.global.warnings.map(w => h("div", { class: "warnbox" }, w)), privacyTable(s.global),
+    h("label", {}, "Preset for all environments ", picker("global", "preset", presetOf(s.global), false)),
+    s.global.warnings.map(w => h("div", { class: "warnbox" }, w)), privacyTable("global", s.global),
     h("h2", {}, "Environments"),
     Object.entries(s.environments).map(([name, e]) => h("details", {}, h("summary", {}, `${name}: ${e.privacy.label}`),
       e.description ? h("p", {}, e.description) : null,
       h("p", { class: "muted" }, `Workspace: ${e.workspace.join(", ") || "-"} · MCP servers: ${e.mcp_servers.join(", ") || "-"} · retention: ${e.retention_days ? e.retention_days + " days" : "forever"}`),
-      e.privacy.warnings.map(w => h("div", { class: "warnbox" }, w)), privacyTable(e.privacy))),
+      e.privacy.warnings.map(w => h("div", { class: "warnbox" }, w)), privacyTable(name, e.privacy))),
+    h("h2", {}, "Vault recovery key"),
+    h("p", {}, !rk ? "Not available in this process." : rk.set_up
+      ? `Set up ${rk.created_at.slice(0, 10)}: it can open ${rk.covered} of ${rk.locked} locked conversation(s)${rk.covered < rk.locked ? " (the others were locked before it existed; unlocking each once adds them)" : ""}.`
+      : "None: a forgotten passphrase can't be recovered. Create one in a terminal with `cairnward vault recovery-key create` (it's shown once, there)."),
     h("h2", {}, "Backends"),
     table([{ label: "Name", render: r => r[0] }, { label: "Driver", render: r => r[1].driver }, { label: "Location", render: r => r[1].location }, { label: "Host", render: r => r[1].host, mono: true }], Object.entries(s.backends)),
     h("h2", {}, "Roles"), table([{ label: "Role", render: r => r[0] }, { label: "Model", render: r => r[1] }], Object.entries(s.roles)),
     h("h2", {}, "Clients"),
     Object.keys(s.clients).length ? table([{ label: "Name", render: r => r[0] }, { label: "Kind", render: r => r[1].kind }, { label: "Default environment", render: r => r[1].default_environment || "-" }], Object.entries(s.clients)) : h("p", {}, "None in clients.toml (keys made with `cairnward client add` work without an entry)."),
     h("h2", {}, "Audit anchoring"), h("p", {}, s.anchor_repo || "not set up"));
+}
+
+// ------------------------------------------------------------------ backups
+
+export async function backups(main) {
+  const b = await api("/api/backup");
+  const dl = (...pairs) => h("dl", {}, pairs.filter(p => p[1] !== null && p[1] !== undefined)
+    .flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]));
+  const last = b.last;
+  put(main, h("h1", {}, "Backups"),
+    h("p", { class: "muted" }, "restic backups of the vault, research library, artifacts and settings, always encrypted. Run or restore them in a terminal: `cairnward backup run`, `cairnward backup restore --at DATE`."),
+    b.mode === "none" || !b.repository
+      ? h("div", { class: "warnbox", role: "status" }, "Backups are off. Set [backup] mode and repository in cairnward.toml, then `cairnward backup init`.")
+      : null,
+    b.cloud_warning ? h("div", { class: "warnbox" }, b.cloud_warning) : null,
+    dl(["Mode", b.mode === "auto" ? `automatic, every ${b.interval_hours} h while Cairnward runs` : b.mode === "on_demand" ? "on demand" : "off"],
+      ["Where", b.where || "not set"],
+      ["Network", b.remote ? `remote (${b.remote}): through egress in the ${b.environment} environment` : (b.repository ? "a folder (no network)" : null)],
+      ["Keeps", `${b.keep.daily} daily, ${b.keep.weekly} weekly, ${b.keep.monthly} monthly`],
+      ["Includes", ["conversations", "audit log", ...b.includes].join(", ")],
+      ["Last backup", last ? `${when(last.time)}${last.snapshot ? ` (snapshot ${last.snapshot})` : ""}` : "never"]),
+    h("h2", {}, "Purged conversations still in older backups"),
+    b.pending.length
+      ? table([{ label: "Conversation", key: "conversation", mono: true }, { label: "Purged", render: r => when(r.since) },
+               { label: "Tries", key: "tries", num: true }, { label: "Last error", render: r => r.error || "-" }], b.pending)
+      : h("p", {}, "None: every purge has been removed from every backup."));
 }
 
 // ------------------------------------------------------------------ artifacts
@@ -437,7 +504,7 @@ export async function artifacts(main, params) {
     put(view, h("h2", {}, "Versions"), table([
       { label: "Version", render: r => h("a", { href: "#", onclick: ev => { ev.preventDefault(); open(path, r.rev); } }, r.rev.slice(0, 10)) },
       { label: "When", render: r => when(r.date) }, { label: "What", key: "message" },
-      { label: "", render: r => r.rev === history[0]?.rev ? "current" : h("button", { type: "button", onclick: async () => {
+      { label: "", srLabel: "Restore", render: r => r.rev === history[0]?.rev ? "current" : h("button", { type: "button", onclick: async () => {
         await api(`${base}/restore`, { method: "POST", body: { path, rev: r.rev } }); toast("Restored as a new version."); open(path);
       } }, "Restore") },
     ], history));

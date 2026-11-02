@@ -84,7 +84,7 @@ uv run cairnward vault list
 ```bash
 uv run cairnward vault search "parser"
 ```
-`vault show | export | delete | restore | purge` take an id or its first characters. Deleting here doesn't touch the client's own history. Lock a conversation with `vault lock <id>` (passphrase; a locked conversation never goes to hosted models) and open it for a while with `vault unlock <id>`.
+`vault show | export | delete | restore | purge` take an id or its first characters. Deleting here doesn't touch the client's own history. Lock a conversation with `vault lock <id>` (passphrase; a locked conversation never goes to hosted models) and open it for a while with `vault unlock <id>`. A forgotten passphrase can't be recovered unless you set up a recovery key first (`vault recovery-key create`; keep what it shows off this computer); then `vault recover <id>` sets a new passphrase.
 ```bash
 uv run cairnward store info
 ```

@@ -33,6 +33,27 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def new_recovery_identity() -> tuple[str, str]:
+    """A recovery key: (secret identity, shown once; public recipient, stored)."""
+    identity = x25519.Identity.generate()
+    return str(identity), str(identity.to_public())
+
+
+def wrap_for_recipient(key: bytes, recipient: str) -> bytes:
+    return bytes(encrypt(key, [x25519.Recipient.from_str(recipient)]))
+
+
+def unwrap_with_identity(wrapped: bytes, identity: str) -> bytes:
+    try:
+        ident = x25519.Identity.from_str(identity.strip())
+    except Exception as exc:
+        raise DecryptionError("that isn't a recovery key (AGE-SECRET-KEY-1...)") from exc
+    try:
+        return bytes(decrypt(wrapped, [ident]))
+    except Exception as exc:
+        raise DecryptionError("this recovery key doesn't open that conversation") from exc
+
+
 def wrap_key(key: bytes, secret: str) -> bytes:
     """Encrypt a conversation key with a passphrase (age scrypt recipient)."""
     return bytes(passphrase.encrypt(key, secret))

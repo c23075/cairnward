@@ -3,7 +3,7 @@ import * as views from "/static/views.js";
 
 const routes = {
   approvals: views.approvals, activity: views.activity, audit: views.audit, egress: views.egress,
-  vault: views.vault, jobs: views.jobs, artifacts: views.artifacts, mcp: views.mcp, settings: views.settingsView,
+  vault: views.vault, jobs: views.jobs, artifacts: views.artifacts, backups: views.backups, mcp: views.mcp, settings: views.settingsView,
 };
 let cleanup = null;
 let lastPending = 0;

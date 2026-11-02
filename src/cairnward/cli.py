@@ -193,6 +193,11 @@ def build_parser() -> argparse.ArgumentParser:
     v_unlock.add_argument("--minutes", type=float, default=30, help="how long (default 30)")
     v_unlock.add_argument("--permanently", action="store_true", help="remove the lock")
     vlt_sub.add_parser("relock", help="close every unlocked conversation in the server now")
+    v_rk = vlt_sub.add_parser("recovery-key", help="optional key that can reopen locked "
+                              "conversations if a passphrase is forgotten")  # fmt: skip
+    v_rk.add_argument("what", choices=["status", "create", "remove"], nargs="?", default="status")
+    v_rec = vlt_sub.add_parser("recover", help="set a new passphrase with the recovery key")
+    v_rec.add_argument("id")
 
     rs = sub.add_parser("research", help="research jobs (run in the background by the server)")
     rs_sub = rs.add_subparsers(dest="research_command", metavar="ACTION", required=True)

@@ -3,6 +3,8 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
+const { readFileSync } = await import("node:fs");
+const axeSource = readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
 
 const url = process.argv[2];
 const out = { errors: [] };
@@ -69,8 +71,35 @@ out.previewSandbox = await page.getAttribute("iframe.preview", "sandbox");
 out.pwned2 = await page.evaluate(() => window.pwned2 === 1);
 out.previewText = await page.frameLocator("iframe.preview").locator("h1").textContent();
 
-for (const view of ["activity", "audit", "egress", "jobs", "artifacts", "mcp", "settings"]) {
+for (const view of ["activity", "audit", "egress", "jobs", "artifacts", "backups", "mcp", "settings"]) {
   out[`h1_${view}`] = await go(view);
+}
+
+// change settings in the page: a stricter value saves at once; a weaker one asks first
+await go("settings");
+await page.selectOption("select[aria-label='network (all environments)']", "off");
+await page.waitForSelector("text=Saved, not yet in effect");
+await page.selectOption("select[aria-label='approvals (all environments)']", "off");
+await page.waitForSelector("dialog[open] >> text=Weaken a protection?");
+out.weakenWarning = await page.textContent("dialog[open] .warnbox");
+await page.click("dialog[open] button.danger");
+await page.waitForFunction(() => document.querySelector("main .warnbox")?.textContent.includes("approvals"));
+out.savedBanner = await page.textContent("main .warnbox");
+
+// axe-core on every view, light and dark (evaluate runs outside the page's CSP)
+out.axe = {};
+for (const scheme of ["light", "dark"]) {
+  await page.emulateMedia({ colorScheme: scheme });
+  for (const view of ["approvals", "activity", "audit", "egress", "vault", "jobs", "artifacts", "backups", "mcp", "settings"]) {
+    await go(view);
+    await page.evaluate(() => { for (const d of document.querySelectorAll("main details")) d.open = true; });
+    if (!(await page.evaluate(() => typeof window.axe === "object"))) await page.evaluate(axeSource);
+    const found = await page.evaluate(async () => {
+      const r = await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"] } });
+      return r.violations.map(v => `${v.id} (${v.impact}): ${v.nodes.slice(0, 3).map(n => n.target.join(" ")).join(" | ")}`);
+    });
+    if (found.length) out.axe[`${scheme}:${view}`] = found;
+  }
 }
 // accessibility basics on the settings page and the vault page
 for (const view of ["vault", "audit", "settings"]) {

@@ -93,7 +93,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-VLT-2 | Reconstruct conversations from stateless requests by prefix hashing; branches for divergence | M | M1 | Hypothesis property test |
 | FR-VLT-3 | Vault browser: search, folders, pin, export, delete with confirm/undo; shortcuts (`d`, `f`, `/`, `j/k`, `L`, `x`, `l`, `?`); single-key shortcuts can be turned off | M | M2 | Playwright e2e |
 | FR-VLT-4 | Per-environment retention and `vault = "off"` (digests only) | M | M2 | unit |
-| FR-ENC-1 | Lock conversation / artifacts with passphrase (age, key wrapping, recovery key optional) | M | M2 | `test_lock.py` |
+| FR-ENC-1 | Lock conversation / artifacts with passphrase (age, key wrapping, recovery key optional) | M | M2 | `test_lock.py`, `test_recovery_key.py` |
 | FR-ENC-2 | Passphrase never in model context, tool args, logs or audit | M | M2 | `tests/security/test_passphrase_leak.py` |
 | FR-ENC-5 | Crypto-shredding on purge | M | M1 | `test_crypto_shred.py` |
 

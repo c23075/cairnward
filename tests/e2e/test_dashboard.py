@@ -1,7 +1,7 @@
 """The dashboard in a real browser (Chromium via Node Playwright), against `serve`.
 
-Skipped unless node can load playwright (CAIRNWARD_E2E_NODE_PATH may point NODE_PATH
-at an install)."""
+Skipped unless node can load playwright and axe-core (`npm ci` in tests/e2e, or NODE_PATH
+pointing at an install)."""
 
 import json
 import os
@@ -26,13 +26,14 @@ def node_playwright() -> bool:
     node = shutil.which("node")
     if node is None:
         return False
-    res = subprocess.run([node, "-e", "require('playwright')"], capture_output=True, check=False,
+    res = subprocess.run([node, "-e", "require('playwright'); require('axe-core')"],
+                         capture_output=True, check=False,
                          cwd=HERE)  # fmt: skip
     return res.returncode == 0
 
 
 pytestmark = pytest.mark.skipif(
-    sys.platform == "win32" or not node_playwright(), reason="needs node + playwright"
+    sys.platform == "win32" or not node_playwright(), reason="needs node + playwright + axe-core"
 )
 
 
@@ -170,7 +171,7 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
         srv.shutdown()
     # no script errors and no CSP violations (the browser logs the expected 423 Locked)
     # the sandboxed preview doing its job: its script and its beacon image are blocked
-    expected = ("status of 423", "Blocked script execution", "beacon.png")
+    expected = ("status of 423", "status of 409", "Blocked script execution", "beacon.png")
     assert [e for e in out["errors"] if not any(x in e for x in expected)] == []
     assert out["previewSandbox"] == "" and out["pwned2"] is False
     assert out["previewText"] == "Report"
@@ -184,3 +185,8 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
     assert out["h1_settings"] == "Settings" and out["h1_egress"] == "Egress report"
     assert out["h1_jobs"] == "Research jobs"
     assert out["a11y_settings"] == [] and out["a11y_vault"] == [] and out["a11y_audit"] == []
+    assert out["h1_backups"] == "Backups"
+    assert "approvals = off" in out["weakenWarning"] and "approvals" in out["savedBanner"]
+    toml = (paths.config_dir / "cairnward.toml").read_text()
+    assert 'network = "off"' in toml and 'approvals = "off"' in toml
+    assert out["axe"] == {}, json.dumps(out["axe"], indent=1)

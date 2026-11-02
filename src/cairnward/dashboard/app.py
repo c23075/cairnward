@@ -121,9 +121,24 @@ class MoveIn(BaseModel):
     folder_id: str | None = None
 
 
+class PrivacyChangeIn(BaseModel):
+    scope: str = Field(min_length=1, max_length=64)
+    setting: str = Field(min_length=1, max_length=40)
+    value: str | None = Field(default=None, max_length=40)  # None: back to the preset
+    confirm: bool = False
+
+
 class ApproveToolsIn(BaseModel):
     environment: str | None = None
     tools: dict[str, str]
+
+
+def _remote_host(repo: str) -> str:
+    """Only the host (or rclone remote name) of a restic repository: no bucket or path."""
+    rest = repo.split(":", 1)[1]
+    if "://" in rest:
+        return urlsplit(rest).hostname or "?"
+    return rest.split("/", 1)[0].split(":", 1)[0] or "?"
 
 
 def _record(r: Any) -> dict[str, Any]:
@@ -229,10 +244,16 @@ def dashboard_app(
             "pending": len(inbox.pending()) if inbox else 0,
         }  # fmt: skip
 
+    saved: list[dict[str, str]] = []  # changes written since this server started
+
     @app.get("/api/settings")
     def settings() -> dict[str, Any]:
+        from cairnward.config.edit import options
+
         b = cfg.backends
+        recovery = vault.recovery_status() if vault is not None else None
         return {
+            "options": options(), "saved_since_start": saved, "recovery_key": recovery,
             "global": cfg.privacy().as_dict(),
             "environments": {
                 name: {"privacy": cfg.privacy(name).as_dict(), "description": e.description,
@@ -248,6 +269,28 @@ def dashboard_app(
                         for n, c in cfg.clients.clients.items()},
             "anchor_repo": cfg.main.anchor.repo,
         }  # fmt: skip
+
+    @app.post("/api/settings/privacy")
+    def change_privacy(body: PrivacyChangeIn) -> dict[str, Any]:
+        """Write one privacy setting to its file (takes effect on restart). Weakening
+        needs `confirm`; every change goes to the audit log as settings.changed."""
+        from cairnward.audit import record_settings
+        from cairnward.config.edit import EditError
+        from cairnward.config.edit import change_privacy as apply
+        from cairnward.config.loader import load_config
+
+        current = load_config(cfg.paths)  # the files as they are now, not as started
+        try:
+            new, changes = apply(current, body.scope, body.setting, body.value,
+                                 confirm=body.confirm)  # fmt: skip
+        except EditError as exc:
+            code = 409 if str(exc).startswith("needs confirmation") else 400
+            raise HTTPException(code, str(exc)) from None
+        if audit is not None:
+            record_settings(new, audit, actor="user (dashboard)")
+        out = [dataclasses.asdict(c) for c in changes]
+        saved.extend(out)
+        return {"changes": out, "restart_needed": bool(out)}
 
     # ------------------------------------------------------------------ approvals
 
@@ -383,11 +426,41 @@ def dashboard_app(
         from cairnward import backup
 
         b = cfg.main.backup
+        kind = backup.remote_kind(cfg) if b.repository else None
+        repo = b.repository or ""
+        shown = repo if kind is None else f"{kind}:{_remote_host(repo)}"
+        pending = backup.pending(cfg)
         return {
             "mode": b.mode,
             "repository": bool(b.repository),
-            "pending_purges": len(backup.pending(cfg)),
+            "where": shown,  # a remote's host only, no bucket paths or keys
+            "remote": kind,
+            "environment": b.environment or cfg.main.defaults.environment if kind else None,
+            "interval_hours": b.interval_hours,
+            "keep": {"daily": b.keep_daily, "weekly": b.keep_weekly, "monthly": b.keep_monthly},
+            "includes": [
+                n
+                for n, on in (
+                    ("research library", b.include_research),
+                    ("artifacts", b.include_artifacts),
+                    ("configuration", b.include_config),
+                )
+                if on
+            ],
+            "pending_purges": len(pending),
+            "pending": [
+                {
+                    "conversation": str(p.get("id", ""))[:10],
+                    "since": p.get("requested"),
+                    "tries": p.get("attempts", 0),
+                    "error": p.get("last_error"),
+                }
+                for p in pending[:50]
+            ],
             "last": backup.last_run(cfg),
+            "cloud_warning": backup.cloud_warning(Path(repo).expanduser())
+            if repo and kind is None
+            else None,
         }
 
     @app.get("/api/vault/folders")
