@@ -171,6 +171,11 @@ uv run cairnward library set thesis --parser docling --metadata grobid
 uv run cairnward library index thesis --rebuild
 ```
 
+Mirror a Google Drive folder (read-only; set up an rclone remote first with `rclone config`, ideally with `scope = drive.readonly`; the library's environment must allow network access):
+```bash
+uv run cairnward library drive thesis --remote gdrive:Papers/Thesis --preview
+```
+
 Bring papers in from Zotero (Zotero 7 running, with Settings → Advanced → "Allow other applications on this computer to communicate with Zotero" on; read-only):
 ```bash
 uv run cairnward library zotero thesis --collection "Thesis"

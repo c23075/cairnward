@@ -351,6 +351,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["pdf", "grobid"],
         help="metadata and reference lists (grobid: your GROBID service)",
     )
+    ldr = lib_sub.add_parser("drive", help="mirror PDFs from Google Drive (or any rclone remote), "
+                             "read-only, then index")  # fmt: skip
+    ldr.add_argument("name")
+    ldr.add_argument("--remote", required=True, help="rclone remote and folder, e.g. gdrive:Papers")
+    ldr.add_argument("--preview", action="store_true", help="only show what would be copied")
+    ldr.add_argument(
+        "--prune",
+        action="store_true",
+        help="delete local copies of PDFs no longer on the remote (drive/ only)",
+    )
+    ldr.add_argument("--no-index", action="store_true")
+    ldr.add_argument("--yes", action="store_true", help="answer the network question with yes")
     lz = lib_sub.add_parser("zotero", help="copy PDFs and metadata from Zotero (read-only, "
                             "local API), then index")  # fmt: skip
     lz.add_argument("name", help="the library to fill")
@@ -1590,6 +1602,64 @@ def _library_ask(cfg: Config, research: Any, args: argparse.Namespace) -> int:
     return 0
 
 
+def _library_drive(cfg: Config, research: Any, args: argparse.Namespace) -> int:
+    from cairnward.audit import AuditLog, enabled_for
+    from cairnward.policy import PolicyEngine
+    from cairnward.policy.engine import Action
+    from cairnward.research import drive
+
+    lib = research.get(args.name)
+    with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit:
+        engine = PolicyEngine(cfg, audit=audit)
+        action = Action(
+            "net.connect",
+            drive.HOST,
+            environment=lib.environment,
+            actor="user",
+            details={"via": "rclone", "remote": args.remote.split(":", 1)[0]},
+        )
+        rule = engine.rule_for(action)
+        if rule.base == "deny":
+            _log(f"not allowed in environment '{lib.environment}': {rule.reason}")
+            return 1
+        if rule.base == "ask" and not args.yes:
+            answer = input(f"Connect to Google Drive ({drive.HOST}) for '{args.name}'? [y/N] ")
+            if answer.strip().lower() not in ("y", "yes"):
+                return 1
+        try:
+            for warning in drive.check_remote(args.remote):
+                print(f"note: {warning}")
+            local = lib.folder / "drive"
+            if args.preview:
+                todo = drive.plan(drive.listing(args.remote), local)
+            else:
+                todo = drive.mirror(args.remote, local, prune=args.prune)
+        except drive.DriveError as exc:
+            audit.append(
+                "drive.mirror",
+                actor="user",
+                environment=lib.environment,
+                target=args.name,
+                outcome="error",
+                details={"error": str(exc)[:300]},
+            )
+            _log(str(exc))
+            return 1
+        counts = {k: len(v) for k, v in todo.items()}
+        audit.append("drive.mirror", actor="user", environment=lib.environment, target=args.name,
+                     details={**counts, "preview": args.preview, "prune": args.prune})  # fmt: skip
+    verb = "would copy" if args.preview else "copied"
+    print(f"Drive: {verb} {counts['new']} new and {counts['changed']} changed PDF(s); "
+          f"{counts['unchanged']} unchanged; {counts['gone']} no longer on the remote"
+          + (" (deleted here)" if args.prune and not args.preview else ""))  # fmt: skip
+    for rel in (todo["new"] + todo["changed"])[:20]:
+        print(f"  {rel}")
+    if args.preview or args.no_index or not (counts["new"] or counts["changed"]):
+        return 0
+    research.close()
+    return main(["--config-dir", str(cfg.paths.config_dir), "library", "index", args.name])
+
+
 def _library_zotero(cfg: Config, research: Any, args: argparse.Namespace) -> int:
     from cairnward.audit import AuditLog, enabled_for
     from cairnward.research.zotero import Zotero, ZoteroError, import_items
@@ -1668,6 +1738,8 @@ def _cmd_library(args: argparse.Namespace) -> int:
                 return _library_ask(cfg, research, args)
             if cmd == "zotero":
                 return _library_zotero(cfg, research, args)
+            if cmd == "drive":
+                return _library_drive(cfg, research, args)
             if cmd == "set":
                 from cairnward.research.parsing import set_options
 
