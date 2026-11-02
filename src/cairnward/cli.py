@@ -1621,6 +1621,20 @@ def _cmd_runs(args: argparse.Namespace) -> int:
             return 1
 
 
+def _run_closing(backends: Any, coro: Any) -> Any:
+    """Run `coro`, then close the backends' HTTP clients in the same event loop (closing
+    them from a second asyncio.run fails once a real connection was opened)."""
+    import asyncio
+
+    async def go() -> Any:
+        try:
+            return await coro
+        finally:
+            await backends.aclose()
+
+    return asyncio.run(go())
+
+
 def _embedder(cfg: Config, environment: str) -> tuple[Any, Any, Any]:
     """(embedder, audit log, backends) for CLI research commands."""
     from cairnward.audit import AuditLog, enabled_for
@@ -1638,7 +1652,6 @@ def _embedder(cfg: Config, environment: str) -> tuple[Any, Any, Any]:
 def _library_ask(cfg: Config, research: Any, args: argparse.Namespace) -> int:
     """Through the running server when there is one (its queue keeps research from
     competing with chats for the CPU); otherwise in this process."""
-    import asyncio
 
     import httpx
 
@@ -1677,11 +1690,11 @@ def _library_ask(cfg: Config, research: Any, args: argparse.Namespace) -> int:
     except (RunError, httpx.ConnectError):
         embedder, audit, backends = _embedder(cfg, research.get(args.name).environment)
         try:
-            answer = asyncio.run(run_ask(cfg, embedder.engine, backends, args.name, args.question,
-                                         k=args.k, effort=args.effort, actor="user"))  # fmt: skip
+            answer = _run_closing(backends, run_ask(cfg, embedder.engine, backends, args.name,
+                                                    args.question, k=args.k, effort=args.effort,
+                                                    actor="user"))  # fmt: skip
         finally:
             audit.close()
-            asyncio.run(backends.aclose())
         data = answer.as_dict()
     if args.json:
         print(json.dumps(data, indent=2))
@@ -1790,7 +1803,6 @@ def _library_zotero(cfg: Config, research: Any, args: argparse.Namespace) -> int
 
 
 def _cmd_library(args: argparse.Namespace) -> int:
-    import asyncio
 
     from cairnward.research import EmbeddingDenied, LibraryError, Research
 
@@ -1892,7 +1904,8 @@ def _cmd_library(args: argparse.Namespace) -> int:
                     parse_many, enrich = hooks(
                         cfg, args.name, lib.environment, proxy=backends.web_proxy(lib.environment)
                     )
-                    report = asyncio.run(
+                    report = _run_closing(
+                        backends,
                         research.index(
                             args.name,
                             embedder,
@@ -1901,7 +1914,7 @@ def _cmd_library(args: argparse.Namespace) -> int:
                             progress=print,
                             parse_many=parse_many,
                             enrich=enrich,
-                        )
+                        ),
                     )
                     audit.append(
                         "library.index",
@@ -1929,10 +1942,11 @@ def _cmd_library(args: argparse.Namespace) -> int:
                         f"{report.chunks} chunks in {report.seconds:.0f}s."
                     )
                     return 1 if report.failed else 0
-                hits = asyncio.run(research.search(args.name, args.query, embedder, k=args.k))
+                hits = _run_closing(
+                    backends, research.search(args.name, args.query, embedder, k=args.k)
+                )
             finally:
                 audit.close()
-                asyncio.run(backends.aclose())
             if args.json:
                 from dataclasses import asdict
 

@@ -88,6 +88,17 @@ class EvalError(Exception):
     pass
 
 
+def brief(output: str, limit: int = 600) -> str:
+    """What went wrong, from a command's output: Cairnward's own error lines and a
+    traceback's final line, else the end of the output."""
+    lines = [x.rstrip() for x in output.strip().splitlines() if x.strip()]
+    keep = [x for x in lines if x.startswith("cairnward:")]
+    if lines and not lines[-1].startswith(" ") and "Error" in lines[-1].split(":")[0]:
+        keep.append(lines[-1])  # e.g. "RuntimeError: ..."
+    tail = "\n".join(lines[-3:])
+    return ("\n".join(keep) if keep else tail)[-limit:]
+
+
 def run(env: str = "litreview-offline", engines: list[str] | None = None, *, keep: bool = False,
         emit: Any = print) -> dict[str, Any]:  # fmt: skip
     """Build the library, ask every question with each engine, score; returns
@@ -106,7 +117,7 @@ def run(env: str = "litreview-offline", engines: list[str] | None = None, *, kee
                 r = cw(*step)
                 if r.returncode != 0:
                     raise EvalError(f"`cairnward {' '.join(step[:2])}` failed: "
-                                    f"{(r.stdout + r.stderr).strip()[-500:]}")  # fmt: skip
+                                    f"{brief(r.stdout + r.stderr)}")  # fmt: skip
             for engine in engines:
                 mine = []
                 for q in spec["questions"]:
@@ -114,7 +125,7 @@ def run(env: str = "litreview-offline", engines: list[str] | None = None, *, kee
                     r = cw("library", "ask", name, q["question"], "--json", "--engine", engine)
                     took = round(time.monotonic() - t0, 1)
                     if r.returncode != 0:
-                        raise EvalError(f"ask failed ({engine}): {(r.stdout + r.stderr)[-500:]}")
+                        raise EvalError(f"ask failed ({engine}): {brief(r.stdout + r.stderr)}")
                     answer = json.loads(r.stdout)
                     answer["seconds"] = answer.get("seconds") or took  # wall clock if not given
                     res = score(q, answer) | {"engine": engine}
