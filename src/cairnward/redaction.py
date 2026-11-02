@@ -16,6 +16,7 @@ Content is never altered (FR-GW-7): it's sent as it is, or not at all.
 
 from __future__ import annotations
 
+import bisect
 import re
 from collections import Counter
 from collections.abc import Iterable, Iterator
@@ -112,9 +113,15 @@ class Scanner:
     def scan(self, text: str) -> list[Finding]:
         """Non-overlapping findings; secrets win over personal data on the same text."""
         found: list[Finding] = []
+        starts: list[int] = []  # accepted findings, sorted by start (they never overlap)
+        by_start: list[Finding] = []
 
         def overlaps(f: Finding) -> bool:
-            return any(f.start < g.end and g.start < f.end for g in found)
+            i = bisect.bisect_left(starts, f.start)
+            # only the neighbours can overlap, since accepted findings are disjoint
+            return (i > 0 and by_start[i - 1].end > f.start) or (
+                i < len(by_start) and by_start[i].start < f.end
+            )
 
         def ignored(f: Finding) -> bool:
             value = text[f.start : f.end]
@@ -129,6 +136,9 @@ class Scanner:
         for f in candidates:  # in priority order: built-in secrets, custom, personal
             if f.end > f.start and not overlaps(f) and not ignored(f):
                 found.append(f)
+                i = bisect.bisect_left(starts, f.start)
+                starts.insert(i, f.start)
+                by_start.insert(i, f)
         return sorted(found, key=lambda f: f.start)
 
 

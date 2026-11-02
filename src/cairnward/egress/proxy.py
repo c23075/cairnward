@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import re
 import secrets
 import socket
 import time
@@ -90,6 +91,9 @@ class Sessions:
 
 class _BadRequest(Exception):
     pass
+
+
+_CONTROL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 
 
 def _split_hostport(value: str, default_port: int) -> tuple[str, int]:
@@ -219,16 +223,22 @@ class EgressProxy:
         except ValueError as exc:  # header too large
             raise _BadRequest("request header too large") from exc
         lines = head.decode("latin-1").split("\r\n")
+        if any(_CONTROL.search(line) for line in lines):
+            # a bare LF or other control character could smuggle a second request or
+            # header past us to the server
+            raise _BadRequest("control characters in the request header")
         try:
             method, target, version = lines[0].split(" ", 2)
         except ValueError:
             raise _BadRequest("malformed request line") from None
+        if not method or " " in version or not version.startswith("HTTP/"):
+            raise _BadRequest("malformed request line")
         headers: list[tuple[str, str]] = []
         for line in lines[1:]:
             if not line:
                 continue
             name, sep, value = line.partition(":")
-            if not sep:
+            if not sep or not name.strip() or name != name.strip():
                 raise _BadRequest("malformed header")
             headers.append((name.strip(), value.strip()))
         hmap = {k.lower(): v for k, v in headers}
@@ -244,7 +254,11 @@ class EgressProxy:
             host, port = _split_hostport(target, 443)
             path = None
         else:
-            url = urlsplit(target)
+            try:
+                url = urlsplit(target)
+                url.port  # noqa: B018 (raises ValueError for a bad port or IPv6 literal)
+            except ValueError:
+                raise _BadRequest(f"malformed URL {target[:100]!r}") from None
             if url.scheme != "http" or not url.netloc:
                 raise _BadRequest("only CONNECT and absolute http:// URLs are proxied")
             host, port = _split_hostport(url.netloc.rpartition("@")[2], 80)
@@ -274,8 +288,8 @@ class EgressProxy:
         # Resolve once, refuse special addresses, dial what was checked.
         try:
             addresses = await self._resolve(host, port)
-        except OSError as exc:
-            reason = f"DNS lookup failed: {exc.strerror or exc}"
+        except (OSError, UnicodeError) as exc:  # UnicodeError: a label getaddrinfo can't encode
+            reason = f"DNS lookup failed: {getattr(exc, 'strerror', None) or exc}"
             await self._deny(writer, Decision(action, "deny", decision.risk, reason))
             return
         chosen, refused = None, []

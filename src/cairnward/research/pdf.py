@@ -67,6 +67,8 @@ def read_pdf(path: Path) -> PdfText:
             pages.append(clean(textpage.get_text_bounded()))
             textpage.close()
             page.close()
+    except pdfium.PdfiumError as exc:
+        raise PdfError(f"can't read PDF ({exc}); damaged?") from exc
     finally:
         pdf.close()
     year = None

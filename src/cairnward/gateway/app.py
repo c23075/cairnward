@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from cairnward import __version__
 from cairnward.audit.log import canonical, digest
@@ -78,6 +78,27 @@ class ChatCompletionRequest(BaseModel):
     max_completion_tokens: int | None = None
     temperature: float | None = None
     top_p: float | None = None
+
+    @field_validator("messages")
+    @classmethod
+    def _well_formed(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Checked, never changed: messages are forwarded as they came (FR-GW-7)."""
+        for i, m in enumerate(messages):
+            if not isinstance(m.get("role"), str) or not m["role"]:
+                raise ValueError(f"messages[{i}] needs a 'role' (a string)")
+            content = m.get("content")
+            if not (
+                content is None
+                or isinstance(content, str)
+                or (isinstance(content, list) and all(isinstance(p, dict) for p in content))
+            ):
+                raise ValueError(f"messages[{i}].content must be text, a list of parts or null")
+            calls = m.get("tool_calls")
+            if calls is not None and not (
+                isinstance(calls, list) and all(isinstance(c, dict) for c in calls)
+            ):
+                raise ValueError(f"messages[{i}].tool_calls must be a list of objects")
+        return messages
 
 
 def _error(status: int, message: str, kind: str, code: str | None = None) -> JSONResponse:

@@ -22,6 +22,7 @@ from cairnward.config.models import LOOPBACK_HOSTS
 from cairnward.mcp.hub import McpHub
 from cairnward.mcp.jsonrpc import McpError
 
+MAX_SESSIONS = 1000  # oldest dropped first; a client re-initialises after a 404
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
     "Tools from MCP servers enabled in this Cairnward environment, named "
@@ -91,7 +92,15 @@ def add_mcp_routes(
         method, rid = msg.get("method"), msg.get("id")
         if method is None or "id" not in msg:  # notification, or a response to us
             return Response(status_code=202)
-        params = msg.get("params") or {}
+        if isinstance(rid, bool) or not isinstance(rid, str | int | None):
+            return _rpc_error(None, -32600, "id must be a string or a number", 400)
+        if not isinstance(method, str):
+            return _rpc_error(rid, -32600, "method must be a string", 400)
+        params = msg.get("params")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            return _rpc_error(rid, -32602, "params must be an object")
         headers: dict[str, str] = {}
 
         def ok(result: Any) -> JSONResponse:
@@ -101,6 +110,8 @@ def add_mcp_routes(
             asked = params.get("protocolVersion")
             new_sid = secrets.token_urlsafe(24)
             sessions[new_sid] = _McpSession(client, environment, run_id)
+            while len(sessions) > MAX_SESSIONS:  # clients that never say goodbye
+                sessions.pop(next(iter(sessions)))
             headers["Mcp-Session-Id"] = new_sid
             return ok({
                 "protocolVersion": asked if asked in PROTOCOLS else PROTOCOLS[1],
@@ -123,6 +134,8 @@ def add_mcp_routes(
                 return ok(await hub.call(environment, name, args, client=client, run_id=run_id))
             except McpError as exc:
                 return _rpc_error(rid, exc.code or -32603, str(exc))
+            except (ValueError, TypeError) as exc:  # arguments a built-in tool can't use
+                return _rpc_error(rid, -32602, f"invalid arguments: {str(exc)[:200]}")
         try:
             if method == "prompts/list":
                 return ok({"prompts": hub.list_prompts(environment)})
