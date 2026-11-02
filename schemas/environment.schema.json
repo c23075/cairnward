@@ -389,6 +389,21 @@
         "vault": null
       }
     },
+    "research_sources": {
+      "description": "online academic sources this environment may search (opt-in; each request is still checked against its network setting)",
+      "items": {
+        "enum": [
+          "openalex",
+          "semantic-scholar",
+          "arxiv",
+          "crossref",
+          "pubmed"
+        ],
+        "type": "string"
+      },
+      "title": "Research Sources",
+      "type": "array"
+    },
     "run_budget": {
       "$ref": "#/$defs/RunBudget",
       "default": {

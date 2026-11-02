@@ -158,6 +158,18 @@ uv run cairnward research ask thesis questions.txt --engine paperqa --at 23:30
 ```
 Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
+Bring papers in from Zotero (Zotero 7 running, with Settings → Advanced → "Allow other applications on this computer to communicate with Zotero" on; read-only):
+```bash
+uv run cairnward library zotero thesis --collection "Thesis"
+```
+Search OpenAlex, Semantic Scholar, arXiv, Crossref and PubMed (allowed in the `litreview-online` environment; each new host is asked about first), then add open-access PDFs by their ID:
+```bash
+uv run cairnward research search "sleep and working memory in older adults"
+```
+```bash
+uv run cairnward research add thesis doi:10.1111/jsr.13540
+```
+
 ## 7. Back up
 Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. Add to `cairnward.toml`, with a folder on another disk:
 ```toml

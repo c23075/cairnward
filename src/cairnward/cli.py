@@ -208,6 +208,18 @@ def build_parser() -> argparse.ArgumentParser:
     eng = rs_sub.add_parser("engine", help="optional engines (PaperQA2, citeproc-js, pandoc)")
     eng.add_argument("action", choices=["install", "status"])
     eng.add_argument("name", choices=["paperqa", "citeproc-js", "pandoc"])
+    rsearch = rs_sub.add_parser("search", help="search OpenAlex, Semantic Scholar, arXiv, "
+                                "Crossref, PubMed (opt-in per environment)")  # fmt: skip
+    rsearch.add_argument("query")
+    rsearch.add_argument("--env", help="environment (default: the library's, or litreview-online)")
+    rsearch.add_argument("--library", help="use this library's environment")
+    rsearch.add_argument("--source", action="append", dest="sources", metavar="NAME",
+                         help="only this source (repeatable)")  # fmt: skip
+    rsearch.add_argument("--limit", type=int, default=10, help="results per source (max 50)")
+    rsearch.add_argument("--json", action="store_true")
+    radd = rs_sub.add_parser("add", help="download open-access PDFs into a library and index them")
+    radd.add_argument("library")
+    radd.add_argument("ids", nargs="+", metavar="ID", help="doi:10.x/y, arxiv:2401.01234 or a DOI")
     rb = rs_sub.add_parser("ask", help="answer every question in a file (one per line)")
     rb.add_argument("library")
     rb.add_argument("file", type=Path)
@@ -316,6 +328,17 @@ def build_parser() -> argparse.ArgumentParser:
     lc.add_argument("name")
     lc.add_argument("folder", type=Path)
     lc.add_argument("--env", default="litreview-offline", help="environment (privacy, models)")
+    lz = lib_sub.add_parser("zotero", help="copy PDFs and metadata from Zotero (read-only, "
+                            "local API), then index")  # fmt: skip
+    lz.add_argument("name", help="the library to fill")
+    lz.add_argument("--collection", help="a Zotero collection (e.g. Thesis or Thesis/Chapter 2); "
+                    "default: the whole Zotero library")  # fmt: skip
+    lz.add_argument("--url", default="http://127.0.0.1:23119/api", help="Zotero's local API")
+    lz.add_argument(
+        "--storage", type=Path, help="Zotero's storage folder (default ~/Zotero/storage)"
+    )
+    lz.add_argument("--no-index", action="store_true", help="only copy; index later")
+    lz.add_argument("--list-collections", action="store_true", help="show Zotero's collections")
     li = lib_sub.add_parser("index", help="parse, chunk and embed new or changed PDFs")
     li.add_argument("name")
     li.add_argument("--prune", action="store_true", help="forget PDFs no longer in the folder")
@@ -1046,6 +1069,74 @@ def parse_at(value: str, now: Any = None) -> str:
     return str(at.astimezone(UTC).isoformat(timespec="seconds"))
 
 
+def _research_search(args: argparse.Namespace, mgmt: Any) -> int:
+    body = {"query": args.query, "environment": args.env, "library": args.library,
+            "sources": args.sources, "limit": args.limit}  # fmt: skip
+    resp = mgmt.post("/v1/research/search", json=body, timeout=180)
+    if resp.status_code != 200:
+        print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
+        return 1
+    out = resp.json()
+    if args.json:
+        print(json.dumps(out, indent=1))
+        return 0
+    for name, rep in out["sources"].items():
+        if "error" in rep:
+            print(f"  {name}: {rep['error']}", file=sys.stderr)
+    for n, r in enumerate(out["records"], 1):
+        who = ", ".join(r["authors"][:3]) + (" et al." if len(r["authors"]) > 3 else "")
+        ident = (f"doi:{r['doi']}" if r["doi"] else f"arxiv:{r['arxiv']}" if r["arxiv"]
+                 else f"{r['source']}:{r['id']}")  # fmt: skip
+        extra = " · ".join(x for x in (
+            "open-access PDF" if r["pdf_url"] else "", f"cited {r['cited_by']}"
+            if r["cited_by"] is not None else "", r["source"]) if x)  # fmt: skip
+        print(f"{n:2}. {who} ({r['year'] or 'n.d.'}). {r['title']}"
+              + (f". {r['venue']}" if r["venue"] else ""))  # fmt: skip
+        print(f"    {ident}  [{extra}]")
+    if not out["records"]:
+        print("no results")
+    if out.get("warning"):
+        print(f"note: {out['warning']}", file=sys.stderr)
+    print(f"(environment {out['environment']}; add papers with: cairnward research add "
+          "<library> <id> ...)", file=sys.stderr)  # fmt: skip
+    return 0
+
+
+def _research_add(args: argparse.Namespace, cfg: Config, mgmt: Any) -> int:
+    import base64
+
+    from cairnward.research import LibraryError, Research
+
+    try:
+        with Research.open(cfg.paths) as research:
+            folder = research.get(args.library).folder
+    except LibraryError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    resp = mgmt.post("/v1/research/fetch", json={"library": args.library, "ids": args.ids},
+                     timeout=600)  # fmt: skip
+    if resp.status_code != 200:
+        print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
+        return 1
+    target = folder / "online"
+    saved = 0
+    for item in resp.json()["items"]:
+        if "error" in item:
+            print(f"  {item['id']}: {item['error']}", file=sys.stderr)
+            continue
+        target.mkdir(parents=True, exist_ok=True)
+        pdf = target / Path(item["filename"]).name
+        pdf.write_bytes(base64.b64decode(item["pdf_b64"]))
+        pdf.with_name(pdf.name + ".csl.json").write_text(json.dumps(item["csl"], indent=1),
+                                                         encoding="utf-8")  # fmt: skip
+        print(f"  added {pdf.relative_to(folder)}: {item['title'][:70]}")
+        saved += 1
+    if saved:
+        print("indexing ...")
+        return main(["--config-dir", str(cfg.paths.config_dir), "library", "index", args.library])
+    return 1
+
+
 def _cmd_jobs(args: argparse.Namespace) -> int:
     from cairnward.run.runner import RunError, management
 
@@ -1103,6 +1194,10 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
                 f"{j['library']}{engine}{when}{eta}")  # fmt: skip
 
     with mgmt:
+        if args.command == "research" and args.research_command == "search":
+            return _research_search(args, mgmt)
+        if args.command == "research" and args.research_command == "add":
+            return _research_add(args, cfg, mgmt)
         if args.command == "research":
             start = parse_at(args.at) if args.at else None
             body: dict[str, Any] = {"library": args.library, "not_before": start}
@@ -1443,6 +1538,41 @@ def _library_ask(cfg: Config, research: Any, args: argparse.Namespace) -> int:
     return 0
 
 
+def _library_zotero(cfg: Config, research: Any, args: argparse.Namespace) -> int:
+    from cairnward.audit import AuditLog, enabled_for
+    from cairnward.research.zotero import Zotero, ZoteroError, import_items
+
+    try:
+        zotero = Zotero(args.url, storage=args.storage)
+    except ZoteroError as exc:
+        _log(str(exc))
+        return 1
+    try:
+        if args.list_collections:
+            for c in sorted(zotero.collections(), key=lambda c: c["name"].lower()):
+                print(c["name"])
+            return 0
+        lib = research.get(args.name)
+        report = import_items(zotero, lib.folder, args.collection)
+    except ZoteroError as exc:
+        _log(str(exc))
+        return 1
+    finally:
+        zotero.close()
+    with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit:
+        audit.append("zotero.import", actor="user", environment=lib.environment, target=args.name,
+                     details={k: (len(v) if isinstance(v, list) else v)
+                              for k, v in report.items()})  # fmt: skip
+    print(f"Zotero: {report['items']} items, {report['copied']} PDFs copied, "
+          f"{report['unchanged']} unchanged, {len(report['no_pdf'])} without a PDF")  # fmt: skip
+    for title in report["no_pdf"][:10]:
+        print(f"  no PDF: {title}")
+    if args.no_index or not (report["copied"] or report["unchanged"]):
+        return 0
+    research.close()
+    return main(["--config-dir", str(cfg.paths.config_dir), "library", "index", args.name])
+
+
 def _cmd_library(args: argparse.Namespace) -> int:
     import asyncio
 
@@ -1484,11 +1614,14 @@ def _cmd_library(args: argparse.Namespace) -> int:
                 return 0
             if cmd == "ask":
                 return _library_ask(cfg, research, args)
+            if cmd == "zotero":
+                return _library_zotero(cfg, research, args)
             if cmd == "refs":
                 from cairnward.research.cite import from_documents
 
                 docs = [d for d in research.documents(args.name) if d.status == "indexed"]
-                print(json.dumps(from_documents(docs), indent=2, ensure_ascii=False))
+                refs = from_documents(docs, research.get(args.name).folder)
+                print(json.dumps(refs, indent=2, ensure_ascii=False))
                 return 0
             if cmd == "check":
                 from cairnward.research.check import check_draft

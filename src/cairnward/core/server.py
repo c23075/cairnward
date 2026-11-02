@@ -42,6 +42,7 @@ from cairnward.mcp.pins import PinStore
 from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
 from cairnward.policy.provenance import ProvenanceTracker
 from cairnward.research.engines.deep import RemoteExecutor, run_worker
+from cairnward.research.online import Online
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
 
@@ -275,6 +276,7 @@ def _core_parts(
         dashboard=auth,
         research_ask=research_ask,
         jobs=jobs,
+        online=Online(cfg, engine, backends),
     )
     return gateway, management, hub, dashboard
 

@@ -351,11 +351,12 @@ class JobRunner:
             research = self.research()
             try:
                 docs = {d.id: d for d in research.documents(library)}
+                folder = research.get(library).folder
             finally:
                 research.close()
             ids = [s.params["document_id"] for s in job.steps if s.name == "notes"
                    and s.status == "done"]  # fmt: skip
-            items = from_documents([docs[i] for i in ids if i in docs])
+            items = from_documents([docs[i] for i in ids if i in docs], folder)
             style = job.params.get("style", "apa")
             entries, used = await asyncio.to_thread(format_references, items, style,
                                                     engine=self.cite_engine,

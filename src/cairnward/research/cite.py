@@ -372,11 +372,21 @@ def _builtin(items: list[Item], style: str, md: bool) -> list[str]:
     raise CiteError(f"unknown style '{style}': apa, ieee, or a .csl file")
 
 
-def from_documents(rows: Iterable[Any]) -> list[Item]:
-    """CSL-JSON for a library's papers from their PDF metadata (title, authors, year):
-    a starting point to complete in a reference manager."""
+def from_documents(rows: Iterable[Any], folder: Path | None = None) -> list[Item]:
+    """CSL-JSON for a library's papers: from a `<file>.csl.json` next to the PDF when there
+    is one (written by `research add` and the Zotero import), else from the PDF's own
+    metadata (title, authors, year), a starting point to complete in a reference manager."""
     out: list[Item] = []
     for d in rows:
+        sidecar = folder / f"{d.path}.csl.json" if folder is not None else None
+        if sidecar is not None and sidecar.is_file():
+            try:
+                given = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                given = None
+            if isinstance(given, dict) and given.get("title"):
+                out.append({**given, "id": f"doc{d.id}"})
+                continue
         item: Item = {"id": f"doc{d.id}", "type": "article-journal",
                       "title": d.title or Path(d.path).stem, "note": f"file: {d.path}"}  # fmt: skip
         if d.authors:

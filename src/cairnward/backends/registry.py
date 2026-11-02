@@ -60,6 +60,11 @@ class Backends:
         self._transport_for = transport_for or (lambda _name: None)
         self._drivers: dict[tuple[str, str | None], Driver] = {}
 
+    def web_proxy(self, environment: str | None) -> str | None:
+        """The proxy for Cairnward's own outbound requests (research sources): egress, or
+        srt's proxy inside the isolated core."""
+        return self.proxy_all or self._egress_for(environment)
+
     def spec(self, name: str) -> Backend:
         try:
             return self.config.backends[name]

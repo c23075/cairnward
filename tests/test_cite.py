@@ -45,3 +45,22 @@ def test_cli(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert out.startswith("[1] M. P. Walker and R. Stickgold") and "*" not in out
     assert main(["cite", str(DATA / "refs.json"), "--style", "x.csl"]) == 1
+
+
+def test_sidecar_metadata_is_used(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from cairnward.research.cite import from_documents
+
+    (tmp_path / "online").mkdir()
+    (tmp_path / "online" / "walker-2022.pdf.csl.json").write_text(
+        '{"type": "article-journal", "title": "Sleep and memory", "DOI": "10.1/x",'
+        ' "author": [{"family": "Walker", "given": "M. P."}]}'
+    )
+    rows = [SimpleNamespace(id=1, path="online/walker-2022.pdf", title="scan.pdf", authors=None,
+                            year=None),
+            SimpleNamespace(id=2, path="other.pdf", title="From the PDF", authors="Kim; Lee",
+                            year=2020)]  # fmt: skip
+    a, b = from_documents(rows, tmp_path)
+    assert a["id"] == "doc1" and a["DOI"] == "10.1/x" and a["author"][0]["family"] == "Walker"
+    assert b["title"] == "From the PDF" and b["author"] == [{"literal": "Kim"}, {"literal": "Lee"}]

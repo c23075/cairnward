@@ -444,6 +444,13 @@ class EnvironmentConfig(_Strict):
         default_factory=list, description="MCP servers (mcp.toml) offered in this environment"
     )
     skills: list[str] = Field(default_factory=list)
+    research_sources: list[
+        Literal["openalex", "semantic-scholar", "arxiv", "crossref", "pubmed"]
+    ] = Field(
+        default_factory=list,
+        description="online academic sources this environment may "
+        "search (opt-in; each request is still checked against its network setting)",
+    )
     citation_style: str = "apa"
     vault_retention_days: int | None = Field(default=None, ge=1)
     run_budget: RunBudget = RunBudget()
@@ -556,6 +563,7 @@ def builtin_environments() -> dict[str, EnvironmentConfig]:
             tools=["rag", "pdf", "zotero", "scholar"],
             skills=["lit-review", "citation-check", "references"],
             effort_default="high",
+            research_sources=["openalex", "semantic-scholar", "arxiv", "crossref", "pubmed"],
             privacy=PrivacyOverrides(
                 network="ask",
                 network_allow_hosts=[

@@ -94,6 +94,19 @@ class JobIn(BaseModel):
     )
 
 
+class OnlineSearchIn(BaseModel):
+    query: str = Field(min_length=3, max_length=500)
+    environment: str | None = None
+    library: str | None = Field(default=None, description="use this library's environment")
+    sources: list[str] | None = Field(default=None, max_length=10)
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class OnlineFetchIn(BaseModel):
+    library: str
+    ids: list[str] = Field(min_length=1, max_length=50)
+
+
 class AskQuestionIn(BaseModel):
     library: str
     question: str = Field(min_length=3, max_length=4000)
@@ -147,6 +160,7 @@ def management_app(
     dashboard: Any = None,
     research_ask: Any = None,
     jobs: Any = None,
+    online: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward management", docs_url=None, redoc_url=None)
     runs: dict[str, _Run] = {}
@@ -407,6 +421,46 @@ def management_app(
             raise HTTPException(400, str(exc)) from None
         result: dict[str, Any] = answer.as_dict()
         return result
+
+    def online_env(library: str | None, environment: str | None) -> str:
+        from cairnward.research import LibraryError, Research
+
+        if environment:
+            return environment
+        if library:
+            try:
+                with Research.open(cfg.paths) as research:
+                    return str(research.get(library).environment)
+            except LibraryError as exc:
+                raise HTTPException(404, str(exc)) from None
+        return "litreview-online"
+
+    @app.post("/v1/research/search")
+    async def online_search(body: OnlineSearchIn) -> dict[str, Any]:
+        from cairnward.research.online import OnlineError
+
+        if online is None:
+            raise HTTPException(503, "online sources aren't available in this process")
+        env = online_env(body.library, body.environment)
+        try:
+            result: dict[str, Any] = await online.search(env, body.query, sources=body.sources,
+                                                         limit=body.limit)  # fmt: skip
+        except OnlineError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return {**result, "environment": env}
+
+    @app.post("/v1/research/fetch")
+    async def online_fetch(body: OnlineFetchIn) -> dict[str, Any]:
+        from cairnward.research.online import OnlineError
+
+        if online is None:
+            raise HTTPException(503, "online sources aren't available in this process")
+        env = online_env(body.library, None)
+        try:
+            items = await online.fetch(env, body.ids)
+        except OnlineError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return {"items": items, "environment": env}
 
     # ------------------------------------------------------------------ research jobs
 
