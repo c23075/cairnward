@@ -584,8 +584,27 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
         asyncio.run(run())
 
 
+SOCKET_PATH_MAX = 107  # sun_path on Linux (108 bytes with the terminating NUL); macOS: 103
+
+
+def socket_path_problem(cfg: Config) -> str | None:
+    """The longest Unix socket path Cairnward makes, if it's too long to bind."""
+    longest = cfg.paths.state_dir / "mcp" / f"mcp-{'0' * 16}.sock"
+    limit = 103 if sys.platform == "darwin" else SOCKET_PATH_MAX
+    if os.name != "nt" and len(os.fsencode(longest)) > limit:
+        return (
+            f"the state folder's path is too long for Unix sockets ({len(os.fsencode(longest))}"
+            f" > {limit} bytes for {longest}); set CAIRNWARD_STATE_DIR to a shorter path, "
+            "e.g. ~/.local/state/cairnward"
+        )
+    return None
+
+
 def serve(cfg: Config, *, with_egress: bool = True, log: Log) -> int:
     """Isolated mode when the privacy settings ask for it and it's available."""
+    if problem := socket_path_problem(cfg):
+        log(f"cairnward: can't start: {problem}")
+        return 2
     if cfg.privacy().value("isolation") == "on" and with_egress:
         try:
             return serve_isolated(cfg, log=log)

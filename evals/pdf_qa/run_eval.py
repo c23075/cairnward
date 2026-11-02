@@ -84,6 +84,54 @@ def score(q: dict[str, Any], a: dict[str, Any]) -> dict[str, Any]:
     return res
 
 
+class EvalError(Exception):
+    pass
+
+
+def run(env: str = "litreview-offline", engines: list[str] | None = None, *, keep: bool = False,
+        emit: Any = print) -> dict[str, Any]:  # fmt: skip
+    """Build the library, ask every question with each engine, score; returns
+    {"summaries": {engine: {...}}, "results": [...]}. Needs `cairnward serve`."""
+    engines = engines or ["lean"]
+    spec = json.loads((HERE / "questions.json").read_text())
+    name = f"eval-pdf-qa-{int(time.time())}"
+    results: list[dict[str, Any]] = []
+    summaries: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory(prefix="cw-pdfqa-") as tmp:
+        folder = Path(tmp)
+        build(folder, spec)
+        try:
+            for step in (["library", "create", name, str(folder), "--env", env],
+                         ["library", "index", name]):  # fmt: skip
+                r = cw(*step)
+                if r.returncode != 0:
+                    raise EvalError(f"`cairnward {' '.join(step[:2])}` failed: "
+                                    f"{(r.stdout + r.stderr).strip()[-500:]}")  # fmt: skip
+            for engine in engines:
+                mine = []
+                for q in spec["questions"]:
+                    t0 = time.monotonic()
+                    r = cw("library", "ask", name, q["question"], "--json", "--engine", engine)
+                    took = round(time.monotonic() - t0, 1)
+                    if r.returncode != 0:
+                        raise EvalError(f"ask failed ({engine}): {(r.stdout + r.stderr)[-500:]}")
+                    answer = json.loads(r.stdout)
+                    answer["seconds"] = answer.get("seconds") or took  # wall clock if not given
+                    res = score(q, answer) | {"engine": engine}
+                    mine.append(res)
+                    emit(json.dumps(res))
+                results += mine
+                summaries[engine] = {
+                    "questions": len(mine), "passed": sum(r["pass"] for r in mine),
+                    "invented_citations": sum(r["invented"] for r in mine),
+                    "seconds_total": round(sum(r["seconds"] for r in mine), 1),
+                }  # fmt: skip
+        finally:
+            if not keep:
+                cw("library", "remove", name)
+    return {"summaries": summaries, "results": results}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--env", default="litreview-offline")
@@ -92,41 +140,15 @@ def main() -> int:
     ap.add_argument("--compare", action="store_true",
                     help="run both engines on the same questions (FR-RES-13)")  # fmt: skip
     args = ap.parse_args()
-    spec = json.loads((HERE / "questions.json").read_text())
-    name = f"eval-pdf-qa-{int(time.time())}"
-    with tempfile.TemporaryDirectory(prefix="cw-pdfqa-") as tmp:
-        folder = Path(tmp)
-        build(folder, spec)
-        for step in (["library", "create", name, str(folder), "--env", args.env],
-                     ["library", "index", name]):  # fmt: skip
-            r = cw(*step)
-            if r.returncode != 0:
-                print(r.stdout + r.stderr)
-                return 2
-        engines = ["lean", "paperqa"] if args.compare else [args.engine]
-        summaries = {}
-        try:
-            for engine in engines:
-                results = []
-                for q in spec["questions"]:
-                    r = cw("library", "ask", name, q["question"], "--json", "--engine", engine)
-                    if r.returncode != 0:
-                        print(r.stdout + r.stderr)
-                        return 2
-                    res = score(q, json.loads(r.stdout)) | {"engine": engine}
-                    results.append(res)
-                    print(json.dumps(res))
-                summaries[engine] = {
-                    "questions": len(results), "passed": sum(r["pass"] for r in results),
-                    "invented_citations": sum(r["invented"] for r in results),
-                    "seconds_total": round(sum(r["seconds"] for r in results), 1),
-                }  # fmt: skip
-        finally:
-            if not args.keep:
-                cw("library", "remove", name)
-    for engine, summary in summaries.items():
+    engines = ["lean", "paperqa"] if args.compare else [args.engine]
+    try:
+        out = run(args.env, engines, keep=args.keep)
+    except EvalError as exc:
+        print(exc)
+        return 2
+    for engine, summary in out["summaries"].items():
         print(json.dumps({"engine": engine, "summary": summary}))
-    return 0 if all(s["passed"] == s["questions"] for s in summaries.values()) else 1
+    return 0 if all(s["passed"] == s["questions"] for s in out["summaries"].values()) else 1
 
 
 if __name__ == "__main__":

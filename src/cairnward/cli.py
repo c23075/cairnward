@@ -111,6 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     doc = sub.add_parser("doctor", help="check prerequisites and that protections work")
     doc.add_argument("--json", action="store_true", help="machine-readable output")
+    chk = sub.add_parser("check", help="doctor + evals + client checks on this machine, one report")
+    chk.add_argument("--env", default="litreview-offline", help="environment for the lit.ask eval")
+    chk.add_argument("--no-paperqa", action="store_true", help="don't compare with PaperQA2")
+    chk.add_argument("--no-coding", action="store_true", help="skip the coding-agent eval")
+    chk.add_argument("--out", type=Path, help="report path (default docs/bench/check-<date>.md)")
     stp = sub.add_parser("setup", help="choose a privacy preset and check prerequisites")
     stp.add_argument("--preset", choices=["open", "balanced", "strict"])
     stp.add_argument(
@@ -1599,6 +1604,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return vault_cli.run(_load(args), args, sys.stdout)
         if args.command == "doctor":
             return _cmd_doctor(args)
+        if args.command == "check":
+            from cairnward import check
+
+            return check.run(default_paths(args.config_dir), env=args.env,
+                             paperqa=not args.no_paperqa, coding=not args.no_coding,
+                             out=args.out)  # fmt: skip
         if args.command == "setup":
             return _cmd_setup(args)
         if args.command == "client":

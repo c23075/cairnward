@@ -52,7 +52,7 @@ class Cairnward:
                     "CAIRNWARD_DATA_DIR": str(self.paths.data_dir),
                     "CAIRNWARD_STATE_DIR": str(self.paths.state_dir),
                     "CAIRNWARD_CACHE_DIR": str(tmp_path / "cache")}  # fmt: skip
-        if locate(self.paths) is None:
+        if mode != "off" and locate(self.paths) is None:
             pytest.skip("sandbox-runtime not installed (cairnward sandbox install / CAIRNWARD_SRT)")
         self.gw, self.dash, self.eg = free_port(), free_port(), free_port()
         envs = self.paths.config_dir / "environments"

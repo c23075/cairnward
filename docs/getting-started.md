@@ -154,5 +154,12 @@ uv run cairnward research ask thesis questions.txt --engine paperqa --at 23:30
 ```
 Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
+## 7. Check everything on your machine
+With `cairnward serve` running and your models pulled, one command runs the doctor, the lit.ask eval (and PaperQA2 next to it when installed), the coding eval with each installed agent, and summarises what your chat clients did:
+```bash
+uv run cairnward check
+```
+It writes `docs/bench/check-<date>.md` (and a `.json` next to it) with no prompts or answers in it. On a CPU the evals take a while (roughly 10–40 minutes); `--no-paperqa` and `--no-coding` make it shorter. Fill in the manual client checklist at the end of the report after trying each chat app.
+
 ## Important: Ollama can still be reached directly
 Ollama listens on `127.0.0.1:11434`. Agents started with `cairnward run` (sandboxed) can only reach Cairnward's gateway, but **any unsandboxed program on your machine can talk to Ollama directly and bypass Cairnward**. Configure chat apps to use Cairnward's gateway, not Ollama, and turn off their own Ollama connection (see the client guides).

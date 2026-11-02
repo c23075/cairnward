@@ -1,5 +1,7 @@
 # Benchmarks
 
+`uv run cairnward check` runs everything that needs the real machine (doctor, the lit.ask and coding evals, client usage) and writes `check-<date>.md` here; commit it with the results.
+
 `scripts/bench_backend.py` measures how fast a model server runs on your machine. The results set Cairnward's performance requirements (NFR-P3, NFR-P4 in [requirements.md](../requirements.md)), e.g. when to warn that a prompt will take more than a minute to read.
 
 It uses only the Python standard library, sends only generated filler text, and by default talks only to servers on this machine.
