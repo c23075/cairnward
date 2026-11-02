@@ -206,6 +206,32 @@ def coding_section(agents: list[str], log: Callable[[str], None]) -> Section:
     return sec
 
 
+def review_section(env: str) -> Section:
+    sec = Section(f"Review pipeline eval (environment {env})")
+    script = REPO / "evals" / "litreview_table" / "run_eval.py"
+    if not script.exists():
+        sec.lines.append("skipped: needs a repository checkout (evals/litreview_table)")
+        return sec
+    started = time.monotonic()
+    res = subprocess.run([sys.executable, str(script), "--env", env], capture_output=True,  # noqa: S603
+                         text=True, check=False, cwd=REPO)  # fmt: skip
+    sec.seconds = round(time.monotonic() - started, 1)
+    rows = []
+    for line in res.stdout.splitlines():
+        with contextlib.suppress(ValueError):
+            rows.append(json.loads(line))
+    checks = [r for r in rows if "check" in r]
+    if not checks:
+        sec.status = "fail"
+        sec.lines.append(f"could not run: {(res.stdout + res.stderr).strip()[-400:]}")
+        return sec
+    sec.data = rows
+    sec.lines += ["| Check | Result |", "|---|---|"]
+    sec.lines += [f"| {c['check']} | {'pass' if c['pass'] else 'FAIL'} |" for c in checks]
+    sec.status = "pass" if all(c["pass"] for c in checks) else "fail"
+    return sec
+
+
 def clients_section() -> Section:
     sec = Section("Chat clients (from the audit log)")
     out = _cw("audit", "log", "--json", "--action", "model.call", "--last", "100000")
@@ -265,7 +291,7 @@ def default_out(paths: Paths, day: str) -> Path:
 
 
 def run(paths: Paths, *, env: str = "litreview-offline", paperqa: bool = True,
-        coding: bool = True, out: Path | None = None,
+        coding: bool = True, review: bool = False, out: Path | None = None,
         log: Callable[[str], None] = print) -> int:  # fmt: skip
     started = datetime.now(UTC).isoformat(timespec="seconds")
     info = machine()
@@ -286,6 +312,9 @@ def run(paths: Paths, *, env: str = "litreview-offline", paperqa: bool = True,
                                       "(`cairnward research engine install paperqa`).")  # fmt: skip
         if coding:
             sections.append(coding_section(list(AGENTS), log))
+        if review:
+            log("review pipeline eval (screening, notes, synthesis); on a CPU ~30 min ...")
+            sections.append(review_section(env))
         sections.append(clients_section())
     text = render(sections, info, started)
     target = out or default_out(paths, started[:10])

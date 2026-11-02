@@ -396,3 +396,85 @@ def from_documents(rows: Iterable[Any], folder: Path | None = None) -> list[Item
             item["issued"] = {"date-parts": [[int(d.year)]]}
         out.append(item)
     return out
+
+
+# ------------------------------------------------------------------ BibTeX export
+
+_BIB_TYPES = {"article-journal": "article", "article": "article", "article-magazine": "article",
+              "article-newspaper": "article", "paper-conference": "inproceedings",
+              "chapter": "incollection", "book": "book", "thesis": "phdthesis",
+              "report": "techreport", "webpage": "misc", "post": "misc", "post-weblog": "misc",
+              "dataset": "misc", "manuscript": "unpublished"}  # fmt: skip
+_TEX_SPECIAL = {"\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "&": r"\&", "%": r"\%",
+                "$": r"\$", "#": r"\#", "_": r"\_", "~": r"\textasciitilde{}",
+                "^": r"\textasciicircum{}"}  # fmt: skip
+
+
+def _tex(text: Any) -> str:
+    return "".join(_TEX_SPECIAL.get(c, c) for c in " ".join(str(text).split()))
+
+
+def _bib_names(names: list[dict[str, Any]]) -> str:
+    out = []
+    for n in names:
+        if n.get("literal"):
+            out.append("{" + _tex(n["literal"]) + "}")  # an organisation: never split
+        elif n.get("family"):
+            given = f", {_tex(n['given'])}" if n.get("given") else ""
+            out.append(_tex(n["family"]) + given)
+    return " and ".join(out)
+
+
+def bib_key(item: Item, taken: set[str]) -> str:
+    names = item.get("author") or item.get("editor") or [{}]
+    first = str(names[0].get("family") or names[0].get("literal") or "anon")
+    word = next((w for w in re.findall(r"[A-Za-z]+", str(item.get("title", ""))) if len(w) > 3),
+                "untitled")  # fmt: skip
+    base = re.sub(r"[^A-Za-z0-9]", "", _fold(first)) + (_year(item) or "nd") + word.lower()
+    key, n = base, 1
+    while key in taken:
+        n += 1
+        key = f"{base}{chr(96 + n)}" if n <= 26 else f"{base}{n}"
+    taken.add(key)
+    return key
+
+
+def to_bibtex(items: Iterable[Item]) -> str:
+    """BibTeX for CSL-JSON items (for LaTeX/BibLaTeX users and reference managers)."""
+    taken: set[str] = set()
+    entries = []
+    for item in items:
+        kind = str(item.get("type", "article-journal"))
+        btype = _BIB_TYPES.get(kind, "misc")
+        fields: list[tuple[str, str]] = []
+        if item.get("author"):
+            fields.append(("author", _bib_names(item["author"])))
+        if item.get("editor"):
+            fields.append(("editor", _bib_names(item["editor"])))
+        fields.append(("title", "{" + _tex(item.get("title", "")) + "}"))  # keep its case
+        container = item.get("container-title")
+        if container:
+            name = {"article": "journal", "inproceedings": "booktitle",
+                    "incollection": "booktitle"}.get(btype, "howpublished")  # fmt: skip
+            fields.append((name, _tex(container)))
+        if year := _year(item):
+            fields.append(("year", year))
+        for csl_name, bib_name in (("volume", "volume"), ("issue", "number"),
+                                   ("edition", "edition")):  # fmt: skip
+            if item.get(csl_name):
+                fields.append((bib_name, _tex(item[csl_name])))
+        if item.get("page"):
+            fields.append(("pages", _tex(str(item["page"]).replace(EN_DASH, "-")).replace(
+                "-", "--")))  # fmt: skip
+        if item.get("publisher"):
+            who = {"phdthesis": "school", "techreport": "institution"}.get(btype, "publisher")
+            fields.append((who, _tex(item["publisher"])))
+        if doi := _doi(item):
+            fields.append(("doi", doi))
+        if item.get("URL"):
+            fields.append(("url", str(item["URL"])))
+        if kind == "article" and str(item.get("number", "")).startswith("arXiv:"):
+            fields += [("eprint", str(item["number"]).split(":", 1)[1]), ("archiveprefix", "arXiv")]
+        body = ",\n".join(f"  {k} = {{{v}}}" for k, v in fields)
+        entries.append(f"@{btype}{{{bib_key(item, taken)},\n{body}\n}}")
+    return "\n\n".join(entries) + ("\n" if entries else "")

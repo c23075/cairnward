@@ -288,6 +288,8 @@ class McpHub:
                             "question": {"type": "string", "description": "the review question"},
                             "library": {"type": "string", "enum": libraries},
                             "style": {"type": "string", "enum": ["apa", "ieee"], "default": "apa"},
+                            "criteria": {"type": "string",
+                                         "description": "inclusion/exclusion criteria"},
                         }},
                     })  # fmt: skip
                 if self.research_ask is not None:
@@ -506,10 +508,12 @@ class McpHub:
         if not decision.allowed:
             await asyncio.to_thread(self.engine.audit_deny, decision)
             return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
-        job = review_job(name, question, style, actor=f"client:{client}")
+        criteria = str(arguments.get("criteria") or "").strip()[:4000] or None
+        job = review_job(name, question, style, criteria=criteria, actor=f"client:{client}")
         self.jobs.submit(job)
-        text = (f"Review job {job.id} queued: it indexes the library and reviews every paper "
-                f"in it. Follow it with "
+        text = (f"Review job {job.id} queued: it indexes the library, screens every paper's "
+                "title and abstract, reads the included ones and writes a synthesis. Follow it "
+                "with "
                 f"`cairnward jobs show {job.id}`; the result will be in `cairnward jobs result "
                 f"{job.id}`.")  # fmt: skip
         return {"content": [{"type": "text", "text": text}],

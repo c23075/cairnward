@@ -125,6 +125,8 @@ def build_parser() -> argparse.ArgumentParser:
     chk.add_argument("--env", default="litreview-offline", help="environment for the lit.ask eval")
     chk.add_argument("--no-paperqa", action="store_true", help="don't compare with PaperQA2")
     chk.add_argument("--no-coding", action="store_true", help="skip the coding-agent eval")
+    chk.add_argument("--review", action="store_true",
+                     help="also run the review-pipeline eval (long on a CPU)")  # fmt: skip
     chk.add_argument("--out", type=Path, help="report path (default docs/bench/check-<date>.md)")
     stp = sub.add_parser("setup", help="choose a privacy preset and check prerequisites")
     stp.add_argument("--preset", choices=["open", "balanced", "strict"])
@@ -205,6 +207,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rv.add_argument("--files-from", type=Path, metavar="LIST",
                     help="like --files, read from a file with one path per line")  # fmt: skip
+    rv.add_argument("--criteria", help="inclusion/exclusion criteria for screening, or @file")
+    rv.add_argument("--no-screen", action="store_true",
+                    help="read every paper in full (no title/abstract screening)")  # fmt: skip
     eng = rs_sub.add_parser("engine", help="optional engines (PaperQA2, citeproc-js, pandoc)")
     eng.add_argument("action", choices=["install", "status"])
     eng.add_argument("name", choices=["paperqa", "citeproc-js", "pandoc"])
@@ -236,9 +241,11 @@ def build_parser() -> argparse.ArgumentParser:
     jb = sub.add_parser("jobs", help="research jobs: list, progress, results")
     jb_sub = jb.add_subparsers(dest="jobs_command", metavar="ACTION")
     jb_sub.add_parser("list", help="all jobs (default)")
-    for name, text in (("show", "progress of one job"), ("cancel", "stop a job"),
-                       ("result", "print a finished job's result")):  # fmt: skip
+    for name, text in (("show", "progress of one job"), ("cancel", "stop a job")):
         jb_sub.add_parser(name, help=text).add_argument("id")
+    jres = jb_sub.add_parser("result", help="print a finished job's result")
+    jres.add_argument("id")
+    jres.add_argument("--bib", action="store_true", help="print the review's BibTeX instead")
 
     art = sub.add_parser("artifacts", help="versioned files of conversations, jobs and runs")
     art_sub = art.add_subparsers(dest="artifacts_command", metavar="ACTION")
@@ -1202,7 +1209,11 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
             start = parse_at(args.at) if args.at else None
             body: dict[str, Any] = {"library": args.library, "not_before": start}
             if args.research_command == "review":
-                body |= {"kind": "review", "question": args.question, "style": args.style}
+                criteria = args.criteria
+                if criteria and criteria.startswith("@"):
+                    criteria = Path(criteria[1:]).read_text(encoding="utf-8").strip()
+                body |= {"kind": "review", "question": args.question, "style": args.style,
+                         "criteria": criteria, "screen": not args.no_screen}  # fmt: skip
                 files = list(args.files or [])
                 if args.files_from:
                     files += [x.strip() for x in args.files_from.read_text(
@@ -1250,7 +1261,13 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
             if not job.get("result"):
                 print(f"not finished yet: {line(job)}", file=sys.stderr)
                 return 1
-            sys.stdout.write(Path(job["result"]).read_text(encoding="utf-8"))
+            path = Path(job["result"])
+            if args.bib:
+                path = path.with_name("references.bib")
+                if not path.exists():
+                    print("this job has no BibTeX (only reviews do)", file=sys.stderr)
+                    return 1
+            sys.stdout.write(path.read_text(encoding="utf-8"))
             return 0
         print(line(job))
         for st in job["steps"]:
@@ -1866,7 +1883,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             return check.run(default_paths(args.config_dir), env=args.env,
                              paperqa=not args.no_paperqa, coding=not args.no_coding,
-                             out=args.out)  # fmt: skip
+                             review=args.review, out=args.out)  # fmt: skip
         if args.command == "setup":
             return _cmd_setup(args)
         if args.command == "client":

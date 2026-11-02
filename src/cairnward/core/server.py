@@ -209,14 +209,15 @@ def _core_parts(
 
         return await run_ask(cfg, engine, backends, library, question, scheduler=scheduler, **kw)
 
-    def chat_for(library: str) -> Any:
+    def chat_for(library: str, effort: str | None = None) -> Any:
+        """The library's environment's model; effort "low" picks its fast model (screening)."""
         from cairnward.research import Research
         from cairnward.research.llm import InProcessChat
 
         with Research.open(cfg.paths) as research:
             env = research.get(library).environment
         return InProcessChat(cfg, engine, backends, environment=env, scheduler=scheduler,
-                             purpose="review")  # fmt: skip
+                             effort=effort, purpose="review")  # fmt: skip
 
     async def index_library(library: str, files: list[str] | None, actor: str) -> dict[str, Any]:
         from cairnward.research import InProcessEmbedder, Research

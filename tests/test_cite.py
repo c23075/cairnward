@@ -64,3 +64,18 @@ def test_sidecar_metadata_is_used(tmp_path: Path) -> None:
     a, b = from_documents(rows, tmp_path)
     assert a["id"] == "doc1" and a["DOI"] == "10.1/x" and a["author"][0]["family"] == "Walker"
     assert b["title"] == "From the PDF" and b["author"] == [{"literal": "Kim"}, {"literal": "Lee"}]
+
+
+def test_bibtex() -> None:
+    from cairnward.research.cite import to_bibtex
+
+    bib = to_bibtex(load_items(DATA / "refs.json"))
+    assert bib.count("\n@") + 1 == len(load_items(DATA / "refs.json"))
+    assert "@inproceedings{Nguyen2024fast," in bib and "booktitle = {Proceedings" in bib
+    assert "pages = {e13540--e13552}" in bib and "doi = {10.1111/jsr.13540}" in bib
+    assert "title = {{Sleep and working memory in older adults}}" in bib  # case kept
+    org = to_bibtex([{"type": "report", "title": "Costs & 50% of x_y",
+                      "author": [{"literal": "World Health Organization"}]}])  # fmt: skip
+    assert "author = {{World Health Organization}}" in org and r"\& 50\% of x\_y" in org
+    twice = to_bibtex([{"title": "Slow waves", "author": [{"family": "Ito"}]}] * 2)
+    assert "Ito" in twice and "ndslow," in twice and "ndslowb," in twice  # unique keys

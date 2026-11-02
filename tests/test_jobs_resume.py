@@ -28,15 +28,36 @@ NOTES = json.dumps({
 
 
 class FakeChat:
+    """Answers like the models would: screening JSON, notes JSON, synthesis prose. Papers
+    whose title contains a word in `exclude` are excluded at screening."""
+
     context_tokens = 8192
 
-    def __init__(self, crash_on: int | None = None):
-        self.calls, self.crash_on = 0, crash_on
+    def __init__(self, crash_on: int | None = None, exclude: tuple[str, ...] = ()):
+        self.calls, self.crash_on, self.exclude = 0, crash_on, exclude
+        self.kinds: list[str] = []
+        self.efforts: list[str | None] = []
 
     async def ask(self, messages: list[dict[str, Any]], *, max_tokens: int = 700) -> Reply:
         self.calls += 1
         if self.crash_on == self.calls:
             raise asyncio.CancelledError  # the server is stopped mid-step
+        system, user = messages[0]["content"], messages[-1]["content"]
+        if system.startswith("You screen papers"):
+            self.kinds.append("screen")
+            out = any(w in user.split("Title:", 1)[1].split("\n")[0] for w in self.exclude)
+            text = json.dumps(
+                {
+                    "decision": "exclude" if out else "include",
+                    "reason": "off topic" if out else "about sleep and memory",
+                }
+            )
+            return Reply(text, "fast", 50, 20, 0.01)
+        if system.startswith("You write the synthesis"):
+            self.kinds.append("synthesis")
+            return Reply("Longer sleep went with better memory [1, 2]; one study disagrees [9].",
+                         "main", 300, 80, 0.01)  # fmt: skip
+        self.kinds.append("notes")
         return Reply(NOTES, "fake", 100, 50, 0.01)
 
 
@@ -60,25 +81,25 @@ def runner(paths: Paths, chat: FakeChat, ask: Any = None) -> JobRunner:
         raise AssertionError("not used")
 
     return JobRunner(JobStore(paths.data_dir), research=lambda: Research.open(paths),
-                     ask=ask or no_ask, chat_for=lambda lib: chat)  # fmt: skip
+                     ask=ask or no_ask, chat_for=lambda lib, effort=None: chat)  # fmt: skip
 
 
 async def test_review_survives_a_restart(lib: Paths) -> None:
-    job = review_job("thesis", "Does sleep help memory?")
+    job = review_job("thesis", "Does sleep help memory?", screen=False)
     first = runner(lib, FakeChat(crash_on=2))
     first.submit(job)
     with pytest.raises(asyncio.CancelledError):
         await first.run(first.store.load(job.id))
     saved = first.store.load(job.id)
     assert saved.status == "running" and [s.status for s in saved.steps] == [
-        "done", "done", "pending", "pending", "pending"]  # fmt: skip
+        "done", "done", "pending", "pending", "pending", "pending"]  # fmt: skip
 
     chat = FakeChat()
     second = runner(lib, chat)  # a fresh process after the restart
     nxt = second._next()
     assert nxt is not None and nxt.id == job.id
     done = await second.run(nxt)
-    assert done.status == "done" and chat.calls == 2  # paper A wasn't read again
+    assert done.status == "done" and chat.kinds == ["notes", "notes", "synthesis"]  # A not again
     result = second.store.result_path(job.id).read_text()
     assert all(f"| Paper {x} |" in result for x in "ABC") and "Small \\| sample (p. 2)" in result
     assert "## References" in result and "*Paper A*" in result
@@ -136,7 +157,10 @@ async def test_management_api(lib: Paths) -> None:
             await r.run(r.store.load(job["id"]))
             shown = (await c.get(f"/v1/jobs/{job['id']}")).json()
             assert shown["status"] == "done" and shown["result"].endswith("result.md")
-            assert [s["status"] for s in shown["steps"]] == ["done"] * 5
+            names = [s["name"] for s in shown["steps"]]
+            assert names == ["prepare", *["screen"] * 3, "select", *["notes"] * 3, "synthesis",
+                             "table"]  # fmt: skip
+            assert [s["status"] for s in shown["steps"]] == ["done"] * 10
             assert (
                 await c.post("/v1/jobs", json={"kind": "ask", "library": "thesis"})
             ).status_code == 400
@@ -208,3 +232,79 @@ def test_library_files(tmp_path: Path) -> None:
                      ([], "no files")):  # fmt: skip
         with pytest.raises(ValueError, match=why):
             library_files(folder, bad)
+
+
+async def test_full_review_pipeline(lib: Paths, tmp_path: Path) -> None:
+    """screen (fast model) → select → notes (main model) on included papers only →
+    synthesis with checked citations → table, references and .bib (FR-RES-4, D63)."""
+    folder = tmp_path / "papers"
+    abstract = ("This paper reports a cohort of 40 older adults whose sleep was tracked for a "
+                "month; longer sleep went with better working memory.")  # fmt: skip
+    (folder / "a.pdf.csl.json").write_text(json.dumps({
+        "type": "article-journal", "title": "Paper A", "abstract": abstract,
+        "author": [{"family": "Walker", "given": "M."}], "issued": {"date-parts": [[2022]]},
+        "DOI": "10.1/a"}))  # fmt: skip
+    chat = FakeChat(exclude=("Paper C",))
+    efforts: list[str | None] = []
+    prompts: list[str] = []
+
+    def chat_for(library: str, effort: str | None = None) -> FakeChat:
+        efforts.append(effort)
+        return chat
+
+    original = chat.ask
+
+    async def ask(messages: list[dict[str, Any]], *, max_tokens: int = 700) -> Reply:
+        prompts.append(messages[-1]["content"])
+        return await original(messages, max_tokens=max_tokens)
+
+    chat.ask = ask  # type: ignore[method-assign]
+
+    async def no_ask(*a: Any, **k: Any) -> None:
+        raise AssertionError("not used")
+
+    r = JobRunner(JobStore(lib.data_dir), research=lambda: Research.open(lib),
+                  ask=no_ask, chat_for=chat_for)  # fmt: skip
+    job = r.submit(review_job("thesis", "Does sleep help working memory?",
+                              criteria="adults; sleep measured"))  # fmt: skip
+    assert job.eta() == 30  # only "prepare" planned so far
+    done = await r.run(r.store.load(job.id))
+    assert done.status == "done"
+    kinds = [s.name for s in done.steps]
+    assert kinds == ["prepare", "screen", "screen", "screen", "select", "notes", "notes",
+                     "synthesis", "table"]  # fmt: skip
+    # all fast-model screening before any main-model reading; screening uses effort "low"
+    assert chat.kinds == ["screen"] * 3 + ["notes"] * 2 + ["synthesis"]
+    assert efforts[:3] == ["low"] * 3 and set(efforts[3:]) == {None}
+    assert abstract in prompts[0] and "Criteria: adults; sleep measured" in prompts[0]
+    select = next(s for s in done.steps if s.name == "select")
+    assert select.output == {"included": 2, "excluded": 1, "unscreened": 0}
+    synth = next(s for s in done.steps if s.name == "synthesis").output
+    assert synth["invalid_citations"] == [9] and synth["uncited"] == []
+    result = r.store.result_path(job.id).read_text()
+    assert "## Screening" in result and "| Paper C | exclude | off topic |" in result
+    assert "## Synthesis" in result and "cites papers that don't exist: [9]" in result
+    assert "| Paper C |" not in result.split("## Comparison")[1]
+    bib = (r.store.result_path(job.id).parent / "references.bib").read_text()
+    assert "@article{Walker2022paper," in bib and "doi = {10.1/a}" in bib  # from the sidecar
+    assert bib.count("@article") == 2
+
+
+def test_eta_uses_step_kinds() -> None:
+    from cairnward.research.jobs import Job, Step
+
+    steps = [Step("screen", {}, "done", seconds=8), Step("screen", {}, "done", seconds=12),
+             Step("screen", {}), Step("select", {})]  # fmt: skip
+    job = Job("abc123abc123", "review", {}, steps)
+    # one more screen (10 s), select (1 s), and 3 papers to read at the 420 s prior + synthesis
+    assert job.eta() == 10 + 1 + 3 * 420 + 300
+
+
+def test_parsers() -> None:
+    from cairnward.research.jobs import citations_in, parse_screen
+
+    assert parse_screen('{"decision": "Exclude", "reason": "animals"}') == {
+        "decision": "exclude", "reason": "animals"}  # fmt: skip
+    assert parse_screen("I would exclude this")["decision"] == "exclude"
+    assert parse_screen("hmm")["decision"] == "unsure"
+    assert citations_in("a [2] b [1, 3] c [2-4] d [5\u20136] [x]") == [2, 1, 3, 2, 3, 4, 5, 6]

@@ -138,6 +138,8 @@ Run a review overnight: notes per paper and a comparison table with references (
 ```bash
 uv run cairnward research review thesis --question "Does sleep affect working memory?" --at 23:30
 ```
+A review screens every paper's title and abstract with the fast model first (add `--criteria "adults; sleep measured objectively"` to sharpen it, or `--no-screen` to read everything), reads only the included papers in full, writes a synthesis that cites them by number, and saves the references as BibTeX too (`uv run cairnward jobs result <id> --bib > references.bib`).
+
 The papers are picked when the review starts, so PDFs you add to the library folder before then are indexed and included. To review only some papers (paths inside the library folder; they can be added after queuing):
 ```bash
 uv run cairnward research review thesis --question "Does sleep affect working memory?" --files new/smith2024.pdf new/lee2025.pdf --at 23:30

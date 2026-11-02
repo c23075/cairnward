@@ -34,6 +34,10 @@ from cairnward.gateway.scheduling import estimate_tokens
 Status = Literal["queued", "running", "done", "failed", "cancelled"]
 StepStatus = Literal["pending", "done", "failed"]
 NOTE_FIELDS = ("aim", "method", "sample", "findings", "limitations")
+# Seconds per step on the reference machine (spec D63): screening an abstract with the fast
+# model ~10 s; reading a paper and writing notes with the main model ~7 min.
+STEP_PRIOR_S = {"prepare": 30, "screen": 10, "select": 1, "notes": 420, "synthesis": 300,
+                "table": 5, "ask": 120}  # fmt: skip
 
 
 _last_created = [datetime.min.replace(tzinfo=UTC)]
@@ -80,10 +84,31 @@ class Job:
     def progress(self) -> tuple[int, int]:
         return sum(s.status != "pending" for s in self.steps), len(self.steps)
 
+    def eta(self) -> int | None:
+        """Seconds left: each pending step costs the average of finished steps of its kind,
+        else the reference machine's measured cost (D63); screening is fast-model work,
+        notes and synthesis main-model work."""
+        pending = [s for s in self.steps if s.status == "pending"]
+        if not pending:
+            return None
+        by_kind: dict[str, list[float]] = {}
+        for s in self.steps:
+            if s.status == "done" and s.seconds:
+                by_kind.setdefault(s.name, []).append(s.seconds)
+        total = 0.0
+        for s in pending:
+            seen = by_kind.get(s.name)
+            total += sum(seen) / len(seen) if seen else STEP_PRIOR_S.get(s.name, 5)
+        if any(s.name == "select" for s in pending):  # notes not planned yet: assume all
+            screens = sum(1 for s in self.steps if s.name == "screen")
+            total += screens * (sum(by_kind["notes"]) / len(by_kind["notes"])
+                                if by_kind.get("notes") else STEP_PRIOR_S["notes"])  # fmt: skip
+            total += STEP_PRIOR_S["synthesis"]
+        return round(total)
+
     def summary(self) -> dict[str, Any]:
         done, total = self.progress
-        avg = [s.seconds for s in self.steps if s.status == "done" and s.seconds]
-        eta = round(sum(avg) / len(avg) * (total - done)) if avg and done < total else None
+        eta = self.eta() if done < total else None
         return {"id": self.id, "kind": self.kind, "status": self.status, "done": done,
                 "total": total, "created": self.created, "not_before": self.not_before,
                 "finished": self.finished, "eta_s": eta, "error": self.error,
@@ -128,6 +153,11 @@ class JobStore:
         path.write_text(text, encoding="utf-8")
         return path
 
+    def write_file(self, job: Job, name: str, text: str) -> Path:
+        path = self._dir(job.id) / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
     def result_path(self, job_id: str) -> Path:
         return self._dir(job_id) / "result.md"
 
@@ -148,11 +178,16 @@ def ask_job(library: str, questions: list[str], *, engine: str = "lean",
 
 
 def review_job(library: str, question: str, style: str = "apa", *,
-               files: list[str] | None = None, **kw: Any) -> Job:  # fmt: skip
-    """A review whose papers are picked when it starts: the first step indexes the library
-    (or just `files`, paths relative to its folder) and then adds one notes step per
-    paper and the table, so PDFs added before a scheduled start are included."""
-    params = {"library": library, "question": question, "style": style}
+               files: list[str] | None = None, criteria: str | None = None,
+               screen: bool = True, **kw: Any) -> Job:  # fmt: skip
+    """The review pipeline (FR-RES-4, D63). Its papers are picked when it starts: the first
+    step indexes the library (or just `files`, paths relative to its folder), then:
+    screen each paper's title and abstract with the fast model (against the question and
+    `criteria`) → select → notes from the full text of included papers with the main
+    model → synthesis → comparison table, references and a .bib file. `screen=False`
+    reads every paper."""
+    params = {"library": library, "question": question, "style": style,
+              "criteria": criteria, "screen": screen}  # fmt: skip
     prepare = Step("prepare", {"title": "index and pick the papers", "files": files})
     return new_job("review", params, [prepare], **kw)
 
@@ -186,6 +221,48 @@ NOTES_SYSTEM = (
     "limitations. Each value is one or two sentences ending with the page, like (p. 4). "
     'Write "not reported" when the paper doesn\'t say.'
 )
+
+
+SCREEN_SYSTEM = (
+    "You screen papers for a literature review from their title and abstract only. Decide "
+    "whether the paper is relevant to the review question and meets the criteria. Reply "
+    'with a JSON object: {"decision": "include" | "exclude" | "unsure", "reason": "<one '
+    'sentence>"}. Say "unsure" when the abstract doesn\'t tell.'
+)
+SYNTHESIS_SYSTEM = (
+    "You write the synthesis section of a literature review from notes on the included "
+    "papers. Use only the notes. Organise by theme: where the papers agree, where they "
+    "disagree or differ in method, and what remains unknown. Cite papers by their number in "
+    "square brackets, like [2] or [1, 3], after every claim; cite only numbers that appear "
+    "in the notes. Write plain paragraphs, 200 to 600 words, no headings and no reference list."
+)
+
+
+def parse_screen(text: str) -> dict[str, str]:
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        with contextlib.suppress(ValueError):
+            data = json.loads(m.group(0))
+            if isinstance(data, dict):
+                decision = str(data.get("decision", "")).strip().lower()
+                if decision in ("include", "exclude", "unsure"):
+                    return {"decision": decision, "reason": str(data.get("reason", ""))[:400]}
+    low = text.lower()
+    guess = "exclude" if "exclude" in low and "include" not in low else "unsure"
+    return {"decision": guess, "reason": text.strip()[:300] or "no answer"}
+
+
+def citations_in(text: str) -> list[int]:
+    """Numbers cited as [2], [1, 3] or [2-4] (ranges expanded)."""
+    out: list[int] = []
+    for group in re.findall(r"\[(\d+(?:\s*[,;\u2013-]\s*\d+)*)\]", text):
+        for part in re.split(r"\s*[,;]\s*", group):
+            bounds = re.split(r"\s*[\u2013-]\s*", part)
+            if len(bounds) == 2 and 0 <= int(bounds[1]) - int(bounds[0]) < 100:
+                out += list(range(int(bounds[0]), int(bounds[1]) + 1))
+            else:
+                out.append(int(bounds[0]))
+    return out
 
 
 def _paper_text(rows: list[Any], budget_tokens: int) -> str:
@@ -223,7 +300,7 @@ class JobRunner:
     """Runs queued jobs one at a time, saving after each step."""
 
     def __init__(self, store: JobStore, *, research: Callable[[], Any], ask: Ask,
-                 chat_for: Callable[[str], Any], audit: Any = None,
+                 chat_for: Callable[..., Any], audit: Any = None,
                  log: Callable[[str], None] = lambda m: None, deep: Any = None,
                  index: Index | None = None, cite_engine: str = "builtin",
                  paths: Any = None):  # fmt: skip
@@ -330,6 +407,12 @@ class JobRunner:
             return answer.as_dict()
         if step.name == "prepare":
             return await self._prepare(job, step)
+        if step.name == "screen":
+            return await self._screen(job, step)
+        if step.name == "select":
+            return self._select(job)
+        if step.name == "synthesis":
+            return await self._synthesis(job)
         if step.name == "notes":
             research = self.research()
             try:
@@ -357,6 +440,9 @@ class JobRunner:
             ids = [s.params["document_id"] for s in job.steps if s.name == "notes"
                    and s.status == "done"]  # fmt: skip
             items = from_documents([docs[i] for i in ids if i in docs], folder)
+            from cairnward.research.cite import to_bibtex
+
+            self.store.write_file(job, "references.bib", to_bibtex(items))
             style = job.params.get("style", "apa")
             entries, used = await asyncio.to_thread(format_references, items, style,
                                                     engine=self.cite_engine,
@@ -380,10 +466,98 @@ class JobRunner:
         if not picked:
             raise RuntimeError("no indexed papers to review"
                                + (f" ({len(skipped)} skipped)" if skipped else ""))  # fmt: skip
-        job.steps += [Step("notes", {"document_id": d.id, "title": d.title or Path(d.path).name})
-                      for d in picked]  # fmt: skip
-        job.steps.append(Step("table", {}))
+        papers = [{"document_id": d.id, "title": d.title or Path(d.path).name, "path": d.path}
+                  for d in picked]  # fmt: skip
+        if job.params.get("screen", False):
+            job.steps += [Step("screen", p) for p in papers]  # all fast-model work first
+            job.steps.append(Step("select", {"title": "keep the included papers"}))
+        else:
+            self._plan_reading(job, papers)
         return {"papers": len(picked), "skipped": skipped, "indexed": indexed}
+
+    @staticmethod
+    def _plan_reading(job: Job, papers: list[dict[str, Any]]) -> None:
+        job.steps += [Step("notes", {"document_id": p["document_id"], "title": p["title"]})
+                      for p in papers]  # fmt: skip
+        if job.params.get("screen") is not None:  # the full pipeline (older jobs: no synthesis)
+            job.steps.append(Step("synthesis", {"title": "write the synthesis"}))
+        job.steps.append(Step("table", {}))
+
+    def _abstract(self, library: str, step: Step) -> str:
+        """For screening: the abstract from the paper's metadata file, else its opening."""
+        research = self.research()
+        try:
+            folder = research.get(library).folder
+            rows = research.chunk_rows(library, [step.params["document_id"]])
+        finally:
+            research.close()
+        sidecar = folder / f"{step.params.get('path', '')}.csl.json"
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+            if isinstance(meta.get("abstract"), str) and len(meta["abstract"]) > 80:
+                return re.sub(r"<[^>]+>", " ", meta["abstract"])[:4000]
+        return _paper_text(rows, 600)  # title page and abstract fit in this
+
+    async def _screen(self, job: Job, step: Step) -> dict[str, Any]:
+        library = job.params["library"]
+        text = await asyncio.to_thread(self._abstract, library, step)
+        criteria = job.params.get("criteria") or "(none beyond the question)"
+        chat = self.chat_for(library, effort="low")  # the fast model (D63)
+        reply = await chat.ask([
+            {"role": "system", "content": SCREEN_SYSTEM},
+            {"role": "user", "content": f"Review question: {job.params['question']}\n\n"
+                                        f"Criteria: {criteria}\n\nTitle: {step.params['title']}"
+                                        f"\n\n{text}"},
+        ], max_tokens=150)  # fmt: skip
+        return {"title": step.params["title"], **parse_screen(reply.text)}
+
+    def _select(self, job: Job) -> dict[str, Any]:
+        kept, excluded, failed = [], 0, 0
+        for s in job.steps:
+            if s.name != "screen":
+                continue
+            if s.status != "done":
+                failed += 1  # couldn't screen: read it rather than drop it
+                kept.append(s.params)
+            elif s.output["decision"] == "exclude":
+                excluded += 1
+            else:
+                kept.append(s.params)
+        if kept:
+            self._plan_reading(job, kept)
+        else:
+            job.steps.append(Step("table", {}))
+        return {"included": len(kept), "excluded": excluded, "unscreened": failed}
+
+    async def _synthesis(self, job: Job) -> dict[str, Any]:
+        notes = [s.output for s in job.steps if s.name == "notes" and s.status == "done"]
+        if not notes:
+            raise RuntimeError("no notes to synthesise")
+        chat = self.chat_for(job.params["library"])
+        budget = max(1000, (chat.context_tokens or 8192) - 1800)
+        per_paper = max(60, budget // len(notes))
+
+        def brief(n: int, note: dict[str, Any]) -> str:
+            text = note.get("raw") or "; ".join(f"{f}: {note.get(f, '')}" for f in NOTE_FIELDS)
+            words = text.split()
+            keep = int(per_paper * 0.75)  # ~0.75 words per token
+            return f"[{n}] {note['title']}\n" + " ".join(words[:keep])
+
+        listing = "\n\n".join(brief(i, n) for i, n in enumerate(notes, 1))
+        reply = await chat.ask([
+            {"role": "system", "content": SYNTHESIS_SYSTEM},
+            {"role": "user", "content": f"Review question: {job.params['question']}\n\n"
+                                        f"Notes on the included papers:\n\n{listing}"},
+        ], max_tokens=1200)  # fmt: skip
+        cited = citations_in(reply.text)
+        invalid = sorted({n for n in cited if not 1 <= n <= len(notes)})
+        return {
+            "text": reply.text.strip(),
+            "papers": [n["title"] for n in notes],
+            "invalid_citations": invalid,
+            "uncited": [n["title"] for i, n in enumerate(notes, 1) if i not in set(cited)],
+            "trimmed": any(len(brief(i, n)) < len(str(n)) for i, n in enumerate(notes, 1)),
+        }
 
 
 def _cell(text: str) -> str:
@@ -406,7 +580,44 @@ def render(job: Job) -> str:
             else:
                 lines += ["", f"(failed: {s.error})", ""]
         return "\n".join(lines)
-    lines += [f"Review question: {job.params.get('question')}", "", "## Comparison", ""]
+    lines += [f"Review question: {job.params.get('question')}", ""]
+    if job.params.get("criteria"):
+        lines += [f"Criteria: {job.params['criteria']}", ""]
+    screens = [s for s in job.steps if s.name == "screen"]
+    if screens:
+        counts = {d: sum(1 for s in screens if s.status == "done" and s.output["decision"] == d)
+                  for d in ("include", "unsure", "exclude")}  # fmt: skip
+        lines += ["## Screening", "",
+                  f"{len(screens)} papers screened on title and abstract by the fast model: "
+                  f"{counts['include']} included, {counts['unsure']} unsure (read in full), "
+                  f"{counts['exclude']} excluded.", "",
+                  "| Paper | Decision | Reason |", "|---|---|---|"]  # fmt: skip
+        for sc in screens:
+            if sc.status == "done":
+                lines.append(f"| {_cell(sc.output['title'])} | {sc.output['decision']} | "
+                             f"{_cell(sc.output['reason'])} |")  # fmt: skip
+            else:
+                lines.append(f"| {_cell(sc.params['title'])} | not screened (read in full) | "
+                             f"{_cell(sc.error or '')} |")  # fmt: skip
+        lines.append("")
+    synth = next((s for s in job.steps if s.name == "synthesis"), None)
+    if synth is not None:
+        lines += ["## Synthesis", ""]
+        if synth.status == "done":
+            out = synth.output
+            lines += [out["text"], "", "Numbers refer to: " + "; ".join(
+                f"[{i}] {t}" for i, t in enumerate(out["papers"], 1)) + "."]  # fmt: skip
+            if out["invalid_citations"]:
+                lines.append(
+                    f"\n**Check:** cites papers that don't exist: "
+                    f"{', '.join(f'[{n}]' for n in out['invalid_citations'])}."
+                )
+            if out["uncited"]:
+                lines.append(f"\nNot cited in the synthesis: {'; '.join(out['uncited'])}.")
+        else:
+            lines.append(f"(failed: {synth.error})")
+        lines.append("")
+    lines += ["## Comparison", ""]
     lines.append("| Paper | " + " | ".join(f.capitalize() for f in NOTE_FIELDS) + " |")
     lines.append("|" + "---|" * (len(NOTE_FIELDS) + 1))
     for s in job.steps:
@@ -429,6 +640,10 @@ def render(job: Job) -> str:
     table = next((s for s in job.steps if s.name == "table" and s.status == "done"), None)
     if table:
         lines += ["", "## References", "", *[f"{e}\n" for e in table.output["bibliography"]]]
-    lines += ["", "Notes were written by a model from each paper's text: check them against "
-              "the papers (`cairnward library check`) before relying on them."]  # fmt: skip
+        if table.output.get("bibliography"):
+            lines.append("BibTeX: `references.bib` next to this file "
+                         "(`cairnward jobs result <id> --bib`).")  # fmt: skip
+    lines += ["", "Screening, notes and synthesis were written by models from the papers' text: "
+              "check them against the papers (`cairnward library check`) before relying on "
+              "them."]  # fmt: skip
     return "\n".join(lines)

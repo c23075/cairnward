@@ -92,6 +92,8 @@ class JobIn(BaseModel):
     files: list[str] | None = Field(
         default=None, max_length=2000, description="review only these PDFs (in the library folder)"
     )
+    criteria: str | None = Field(default=None, max_length=4000, description="for screening")
+    screen: bool = Field(default=True, description="screen titles/abstracts with the fast model")
 
 
 class OnlineSearchIn(BaseModel):
@@ -506,6 +508,7 @@ def management_app(
                     raise HTTPException(400, str(exc)) from None
                 not_found = [f for f in files if not (lib.folder / f).is_file()]
             job = review_job(body.library, body.question, body.style, files=files,
+                             criteria=body.criteria, screen=body.screen,
                              not_before=body.not_before)  # fmt: skip
         runner.submit(job)
         return job.summary() | {"not_found": not_found}
