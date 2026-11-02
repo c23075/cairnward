@@ -88,6 +88,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--env", default="litreview-offline")
     ap.add_argument("--keep", action="store_true", help="keep the eval library afterwards")
+    ap.add_argument("--engine", choices=["lean", "paperqa"], default="lean")
+    ap.add_argument("--compare", action="store_true",
+                    help="run both engines on the same questions (FR-RES-13)")  # fmt: skip
     args = ap.parse_args()
     spec = json.loads((HERE / "questions.json").read_text())
     name = f"eval-pdf-qa-{int(time.time())}"
@@ -100,26 +103,30 @@ def main() -> int:
             if r.returncode != 0:
                 print(r.stdout + r.stderr)
                 return 2
-        results = []
+        engines = ["lean", "paperqa"] if args.compare else [args.engine]
+        summaries = {}
         try:
-            for q in spec["questions"]:
-                r = cw("library", "ask", name, q["question"], "--json")
-                if r.returncode != 0:
-                    print(r.stdout + r.stderr)
-                    return 2
-                res = score(q, json.loads(r.stdout))
-                results.append(res)
-                print(json.dumps(res))
+            for engine in engines:
+                results = []
+                for q in spec["questions"]:
+                    r = cw("library", "ask", name, q["question"], "--json", "--engine", engine)
+                    if r.returncode != 0:
+                        print(r.stdout + r.stderr)
+                        return 2
+                    res = score(q, json.loads(r.stdout)) | {"engine": engine}
+                    results.append(res)
+                    print(json.dumps(res))
+                summaries[engine] = {
+                    "questions": len(results), "passed": sum(r["pass"] for r in results),
+                    "invented_citations": sum(r["invented"] for r in results),
+                    "seconds_total": round(sum(r["seconds"] for r in results), 1),
+                }  # fmt: skip
         finally:
             if not args.keep:
                 cw("library", "remove", name)
-    summary = {
-        "questions": len(results), "passed": sum(r["pass"] for r in results),
-        "invented_citations": sum(r["invented"] for r in results),
-        "seconds_total": round(sum(r["seconds"] for r in results), 1),
-    }  # fmt: skip
-    print(json.dumps({"summary": summary}))
-    return 0 if summary["passed"] == summary["questions"] else 1
+    for engine, summary in summaries.items():
+        print(json.dumps({"engine": engine, "summary": summary}))
+    return 0 if all(s["passed"] == s["questions"] for s in summaries.values()) else 1
 
 
 if __name__ == "__main__":

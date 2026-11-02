@@ -182,6 +182,9 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--question", required=True, help="the review question")
     rv.add_argument("--style", choices=["apa", "ieee"], default="apa")
     rv.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
+    eng = rs_sub.add_parser("engine", help="optional research engines (PaperQA2)")
+    eng.add_argument("action", choices=["install", "status"])
+    eng.add_argument("name", choices=["paperqa"])
     rb = rs_sub.add_parser("ask", help="answer every question in a file (one per line)")
     rb.add_argument("library")
     rb.add_argument("file", type=Path)
@@ -298,6 +301,11 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("-k", type=int, default=8, help="passages to give the model (default 8)")
     la.add_argument("--effort", help="effort level (default: the environment's)")
     la.add_argument("--json", action="store_true")
+    la.add_argument("--engine", choices=["lean", "paperqa"], default="lean",
+                    help="lean (default) or paperqa (optional deep engine; slower)")  # fmt: skip
+    la.add_argument("--evidence-k", type=int, default=10, help="paperqa: passages to weigh")
+    la.add_argument("--skip-summary", action="store_true",
+                    help="paperqa: no per-passage summaries (faster)")  # fmt: skip
     lrf = lib_sub.add_parser("refs", help="CSL-JSON of the library's papers (from PDF metadata)")
     lrf.add_argument("name")
     lk = lib_sub.add_parser("check", help="check a draft's quotations and references")
@@ -1009,6 +1017,16 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
     from cairnward.run.runner import RunError, management
 
     cfg = _load(args)
+    if args.command == "research" and args.research_command == "engine":
+        from cairnward.research.engines import paperqa
+
+        if args.action == "install":
+            print("Installing PaperQA2 (about 250 MB, hash-checked) in its own environment...")
+            paperqa.install(cfg.paths)
+            return 0
+        exe = paperqa.python(cfg.paths)
+        print(f"paperqa: {'installed (' + str(exe) + ')' if exe else 'not installed'}")
+        return 0 if exe else 1
     try:
         mgmt = management(cfg)
     except RunError as exc:
@@ -1231,6 +1249,23 @@ def _library_ask(cfg: Config, research: Any, args: argparse.Namespace) -> int:
     from cairnward.run.runner import RunError, management
 
     research.get(args.name)  # fail early on a wrong name
+    if getattr(args, "engine", "lean") == "paperqa":
+        from cairnward.research.engines import paperqa
+
+        print("Asking with PaperQA2 (slow on a CPU: several model calls per question)...",
+              file=sys.stderr)  # fmt: skip
+        try:
+            pq = paperqa.ask(cfg, args.name, args.question, effort=args.effort,
+                             evidence_k=args.evidence_k, skip_summary=args.skip_summary,
+                             log=lambda m: print(m, file=sys.stderr))  # fmt: skip
+        except paperqa.EngineError as exc:
+            print(f"cairnward: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(pq.as_dict(), indent=2))
+        else:
+            sys.stdout.write(pq.render())
+        return 0
     body = {"library": args.name, "question": args.question, "k": args.k, "effort": args.effort}
     data: dict[str, Any] | None = None
     try:

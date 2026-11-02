@@ -28,4 +28,4 @@ Option 3 (owner decision, 2026-11-01). The lean pipeline is the default engine a
 ## Consequences
 - Cairnward's core stays free of LiteLLM, huggingface-hub and tiktoken.
 - Interactive questions target ~2–3 minutes on the reference machine.
-- A follow-up task adds the PaperQA2 worker (FR-RES-13, Should, M3), with a guard test that fails if any of its hosted defaults reaches a request.
+- A follow-up task adds the PaperQA2 worker (FR-RES-13, Should, M3), with a guard test that fails if any of its hosted defaults reaches a request. **Done (2026-11-02):** `cairnward research engine install paperqa`, `library ask --engine paperqa`; guard in `paperqa_worker.py`, tests `tests/test_paperqa_guard.py` and `tests/isolation/test_paperqa_engine.py`; comparison with `evals/pdf_qa --compare` still to be run with the real models.

@@ -112,7 +112,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-RES-10 | Research tools exposed via MCP (`lit.search`, `lit.ask`, `lit.review.start`) | M | M2 | integration |
 | FR-RES-11 | Sub-agent fan-out in workflows with budgets, `max_parallel`, nested audit; YAML workflows | S | M3 | `test_workflow_budgets.py` |
 | FR-RES-12 | PaperQA2 spike with written recommendation | M | M1 | ADR-0014 ✅ |
-| FR-RES-13 | Optional PaperQA2 "deep" engine as a sandboxed worker (all calls through the gateway, hosted defaults off), compared with the lean pipeline on the same evals | S | M3 | guard test + eval comparison |
+| FR-RES-13 | Optional PaperQA2 "deep" engine as a sandboxed worker (all calls through the gateway, hosted defaults off), compared with the lean pipeline on the same evals | S | M3 | `tests/test_paperqa_guard.py`, `tests/isolation/test_paperqa_engine.py` ✅; `evals/pdf_qa --compare` (owner-side, real models) |
 
 ### Artifacts
 | ID | Requirement | Pri | MS | Verification |

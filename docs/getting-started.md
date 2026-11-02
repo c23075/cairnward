@@ -137,6 +137,13 @@ uv run cairnward research review thesis --question "Does sleep affect working me
 ```bash
 uv run cairnward jobs list
 ```
+Optional deeper engine, PaperQA2 (more model calls per question, so several minutes more on a CPU; runs sandboxed, every call through Cairnward):
+```bash
+uv run cairnward research engine install paperqa
+```
+```bash
+uv run cairnward library ask thesis "Does longer sleep improve working memory?" --engine paperqa
+```
 Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
 ## Important: Ollama can still be reached directly

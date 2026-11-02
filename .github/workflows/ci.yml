@@ -125,9 +125,14 @@ jobs:
       - name: Chaining to the egress proxy
         run: spikes/t06-sandbox/run_chain.sh
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - name: Isolated serve + cairnward run, end to end
+      - name: Install the optional PaperQA2 engine from its hash-pinned requirements
+        run: |
+          uv venv -q --python 3.12 /tmp/pqa
+          uv pip install -q --require-hashes -r src/cairnward/research/engines/paperqa-requirements.txt --python /tmp/pqa
+      - name: Isolated serve + cairnward run + PaperQA2 engine, end to end
         env:
           CAIRNWARD_SRT: node ${{ github.workspace }}/spikes/t06-sandbox/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js
+          CAIRNWARD_PAPERQA_VENV: /tmp/pqa
         run: |
           uv sync
           uv run pytest -v tests/isolation
