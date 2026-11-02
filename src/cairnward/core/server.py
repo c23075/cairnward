@@ -96,6 +96,12 @@ async def retention_loop(cfg: Config, vault: Vault, log: Log) -> None:
         await asyncio.sleep(24 * 3600)
 
 
+def core_background(cfg: Config, vault: Vault, hub: McpHub, log: Log) -> list[Any]:
+    """Background work of the core, the same in both modes (isolated core, single process):
+    one list so a mode can't silently miss one (the job runner once was)."""
+    return [retention_loop(cfg, vault, log), hub.jobs.run_forever()]
+
+
 async def anchor_loop(cfg: Config, audit: AuditLog, log: Log) -> None:
     """audit_anchor = "git": push a signed checkpoint every interval (spec §5.2, D49)."""
     if cfg.privacy().value("audit_anchor") != "git":
@@ -312,8 +318,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 gw.serve(),
                 _serve_uds(mgmt, socks["management"]),
                 anchor_loop(cfg, audit, log),
-                retention_loop(cfg, vault, log),
-                hub.jobs.run_forever(),
+                *core_background(cfg, vault, hub, log),
             ]
             if with_egress:
                 proxy = EgressProxy(cfg, PolicyEngine(cfg, approver=inbox, audit=audit), sessions)
@@ -561,8 +566,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
 
         async def run() -> None:
             dog = asyncio.create_task(watchdog())
-            keep = asyncio.create_task(retention_loop(cfg, vault, log))
-            research_jobs = asyncio.create_task(hub.jobs.run_forever())
+            background = [asyncio.create_task(c) for c in core_background(cfg, vault, hub, log)]
             try:
                 await asyncio.gather(
                     _serve_uds(gw, socks["gateway"]),
@@ -571,8 +575,8 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
                 )
             finally:
                 dog.cancel()
-                keep.cancel()
-                research_jobs.cancel()
+                for task in background:
+                    task.cancel()
                 inbox.close()
                 await hub.aclose()
                 await backends.aclose()

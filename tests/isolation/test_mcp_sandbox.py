@@ -2,7 +2,6 @@
 isolated (the outer process starts the server). Skipped unless srt is installed."""
 
 import json
-import os
 import subprocess
 import sys
 import threading
@@ -19,6 +18,7 @@ from cairnward.mcp.launch import LocalLauncher
 from cairnward.mcp.pins import PinStore
 from cairnward.policy import PolicyEngine
 from cairnward.sandbox import locate
+from tests.isolation.harness import MODES, Cairnward
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")
 FAKE = Path(__file__).parent.parent / "fakes" / "mcp_server.py"
@@ -81,45 +81,23 @@ async def test_sandboxed_server_limits(tmp_path: Path) -> None:
         origin.shutdown()
 
 
-def test_isolated_serve_mcp_flow(tmp_path: Path) -> None:
-    """Core isolated: approve with the CLI, call a tool through `cairnward mcp`."""
-    env = {**os.environ}
-    paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
-    env.update(
-        CAIRNWARD_CONFIG_DIR=str(paths.config_dir),
-        CAIRNWARD_DATA_DIR=str(paths.data_dir),
-        CAIRNWARD_STATE_DIR=str(paths.state_dir),
-    )
-    if locate(paths) is None:
-        pytest.skip("sandbox-runtime not installed (CAIRNWARD_SRT)")
-    from tests.isolation.test_isolated_serve import free_port
-
-    gw, dash, eg = free_port(), free_port(), free_port()
+@pytest.mark.parametrize("mode", MODES)
+def test_serve_mcp_flow(tmp_path: Path, mode: str) -> None:
+    """Approve with the CLI, call a tool through `cairnward mcp`; the server is sandboxed
+    unless isolation is off for its environment."""
     ws = tmp_path / "ws"
     ws.mkdir()
-    ports = f"[server]\ngateway_port = {gw}\ndashboard_port = {dash}\negress_port = {eg}\n"
-    write_config(paths, ws, "coding", ports)
-    pins_on = (paths.config_dir / "cairnward.toml").read_text().replace(
-        'mcp_pinning = "off"', 'mcp_pinning = "on"')  # fmt: skip
-    (paths.config_dir / "cairnward.toml").write_text(pins_on)
-    (paths.config_dir / "backends.toml").write_text(
-        '[backends.local-ollama]\ndriver = "ollama"\nurl = "http://127.0.0.1:9"\n'
-        '[roles.main]\nbackend = "local-ollama"\nmodel = "m"\n'
-        '[roles.fast]\nbackend = "local-ollama"\nmodel = "m"\n'
+    harness = Cairnward(tmp_path, mode,
+                        privacy='preset = "strict"\nmcp_pinning = "on"\napprovals = "off"\n',
+                        coding_env=f'workspace = "{ws}"\nmcp_servers = ["fake"]\n')  # fmt: skip
+    paths, env = harness.paths, harness.env
+    cmd = json.dumps([sys.executable, "-I", str(FAKE)])
+    (paths.config_dir / "mcp.toml").write_text(
+        f'[servers.fake]\ncommand = {cmd}\n[servers.fake.permissions]\nwrite = ["{{workspace}}"]\n'
     )
     cw = [sys.executable, "-m", "cairnward"]
-    serve = subprocess.Popen(
-        [*cw, "serve"],
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    harness.__enter__()
     try:
-        st = subprocess.run([*cw, "status", "--wait", "60"], env=env, capture_output=True,
-                            text=True, check=False)  # fmt: skip
-        assert "core isolated" in st.stdout, st.stdout + st.stderr
         tools = subprocess.run([*cw, "mcp", "tools", "fake"], env=env, capture_output=True,
                                text=True, check=False)  # fmt: skip
         assert "[NEW    ] echo" in tools.stdout, tools.stdout + tools.stderr
@@ -148,16 +126,10 @@ def test_isolated_serve_mcp_flow(tmp_path: Path) -> None:
         assert replies[2]["result"]["content"][0]["text"] == "written", replies[2]
         assert (ws / "via-mcp.txt").read_text() == "hello"
     finally:
-        serve.terminate()
-        try:
-            serve.wait(20)
-        except subprocess.TimeoutExpired:
-            serve.kill()
-    audit = subprocess.run([*cw, "audit", "log", "--json", "--last", "100"], env=env,
-                           capture_output=True, text=True, check=True).stdout  # fmt: skip
-    recs = [json.loads(x) for x in audit.splitlines()]
+        harness.__exit__()
+    recs = harness.audit(100)
     start = next(r for r in recs if r["action"] == "mcp.start")
-    assert start["details"]["sandboxed"] is True
+    assert start["details"]["sandboxed"] is harness.coding_sandboxed
     assert any(r["action"] == "mcp.approve" for r in recs)
     assert any(r["action"] == "tool.call" and r["phase"] == "post" and r["outcome"] == "ok"
                for r in recs)  # fmt: skip

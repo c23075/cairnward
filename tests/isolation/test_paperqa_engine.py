@@ -17,10 +17,8 @@ from typing import Any
 
 import pytest
 
-from cairnward.config.paths import Paths
-from cairnward.sandbox import locate
 from tests.fakes.pdf import make_pdf
-from tests.isolation.test_isolated_serve import free_port
+from tests.isolation.harness import MODES, Cairnward
 
 VENV = os.environ.get("CAIRNWARD_PAPERQA_VENV")
 pytestmark = pytest.mark.skipif(not VENV or not sys.platform.startswith("linux"),
@@ -63,31 +61,17 @@ class ScriptedOllama(BaseHTTPRequestHandler):
                    "message": {"role": "assistant", "content": text}})  # fmt: skip
 
 
-@pytest.mark.parametrize("mode", ["isolated", "single"])
+@pytest.mark.parametrize("mode", MODES)
 def test_paperqa_through_cairnward(tmp_path: Path, mode: str) -> None:
     """isolated: the core is sandboxed, so the outer process runs the worker for jobs;
-    single: isolation off, the server runs it (unsandboxed, as the setting says)."""
+    hybrid/off: the library's environment has isolation off, so the server runs it
+    (unsandboxed, as the setting says)."""
     CALLS.clear()
-    paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
-    env = {**os.environ, "CAIRNWARD_CONFIG_DIR": str(paths.config_dir),
-           "CAIRNWARD_DATA_DIR": str(paths.data_dir), "CAIRNWARD_STATE_DIR": str(paths.state_dir),
-           "CAIRNWARD_CACHE_DIR": str(tmp_path / "cache")}  # fmt: skip
-    if locate(paths) is None:
-        pytest.skip("sandbox-runtime not installed")
-    gw, dash, eg = free_port(), free_port(), free_port()
     srv = ThreadingHTTPServer(("127.0.0.1", 0), ScriptedOllama)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    (paths.config_dir / "environments").mkdir(parents=True)
-    (paths.config_dir / "cairnward.toml").write_text(
-        f"[server]\ngateway_port = {gw}\ndashboard_port = {dash}\negress_port = {eg}\n"
-        '[privacy]\npreset = "strict"\n' + ("" if mode == "isolated" else 'isolation = "off"\n')
-    )
-    (paths.config_dir / "backends.toml").write_text(
-        f'[backends.local-ollama]\ndriver = "ollama"\nurl = "http://127.0.0.1:{srv.server_address[1]}"\n'
-        '[roles.main]\nbackend = "local-ollama"\nmodel = "qwen3:30b"\n'
-        '[roles.fast]\nbackend = "local-ollama"\nmodel = "qwen3:1.7b"\n'
-        '[roles.embed]\nbackend = "local-ollama"\nmodel = "qwen3-embedding:0.6b"\n'
-    )
+    harness = Cairnward(tmp_path, mode, backend_url=f"http://127.0.0.1:{srv.server_address[1]}",
+                        models=("qwen3:30b", "qwen3:1.7b", "qwen3-embedding:0.6b"))  # fmt: skip
+    paths, env = harness.paths, harness.env
     engine = paths.data_dir / "engines" / "paperqa"
     engine.mkdir(parents=True)
     (engine / "venv").symlink_to(VENV or "")
@@ -98,19 +82,8 @@ def test_paperqa_through_cairnward(tmp_path: Path, mode: str) -> None:
     ]
     (papers / "sleep.pdf").write_bytes(make_pdf([page, page], title="Sleep and Memory"))
     cw = [sys.executable, "-m", "cairnward"]
-    serve = subprocess.Popen(
-        [*cw, "serve"],
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    harness.__enter__()
     try:
-        st = subprocess.run([*cw, "status", "--wait", "60"], env=env, capture_output=True,
-                            text=True, check=False)  # fmt: skip
-        expected = "core isolated" if mode == "isolated" else "single process"
-        assert expected in st.stdout, st.stdout + st.stderr
         for step in (["library", "create", "thesis", str(papers), "--env", "litreview-offline"],
                      ["library", "index", "thesis"]):  # fmt: skip
             r = subprocess.run([*cw, *step], env=env, capture_output=True, text=True, check=False)
@@ -130,15 +103,7 @@ def test_paperqa_through_cairnward(tmp_path: Path, mode: str) -> None:
                                 text=True, check=False)  # fmt: skip
         assert queued.returncode == 0, queued.stdout + queued.stderr
         job_id = queued.stdout.split()[1]
-        import time as _time
-
-        deadline = _time.monotonic() + 600
-        while _time.monotonic() < deadline:
-            shown = subprocess.run([*cw, "jobs", "show", job_id], env=env, capture_output=True,
-                                   text=True, check=False).stdout  # fmt: skip
-            if " done " in shown or " failed " in shown:
-                break
-            _time.sleep(2)
+        shown = harness.wait_job(job_id)
         assert " done " in shown and "[ok ]" in shown, shown
         result = subprocess.run([*cw, "jobs", "result", job_id], env=env, capture_output=True,
                                 text=True, check=True).stdout  # fmt: skip
@@ -156,23 +121,13 @@ def test_paperqa_through_cairnward(tmp_path: Path, mode: str) -> None:
         job_file = paths.data_dir / "jobs" / review_id / "job.json"
         saved = json.loads(job_file.read_text())
         job_file.write_text(json.dumps(saved | {"not_before": None}))
-        deadline = _time.monotonic() + 600
-        while _time.monotonic() < deadline:
-            shown = subprocess.run([*cw, "jobs", "show", review_id], env=env, capture_output=True,
-                                   text=True, check=False).stdout  # fmt: skip
-            if " done " in shown or " failed " in shown:
-                break
-            _time.sleep(3)  # the runner looks for due jobs at least every minute
+        shown = harness.wait_job(review_id)
         assert " done " in shown and "[ok ] prepare" in shown, shown
         result = subprocess.run([*cw, "jobs", "result", review_id], env=env,
                                 capture_output=True, text=True, check=True).stdout  # fmt: skip
         assert "| Naps and Memory |" in result and "Sleep and Memory" not in result, result
     finally:
-        serve.terminate()
-        try:
-            serve.wait(20)
-        except subprocess.TimeoutExpired:
-            serve.kill()
+        harness.__exit__()
         srv.shutdown()
     assert answer["sources"] and answer["sources"][0]["file"] == "sleep.pdf"
     assert answer["text"].startswith("Longer sleep improved working memory [1]")
