@@ -134,6 +134,10 @@ Run a review overnight: notes per paper and a comparison table with references (
 ```bash
 uv run cairnward research review thesis --question "Does sleep affect working memory?" --at 23:30
 ```
+The papers are picked when the review starts, so PDFs you add to the library folder before then are indexed and included. To review only some papers (paths inside the library folder; they can be added after queuing):
+```bash
+uv run cairnward research review thesis --question "Does sleep affect working memory?" --files new/smith2024.pdf new/lee2025.pdf --at 23:30
+```
 ```bash
 uv run cairnward jobs list
 ```

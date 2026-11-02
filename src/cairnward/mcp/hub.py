@@ -482,7 +482,6 @@ class McpHub:
 
     async def _lit_review(self, environment: str, arguments: dict[str, Any], *, client: str,
                           run_id: str | None) -> dict[str, Any]:  # fmt: skip
-        from cairnward.research import Research
         from cairnward.research.jobs import review_job
 
         libraries = self._libraries(environment)
@@ -500,11 +499,10 @@ class McpHub:
         if not decision.allowed:
             await asyncio.to_thread(self.engine.audit_deny, decision)
             return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
-        with Research.open(self.cfg.paths) as research:
-            job = review_job(name, question, research.documents(name), style,
-                             actor=f"client:{client}")  # fmt: skip
+        job = review_job(name, question, style, actor=f"client:{client}")
         self.jobs.submit(job)
-        text = (f"Review job {job.id} queued: {len(job.steps) - 1} papers. Follow it with "
+        text = (f"Review job {job.id} queued: it indexes the library and reviews every paper "
+                f"in it. Follow it with "
                 f"`cairnward jobs show {job.id}`; the result will be in `cairnward jobs result "
                 f"{job.id}`.")  # fmt: skip
         return {"content": [{"type": "text", "text": text}],

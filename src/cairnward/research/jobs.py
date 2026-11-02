@@ -7,7 +7,8 @@ up from the first unfinished step. The runner lives in the core, runs one job at
 
 Job types:
 - `ask`: lit.ask for each question in a list.
-- `review` (first slice of the review pipeline, FR-RES-4): for each paper, the main
+- `review` (first slice of the review pipeline, FR-RES-4): when it starts, the library
+  (or the chosen files) is indexed and the papers picked; then for each paper, the main
   model reads it (as much as fits the context) and writes structured notes with page
   numbers; then a comparison table and a bibliography are assembled without a model.
 Results are Markdown in `<data>/jobs/<id>/result.md`.
@@ -146,13 +147,35 @@ def ask_job(library: str, questions: list[str], *, engine: str = "lean",
     return new_job("ask", params, steps, **kw)
 
 
-def review_job(library: str, question: str, documents: list[Any], style: str = "apa",
-               **kw: Any) -> Job:  # fmt: skip
-    steps = [Step("notes", {"document_id": d.id, "title": d.title or Path(d.path).name})
-             for d in documents if d.status == "indexed"]  # fmt: skip
-    steps.append(Step("table", {}))
-    return new_job("review", {"library": library, "question": question, "style": style},
-                   steps, **kw)  # fmt: skip
+def review_job(library: str, question: str, style: str = "apa", *,
+               files: list[str] | None = None, **kw: Any) -> Job:  # fmt: skip
+    """A review whose papers are picked when it starts: the first step indexes the library
+    (or just `files`, paths relative to its folder) and then adds one notes step per
+    paper and the table, so PDFs added before a scheduled start are included."""
+    params = {"library": library, "question": question, "style": style}
+    prepare = Step("prepare", {"title": "index and pick the papers", "files": files})
+    return new_job("review", params, [prepare], **kw)
+
+
+def library_files(folder: Path, given: list[str]) -> list[str]:
+    """Paths (absolute, or relative to the library folder) -> PDF paths relative to it."""
+    root = folder.resolve()
+    out: list[str] = []
+    for raw in given:
+        p = Path(raw).expanduser()
+        p = (p if p.is_absolute() else root / p).resolve()
+        try:
+            rel = p.relative_to(root).as_posix()
+        except ValueError:
+            raise ValueError(f"{raw} isn't in the library folder {folder}: copy it there "
+                             "first") from None  # fmt: skip
+        if p.suffix.lower() != ".pdf":
+            raise ValueError(f"{raw} isn't a PDF")
+        if rel not in out:
+            out.append(rel)
+    if not out:
+        raise ValueError("no files given")
+    return out
 
 
 # ------------------------------------------------------------------ step work
@@ -191,6 +214,8 @@ def parse_notes(text: str) -> dict[str, str]:
 
 
 Ask = Callable[..., Awaitable[Any]]  # (library, question, **kw) -> Answer
+# (library, files or None, actor) -> index report as a dict
+Index = Callable[[str, list[str] | None, str], Awaitable[dict[str, Any]]]
 Chat = Callable[[list[dict[str, Any]]], Awaitable[Any]]  # messages -> research.llm.Reply
 
 
@@ -199,8 +224,10 @@ class JobRunner:
 
     def __init__(self, store: JobStore, *, research: Callable[[], Any], ask: Ask,
                  chat_for: Callable[[str], Any], audit: Any = None,
-                 log: Callable[[str], None] = lambda m: None, deep: Any = None):  # fmt: skip
+                 log: Callable[[str], None] = lambda m: None, deep: Any = None,
+                 index: Index | None = None):  # fmt: skip
         self.store, self.research, self.ask, self.chat_for = store, research, ask, chat_for
+        self.index = index  # indexes a library (or some of its files) before a review
         self.deep = deep  # research.engines.deep.DeepEngine (PaperQA2), optional
         self.audit, self.log = audit, log
         self.wake = asyncio.Event()
@@ -250,7 +277,10 @@ class JobRunner:
         job.status, job.started = "running", job.started or _now()
         self.store.save(job)
         self.log(f"research job {job.id} ({job.kind}) {'resumed' if resumed else 'started'}")
-        for step in job.steps:
+        i = 0
+        while i < len(job.steps):  # "prepare" adds steps as it finishes
+            step = job.steps[i]
+            i += 1
             if step.status != "pending":
                 continue
             if job.id in self._cancelled or self.store.load(job.id).status == "cancelled":
@@ -296,6 +326,8 @@ class JobRunner:
             else:
                 answer = await self.ask(library, step.params["question"], actor=f"job:{job.id}")
             return answer.as_dict()
+        if step.name == "prepare":
+            return await self._prepare(job, step)
         if step.name == "notes":
             research = self.research()
             try:
@@ -324,6 +356,27 @@ class JobRunner:
             items = from_documents([docs[i] for i in ids if i in docs])
             return {"bibliography": bibliography(items, job.params.get("style", "apa"))}
         raise ValueError(f"unknown step {step.name}")
+
+    async def _prepare(self, job: Job, step: Step) -> dict[str, Any]:
+        library, files = job.params["library"], step.params.get("files")
+        indexed = await self.index(library, files, f"job:{job.id}") if self.index else None
+        research = self.research()
+        try:
+            docs = research.documents(library)
+        finally:
+            research.close()
+        by_path = {d.path: d for d in docs}
+        wanted = files if files is not None else [d.path for d in docs]
+        picked = [by_path[f] for f in wanted if f in by_path and by_path[f].status == "indexed"]
+        skipped = [{"file": f, "why": by_path[f].status if f in by_path else "not found"}
+                   for f in wanted if f not in {d.path for d in picked}]  # fmt: skip
+        if not picked:
+            raise RuntimeError("no indexed papers to review"
+                               + (f" ({len(skipped)} skipped)" if skipped else ""))  # fmt: skip
+        job.steps += [Step("notes", {"document_id": d.id, "title": d.title or Path(d.path).name})
+                      for d in picked]  # fmt: skip
+        job.steps.append(Step("table", {}))
+        return {"papers": len(picked), "skipped": skipped, "indexed": indexed}
 
 
 def _cell(text: str) -> str:
@@ -362,6 +415,10 @@ def render(job: Job) -> str:
         else:
             lines.append(f"| {_cell(s.params['title'])} | (failed: {_cell(s.error or '')}) |"
                          + " |" * 4)  # fmt: skip
+    prep = next((s for s in job.steps if s.name == "prepare" and s.status == "done"), None)
+    if prep and prep.output.get("skipped"):
+        lines += ["", "Not reviewed: " + "; ".join(f"{x['file']} ({x['why']})"
+                                                 for x in prep.output["skipped"])]  # fmt: skip
     table = next((s for s in job.steps if s.name == "table" and s.status == "done"), None)
     if table:
         lines += ["", "## References", "", *[f"{e}\n" for e in table.output["bibliography"]]]

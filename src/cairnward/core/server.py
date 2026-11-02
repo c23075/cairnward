@@ -187,6 +187,20 @@ def _core_parts(
         return InProcessChat(cfg, engine, backends, environment=env, scheduler=scheduler,
                              purpose="review")  # fmt: skip
 
+    async def index_library(library: str, files: list[str] | None, actor: str) -> dict[str, Any]:
+        from cairnward.research import InProcessEmbedder, Research
+
+        with Research.open(cfg.paths) as research:
+            env = research.get(library).environment
+            embedder = InProcessEmbedder(cfg, engine, backends, environment=env, actor=actor)
+            report = await research.index(library, embedder, only=files)
+        fields = ("added", "updated", "unchanged", "no_text", "failed", "missing", "chunks",
+                  "seconds")  # fmt: skip
+        details = {k: getattr(report, k) for k in fields}
+        audit.append("library.index", actor=actor, environment=env, target=library,
+                     details=details | {"files": len(files) if files else None})  # fmt: skip
+        return details
+
     from cairnward.research import Research
     from cairnward.research.engines.deep import DeepEngine, LocalExecutor
     from cairnward.research.jobs import JobRunner, JobStore
@@ -195,7 +209,7 @@ def _core_parts(
                       executor=deep_executor or LocalExecutor(cfg, log))  # fmt: skip
     jobs = JobRunner(JobStore(cfg.paths.data_dir), research=lambda: Research.open(cfg.paths),
                      ask=research_ask, chat_for=chat_for, audit=audit, log=log,
-                     deep=deep)  # fmt: skip
+                     deep=deep, index=index_library)  # fmt: skip
 
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
                  provenance=tracker, vault=vault, backends=backends,

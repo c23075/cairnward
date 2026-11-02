@@ -143,6 +143,30 @@ def test_paperqa_through_cairnward(tmp_path: Path, mode: str) -> None:
         result = subprocess.run([*cw, "jobs", "result", job_id], env=env, capture_output=True,
                                 text=True, check=True).stdout  # fmt: skip
         assert "Longer sleep improved working memory [1]" in result and "sleep.pdf" in result
+        # a review of chosen files, one of them added after queuing: indexed by the core
+        new = papers / "later" / "nap.pdf"
+        queued = subprocess.run([*cw, "research", "review", "thesis", "--question", "Sleep?",
+                                 "--files", str(new), "--at", "00:00"], env=env,
+                                capture_output=True, text=True, check=False)  # fmt: skip
+        assert queued.returncode == 0 and "later/nap.pdf" in queued.stdout, queued.stderr
+        review_id = queued.stdout.split()[1]
+        new.parent.mkdir()
+        new.write_bytes(make_pdf([page], title="Naps and Memory"))
+        # "--at 00:00" is the next midnight; start it now by editing the saved job
+        job_file = paths.data_dir / "jobs" / review_id / "job.json"
+        saved = json.loads(job_file.read_text())
+        job_file.write_text(json.dumps(saved | {"not_before": None}))
+        deadline = _time.monotonic() + 600
+        while _time.monotonic() < deadline:
+            shown = subprocess.run([*cw, "jobs", "show", review_id], env=env, capture_output=True,
+                                   text=True, check=False).stdout  # fmt: skip
+            if " done " in shown or " failed " in shown:
+                break
+            _time.sleep(3)  # the runner looks for due jobs at least every minute
+        assert " done " in shown and "[ok ] prepare" in shown, shown
+        result = subprocess.run([*cw, "jobs", "result", review_id], env=env,
+                                capture_output=True, text=True, check=True).stdout  # fmt: skip
+        assert "| Naps and Memory |" in result and "Sleep and Memory" not in result, result
     finally:
         serve.terminate()
         try:

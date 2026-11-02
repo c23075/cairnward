@@ -89,6 +89,9 @@ class JobIn(BaseModel):
     engine: Literal["lean", "paperqa"] = "lean"
     evidence_k: int = Field(default=10, ge=1, le=50)
     skip_summary: bool = False
+    files: list[str] | None = Field(
+        default=None, max_length=2000, description="review only these PDFs (in the library folder)"
+    )
 
 
 class AskQuestionIn(BaseModel):
@@ -415,14 +418,15 @@ def management_app(
     @app.post("/v1/jobs")
     def submit_job(body: JobIn) -> dict[str, Any]:
         from cairnward.research import LibraryError, Research
-        from cairnward.research.jobs import ask_job, review_job
+        from cairnward.research.jobs import ask_job, library_files, review_job
 
         runner = need_jobs()
         try:
             with Research.open(cfg.paths) as research:
-                docs = research.documents(body.library)
+                lib = research.get(body.library)
         except LibraryError as exc:
             raise HTTPException(404, str(exc)) from None
+        not_found: list[str] = []
         if body.kind == "ask":
             if not body.questions:
                 raise HTTPException(400, "an ask job needs questions")
@@ -435,15 +439,22 @@ def management_app(
             job = ask_job(body.library, body.questions, not_before=body.not_before,
                           engine=body.engine, evidence_k=body.evidence_k,
                           skip_summary=body.skip_summary)  # fmt: skip
+            if not job.steps:
+                raise HTTPException(400, "nothing to do: no questions")
         else:
             if not body.question:
                 raise HTTPException(400, "a review job needs a review question")
-            job = review_job(body.library, body.question, docs, body.style,
+            files = None
+            if body.files is not None:
+                try:
+                    files = library_files(lib.folder, body.files)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from None
+                not_found = [f for f in files if not (lib.folder / f).is_file()]
+            job = review_job(body.library, body.question, body.style, files=files,
                              not_before=body.not_before)  # fmt: skip
-        if len(job.steps) <= (1 if body.kind == "review" else 0):
-            raise HTTPException(400, "nothing to do: no indexed papers or no questions")
         runner.submit(job)
-        return job.summary()
+        return job.summary() | {"not_found": not_found}
 
     @app.get("/v1/jobs")
     def list_jobs() -> list[dict[str, Any]]:

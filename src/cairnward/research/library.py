@@ -243,6 +243,7 @@ class Research:
         *,
         prune: bool = False,
         rebuild: bool = False,
+        only: list[str] | None = None,
         progress: Callable[[str], None] | None = None,
         target_tokens: int = 350,
         overlap_tokens: int = 60,
@@ -262,9 +263,12 @@ class Research:
         report = IndexReport()
         started = time.monotonic()
         known = {r.path: r for r in self.documents(name)}
-        files = sorted(
-            p for p in lib.folder.rglob("*") if p.suffix.lower() == ".pdf" and p.is_file()
-        )
+        if only is not None:  # just these files (paths relative to the folder)
+            files = sorted(p for p in (lib.folder / rel for rel in only) if p.is_file())
+        else:
+            files = sorted(
+                p for p in lib.folder.rglob("*") if p.suffix.lower() == ".pdf" and p.is_file()
+            )
         seen: set[str] = set()
         for n, path in enumerate(files, start=1):
             rel = path.relative_to(lib.folder).as_posix()
@@ -345,7 +349,7 @@ class Research:
                 f"({time.monotonic() - t0:.1f}s)"
             )
         for rel, row in known.items():
-            if rel in seen:
+            if rel in seen or (only is not None and rel not in only):
                 continue
             report.missing += 1
             with self._db.begin() as conn:

@@ -182,6 +182,14 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--question", required=True, help="the review question")
     rv.add_argument("--style", choices=["apa", "ieee"], default="apa")
     rv.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
+    rv.add_argument(
+        "--files",
+        nargs="+",
+        metavar="PDF",
+        help="review only these PDFs (in the library folder; indexed when the job starts)",
+    )
+    rv.add_argument("--files-from", type=Path, metavar="LIST",
+                    help="like --files, read from a file with one path per line")  # fmt: skip
     eng = rs_sub.add_parser("engine", help="optional research engines (PaperQA2)")
     eng.add_argument("action", choices=["install", "status"])
     eng.add_argument("name", choices=["paperqa"])
@@ -1060,6 +1068,16 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
             body: dict[str, Any] = {"library": args.library, "not_before": start}
             if args.research_command == "review":
                 body |= {"kind": "review", "question": args.question, "style": args.style}
+                files = list(args.files or [])
+                if args.files_from:
+                    files += [x.strip() for x in args.files_from.read_text(
+                        encoding="utf-8").splitlines() if x.strip()]  # fmt: skip
+                if args.files or args.files_from:
+                    # absolute here: the server's working directory isn't ours
+                    body["files"] = [
+                        str(Path(f).expanduser().absolute()) if Path(f).expanduser().exists() else f
+                        for f in files
+                    ]
             else:
                 questions = args.file.read_text(encoding="utf-8").splitlines()
                 body |= {"kind": "ask", "questions": [q for q in questions if q.strip()],
@@ -1070,6 +1088,9 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
                 return fail(resp)
             job = resp.json()
             print(f"queued: {line(job)}")
+            if job.get("not_found"):
+                print("not in the library folder yet (reviewed only if there when the job "
+                      "starts): " + ", ".join(job["not_found"]))  # fmt: skip
             print(f"follow it with: cairnward jobs show {job['id']}")
             return 0
         action = args.jobs_command or "list"
