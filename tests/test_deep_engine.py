@@ -1,6 +1,7 @@
 """PaperQA2 in research jobs (FR-RES-13 + FR-RES-3): the core issues and revokes the run
 key, maps and records the answer; the worker runs wherever sandboxes may start."""
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,8 @@ from tests.fakes.pdf import HashEmbedder, make_pdf
 async def lib(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Paths:
     paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
     monkeypatch.setenv("CAIRNWARD_CACHE_DIR", str(tmp_path / "cache"))
-    exe = paths.data_dir / "engines" / "paperqa" / "venv" / "bin" / "python"
+    venv = paths.data_dir / "engines" / "paperqa" / "venv"
+    exe = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     exe.parent.mkdir(parents=True)
     exe.write_text("")  # "installed"
     papers = tmp_path / "papers"
