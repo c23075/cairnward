@@ -133,6 +133,14 @@ class AnchorConfig(_Strict):
     )
     branch: str = Field(default="main", pattern=r"^[A-Za-z0-9._/-]{1,100}$")
     interval_minutes: int = Field(default=60, ge=5, le=1440)
+    tsa_url: str | None = Field(
+        default=None,
+        description="opt-in RFC 3161 timestamp authority for checkpoints, e.g. "
+        "https://freetsa.org/tsr (only the checkpoint's hash is sent)",
+    )
+    tsa_ca_file: str | None = Field(
+        default=None, description="the authority's CA certificate (PEM), to verify timestamps"
+    )
 
 
 class BackupConfig(_Strict):

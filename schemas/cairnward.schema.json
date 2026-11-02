@@ -29,6 +29,32 @@
           "default": null,
           "description": "a private git repo you own, e.g. git@github.com:you/anchors.git",
           "title": "Repo"
+        },
+        "tsa_ca_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "the authority's CA certificate (PEM), to verify timestamps",
+          "title": "Tsa Ca File"
+        },
+        "tsa_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "opt-in RFC 3161 timestamp authority for checkpoints, e.g. https://freetsa.org/tsr (only the checkpoint's hash is sent)",
+          "title": "Tsa Url"
         }
       },
       "title": "AnchorConfig",
@@ -586,7 +612,9 @@
       "default": {
         "branch": "main",
         "interval_minutes": 60,
-        "repo": null
+        "repo": null,
+        "tsa_ca_file": null,
+        "tsa_url": null
       }
     },
     "backup": {

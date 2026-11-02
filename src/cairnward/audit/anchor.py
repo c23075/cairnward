@@ -53,6 +53,8 @@ class AnchorResult:
     last_seq: int | None = None
     last_ts: str | None = None
     unanchored: int = 0
+    timestamped: int = 0  # checkpoints with a verified RFC 3161 timestamp
+    last_tsa_time: str | None = None
     problems: list[str] = field(default_factory=list)
 
 
@@ -184,6 +186,16 @@ class Anchorer:
                    "ts": datetime.now(UTC).isoformat(timespec="seconds")}  # fmt: skip
         text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         entry = {"payload": payload, "sig": self._sign(text)}
+        if self.cfg.tsa_url:  # third-party proof of the time (D69); failure isn't fatal
+            import base64
+
+            from cairnward.audit import timestamp
+
+            try:
+                reply = timestamp.request(self.cfg.tsa_url, text.encode())
+                entry["tsr"] = base64.b64encode(reply).decode()
+            except timestamp.TimestampError as exc:
+                entry["tsr_error"] = str(exc)[:200]
         with checkpoints.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, sort_keys=True) + "\n")
         self._git("add", "anchors")
@@ -221,6 +233,18 @@ class Anchorer:
                 continue
             result.anchors += 1
             result.last_seq, result.last_ts = seq, payload.get("ts")
+            if entry.get("tsr") and self.cfg.tsa_ca_file:
+                import base64
+
+                from cairnward.audit import timestamp
+
+                try:
+                    when = timestamp.verify(text.encode(), base64.b64decode(entry["tsr"]),
+                                            Path(self.cfg.tsa_ca_file).expanduser())  # fmt: skip
+                    result.timestamped += 1
+                    result.last_tsa_time = when
+                except timestamp.TimestampError as exc:
+                    result.problems.append(f"anchor for seq {seq}: {exc}")
             rec = log.at(int(seq)) if isinstance(seq, int) else None
             if rec is None:
                 result.problems.append(f"seq {seq} was anchored but is missing from the log")

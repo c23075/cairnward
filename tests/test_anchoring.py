@@ -108,3 +108,29 @@ def test_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     assert main([*base, "verify", "--anchors"]) == 0
     out = capsys.readouterr().out
     assert "chain and mirror intact" in out and "anchors OK: 1 checkpoint(s)" in out
+
+
+@pytest.mark.skipif(shutil.which("openssl") is None, reason="needs openssl")
+def test_checkpoints_get_rfc3161_timestamps(setup: tuple[Paths, AuditLog, Anchorer, Path],
+                                            tmp_path: Path,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:  # fmt: skip
+    from cairnward.audit import timestamp
+    from tests.test_timestamp import authority, make_tsa
+
+    paths, log, _anchorer, remote = setup
+    tsa_dir = make_tsa(tmp_path)
+    real_request = timestamp.request
+    monkeypatch.setattr(timestamp, "request", lambda url, data: real_request(
+        url, data, transport=authority(tsa_dir)))  # fmt: skip
+    timed = Anchorer(paths, AnchorConfig(repo=remote.as_uri(), tsa_url="https://tsa.example/tsr",
+                                         tsa_ca_file=str(tsa_dir / "ca.crt")))  # fmt: skip
+    assert timed.anchor(log) is not None
+    res = timed.verify(log)
+    assert res.ok and res.timestamped == 1 and "GMT" in (res.last_tsa_time or "")
+    # an authority that's down: the checkpoint is still made, the error noted
+    monkeypatch.setattr(timestamp, "request", lambda url, data: (_ for _ in ()).throw(
+        timestamp.TimestampError("the timestamp authority didn't answer")))  # fmt: skip
+    log.append("run.start", actor="user")
+    assert timed.anchor(log) is not None
+    _, checkpoints = timed._files()
+    assert "tsr_error" in checkpoints.read_text().splitlines()[-1]

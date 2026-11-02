@@ -633,6 +633,9 @@ def _audit_verify_anchors(args: argparse.Namespace, log: Any) -> int:
     if res.ok:
         print(f"anchors OK: {res.anchors} checkpoint(s), last seq {res.last_seq} at {res.last_ts}; "
               f"{res.unanchored} record(s) since then")  # fmt: skip
+        if res.timestamped:
+            print(f"timestamps OK: {res.timestamped} checkpoint(s) timestamped by the authority, "
+                  f"the last at {res.last_tsa_time}")  # fmt: skip
         return 0
     print(f"anchors FAILED: {len(res.problems)} problem(s)", file=sys.stderr)
     for problem in res.problems:
