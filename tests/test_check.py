@@ -41,3 +41,16 @@ def test_check_writes_one_report(tmp_path: Path) -> None:
     # the scripted model doesn't answer like a real one, so the eval itself fails here
     assert res.returncode == 1 and "report:" in res.stdout
     assert "working memory" not in text  # no answers in the report
+
+
+def test_a_crashing_section_doesnt_stop_the_check() -> None:
+    from cairnward.check import Section, _guarded
+
+    def boom() -> Section:
+        raise ValueError("invalid literal for int() with base 10: 'p. 2'")
+
+    sec = _guarded("lit.ask eval", boom)
+    assert sec.status == "fail" and sec.title == "lit.ask eval"
+    assert "crashed: ValueError" in sec.lines[0] and "test_check.py" in sec.lines[0]
+    ok = _guarded("x", lambda: Section("x"))
+    assert ok.title == "x"

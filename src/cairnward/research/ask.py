@@ -70,7 +70,7 @@ class Answer:
         lines = [self.text, ""]
         if self.sources:
             lines.append("Sources:")
-            lines += [f"[{s.n}] {s.title}, p. {s.pages} ({s.file})" for s in self.sources]
+            lines += [f"[{s.n}] {s.title}, {s.pages} ({s.file})" for s in self.sources]
         if self.invalid_citations:
             lines.append("Note: removed citations to passages that weren't given: "
                          + ", ".join(f"[{n}]" for n in self.invalid_citations))  # fmt: skip
@@ -117,7 +117,7 @@ def build_messages(question: str, hits: list[Hit]) -> list[dict[str, str]]:
     blocks = []
     for n, h in enumerate(hits, 1):
         title = h.title or Path(h.path).name
-        blocks.append(f"[{n}] {title}, p. {h.pages}\n{h.text.strip()}")
+        blocks.append(f"[{n}] {title}, {h.pages}\n{h.text.strip()}")
     user = "Passages:\n\n" + "\n\n".join(blocks) + f"\n\nQuestion: {question}"
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
 

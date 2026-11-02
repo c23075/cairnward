@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -75,8 +76,8 @@ def score(q: dict[str, Any], a: dict[str, Any]) -> dict[str, Any]:
         return res
     pages_ok = False
     for s in a.get("sources", []):
-        lo, _, hi = s["pages"].partition("-")
-        if s["file"] == exp["file"] and int(lo) <= exp["page"] <= int(hi or lo):
+        nums = [int(n) for n in re.findall(r"\d+", str(s.get("pages", "")))]  # "p. 2", "pp. 2-3"
+        if s.get("file") == exp["file"] and nums and nums[0] <= exp["page"] <= nums[-1]:
             pages_ok = True
     res["cited"] = pages_ok
     res["content"] = all(k.lower() in a.get("text", "").lower() for k in exp["keywords"])

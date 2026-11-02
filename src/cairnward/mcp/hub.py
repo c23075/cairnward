@@ -528,7 +528,7 @@ class McpHub:
             self.provenance.note_tool(client, run_id, f"lit_search in {name}")
         await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok",
                                 details={"hits": len(hits)})  # fmt: skip
-        lines = [f"[{h.title or Path(h.path).name}, p. {h.pages}] {h.text}" for h in hits]
+        lines = [f"[{h.title or Path(h.path).name}, {h.pages}] {h.text}" for h in hits]
         return {
             "content": [{"type": "text", "text": "\n\n".join(lines) or "No passages found."}],
             "structuredContent": {"hits": [{

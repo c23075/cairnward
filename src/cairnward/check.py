@@ -290,6 +290,22 @@ def default_out(paths: Paths, day: str) -> Path:
     return paths.data_dir / "reports" / f"check-{day}.md"
 
 
+def _guarded(title: str, build: Callable[[], Section]) -> Section:
+    """One section; an unexpected error is reported there and the check goes on."""
+    try:
+        return build()
+    except Exception as exc:  # a bug in an eval or in Cairnward: keep the other sections
+        import traceback
+
+        sec = Section(title)
+        sec.status = "fail"
+        where = traceback.extract_tb(exc.__traceback__)[-1]
+        at = f"{Path(where.filename).name}:{where.lineno}"
+        sec.lines.append(f"crashed: {type(exc).__name__}: {str(exc)[:300]} ({at}); "
+                         "please report this")  # fmt: skip
+        return sec
+
+
 def run(paths: Paths, *, env: str = "litreview-offline", paperqa: bool = True,
         coding: bool = True, review: bool = False, out: Path | None = None,
         log: Callable[[str], None] = print) -> int:  # fmt: skip
@@ -306,16 +322,21 @@ def run(paths: Paths, *, env: str = "litreview-offline", paperqa: bool = True,
 
         engines = ["lean"] + (["paperqa"] if paperqa and pqa.python(paths) else [])
         log(f"lit.ask eval ({', '.join(engines)}); on a CPU this takes a while ...")
-        sections.append(pdf_qa_section(env, engines, log))
+        sections.append(
+            _guarded(
+                f"lit.ask eval ({', '.join(engines)}; environment {env})",
+                lambda: pdf_qa_section(env, engines, log),
+            )
+        )
         if paperqa and "paperqa" not in engines:
             sections[-1].lines.append("\nPaperQA2 isn't installed, so it wasn't compared "
                                       "(`cairnward research engine install paperqa`).")  # fmt: skip
         if coding:
-            sections.append(coding_section(list(AGENTS), log))
+            sections.append(_guarded("Coding eval", lambda: coding_section(list(AGENTS), log)))
         if review:
             log("review pipeline eval (screening, notes, synthesis); on a CPU ~30 min ...")
-            sections.append(review_section(env))
-        sections.append(clients_section())
+            sections.append(_guarded("Review pipeline eval", lambda: review_section(env)))
+        sections.append(_guarded("Chat clients", clients_section))
     text = render(sections, info, started)
     target = out or default_out(paths, started[:10])
     target.parent.mkdir(parents=True, exist_ok=True)

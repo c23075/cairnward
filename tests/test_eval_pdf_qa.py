@@ -34,11 +34,13 @@ def test_facts_land_on_their_pages(tmp_path: Path) -> None:
 def test_scoring() -> None:
     ev = load()
     q = {"id": "q", "expect": {"file": "a.pdf", "page": 2, "keywords": ["1.8"]}}
-    good = {"text": "It retreated 1.8 km [1].", "sources": [{"file": "a.pdf", "pages": "2"}],
+    good = {"text": "It retreated 1.8 km [1].", "sources": [{"file": "a.pdf", "pages": "p. 2"}],
             "invalid_citations": [], "seconds": 3}  # fmt: skip
     assert ev.score(q, good)["pass"]
-    wrong_page = {**good, "sources": [{"file": "a.pdf", "pages": "3-4"}]}
+    wrong_page = {**good, "sources": [{"file": "a.pdf", "pages": "pp. 3-4"}]}
     assert not ev.score(q, wrong_page)["pass"]
+    spanning = {**good, "sources": [{"file": "a.pdf", "pages": "pp. 1-3"}]}
+    assert ev.score(q, spanning)["pass"]
     invented = {**good, "invalid_citations": [7]}
     assert not ev.score(q, invented)["pass"]
     u = {"id": "u", "expect": {"unanswerable": True}}
