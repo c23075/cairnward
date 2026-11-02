@@ -975,6 +975,13 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
             for s in servers:
                 p = s["permissions"]
                 print(f"{s['name']}  {s['version'] or '(no version noted)'}  {s['description']}")
+                if s.get("url"):
+                    print(f"  remote  : {s['url']} (through egress; the environment's network "
+                          "rules apply)")  # fmt: skip
+                    if s.get("headers"):
+                        print(f"  headers : {', '.join(s['headers'])}")
+                    print(f"  enabled : {', '.join(s['environments']) or 'nowhere (mcp_servers)'}")
+                    continue
                 print(f"  command : {' '.join(s['command'])}")
                 print(f"  enabled : {', '.join(s['environments']) or 'nowhere (mcp_servers)'}")
                 print(f"  network : {', '.join(p['network']) or 'none'}")

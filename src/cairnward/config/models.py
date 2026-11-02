@@ -525,6 +525,25 @@ class EnvironmentConfig(_Strict):
 # --------------------------------------------------------------------------- mcp.toml
 
 _MCP_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
+_SECRET_HEADER = re.compile(r"auth|key|token|secret|cookie|session", re.I)
+
+
+def _check_mcp_url(url: str) -> None:
+    parts = urlparse(url)
+    if parts.scheme not in ("https", "http") or not parts.hostname:
+        raise ValueError(f"url must be https://host/path (got '{url}')")
+    if parts.username or parts.password:
+        raise ValueError("put credentials in headers (${env:NAME}), not in the url")
+    if parts.scheme == "http":
+        host = parts.hostname
+        try:
+            local = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            local = host == "localhost"
+        if not local:
+            raise ValueError("a remote MCP server needs https (http only on this machine)")
+
+
 ToolSetting = Literal["allow", "ask", "deny"]
 
 
@@ -551,7 +570,18 @@ class McpPermissions(_Strict):
 
 class McpServer(_Strict):
     description: str = ""
-    command: list[str] = Field(min_length=1, description="stdio server command and arguments")
+    command: list[str] = Field(
+        default_factory=list, description="stdio server command and arguments (or `url`)"
+    )
+    url: str | None = Field(
+        default=None,
+        description="a remote server (streamable HTTP): https, or http on this machine; "
+        "reached through egress in the environment",
+    )
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="HTTP headers for a remote server; secrets as ${env:NAME}, never literal",
+    )
     env: dict[str, str] = Field(default_factory=dict, description="fixed environment variables")
     cwd: str = Field(default="{data}", description="working folder: {data} or {workspace}")
     version: str = Field(default="", description="the version you reviewed (shown, audited)")
@@ -569,6 +599,23 @@ class McpServer(_Strict):
 
     @model_validator(mode="after")
     def _pin_pair(self) -> McpServer:
+        if bool(self.command) == bool(self.url):
+            raise ValueError("give either command (a local server) or url (a remote one)")
+        if self.url is not None:
+            _check_mcp_url(self.url)
+            if self.pin_file is not None or self.env or self.permissions != McpPermissions():
+                raise ValueError(
+                    "pin_file, env and permissions are for local servers; a remote one is "
+                    "limited by the environment's network rules"
+                )
+            for name, value in self.headers.items():
+                if _SECRET_HEADER.search(name) and "${env:" not in value:
+                    raise ValueError(
+                        f"header '{name}' looks like a secret: write it as "
+                        '"Bearer ${env:NAME}" and set NAME in your environment'
+                    )
+        elif self.headers:
+            raise ValueError("headers are for remote servers (url)")
         if (self.pin_file is None) != (self.sha256 is None):
             raise ValueError("pin_file and sha256 go together")
         if self.cwd not in ("{data}", "{workspace}"):

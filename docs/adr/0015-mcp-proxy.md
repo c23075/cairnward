@@ -17,7 +17,7 @@ Clients and agents should reach third-party MCP tools only through Cairnward, so
 
 ## Consequences
 - No dependency on the MCP SDK; protocol versions 2024-11-05 to 2025-11-25 accepted at the tools level.
-- Not yet: remote (HTTP) MCP servers, resources/prompts, sampling, built-in Cairnward tools (`lit.*`, `vault.search`) on the same endpoint, redaction of tool arguments and results (comes with the redaction work), stopping idle servers.
+- Since done: built-in Cairnward tools (`cairnward__lit_*`, artifacts), skills as prompts and resources, redaction of tool arguments and results (M2), remote HTTP servers (2026-11-02, below). Not done: sampling (refused by design), stopping idle servers.
 
 ## Amendment (2026-11-02, owner review)
 Decision 1 is replaced: the protocol plumbing is the **official MCP Python SDK** (`mcp` 2.3.0, MIT, pinned and hash-locked), in both directions, so protocol updates (new revisions, authorisation, transports) come from upstream. FastMCP was considered and not chosen (its proxy re-models definitions, fits approvals that hold a call open less well, and adds more dependencies on top of the SDK). Built as:
@@ -28,3 +28,10 @@ Decision 1 is replaced: the protocol plumbing is the **official MCP Python SDK**
 - **Behaviour changes:** `initialize` must include `capabilities` and `clientInfo` (as the spec requires); an unknown protocol version is answered with the newest one the SDK supports; results that break their tool's declared output schema are errors.
 - **Tests:** the SDK's own client against Cairnward's `/mcp`, Cairnward's client against a server written with the SDK (`tests/test_mcp_conformance.py`), fuzzing of both directions, and the sandboxed end-to-end flow in every server mode.
 - **Cost:** 18 more runtime packages (24 → 42 including transitive ones, all hash-locked in uv.lock; among them cryptography, pyjwt, jsonschema, httpx2, sse-starlette). SDK upgrades are deliberate, gated by the full test suite.
+
+## Amendment: remote MCP servers (2026-11-02)
+A server in `mcp.toml` can be remote: `url = "https://..."` instead of `command`, with optional `headers` whose secret values must be `${env:NAME}` references (resolved from Cairnward's environment when connecting; never stored in config, never audited). Plain `http` is accepted only for this machine; credentials in the URL are refused; `pin_file`, `env` and `permissions` don't apply (a remote server is limited by the environment's network rules instead).
+- **Connection:** the SDK's streamable-HTTP client (`mcp/upstream.py`, `HttpTarget`), redirects only on the same origin (the SDK's rule).
+- **Network:** before connecting, the host is checked as a `net.connect` in the environment (network off refuses, ask asks, an allow-list must list it); the traffic then goes through egress under a core session for that environment, so it appears in the egress report and an address on this machine must be listed exactly. In single-process mode the core has one egress session per environment for this; in isolated mode the core's connections go through its sandbox proxy, under the default environment's session.
+- **Everything else is as for local servers:** tool definitions pinned and approved, every call policy-checked, redacted and audited, sampling and elicitation refused.
+- **Tests:** a real SDK server on loopback with a bearer token from an environment variable (`tests/test_mcp_remote.py`), settings checks, and the same through a running `serve` and egress (`tests/isolation/test_tool_egress.py`). Not tested: a real hosted MCP service, or OAuth (the SDK's OAuth flow isn't wired; servers that require it can't be used yet).

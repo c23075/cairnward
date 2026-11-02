@@ -69,12 +69,13 @@ class Online:
                         proxy=self.backends.web_proxy(environment), check=check,
                         transport=self.transport)  # fmt: skip
 
-    def _redaction(self, environment: str, text: str, hosts: list[str], client: str) -> str | None:
+    def _redaction(self, environment: str, text: str, hosts: list[str], client: str,
+                   initiated_by: str) -> str | None:  # fmt: skip
         from cairnward.redaction import check_outbound
 
         verdict = check_outbound(self.engine, [text], destination=",".join(hosts),
                                  environment=environment, client=client,
-                                 initiated_by="user")  # fmt: skip
+                                 initiated_by=initiated_by)  # fmt: skip
         if not verdict.allowed:
             raise OnlineError(f"not sent: {verdict.reason}")
         return verdict.warning
@@ -93,6 +94,7 @@ class Online:
         limit: int = 10,
         client: str = "cli",
         actor: str = "user",
+        initiated_by: str = "user",
     ) -> dict[str, Any]:
         from cairnward.audit.log import digest
 
@@ -101,7 +103,8 @@ class Online:
             raise OnlineError("the query is too short")
         chosen = enabled_sources(self.cfg, environment, sources)
         warning = await asyncio.to_thread(self._redaction, environment, query,
-                                          [HOSTS[s] for s in chosen], client)  # fmt: skip
+                                          [HOSTS[s] for s in chosen], client,
+                                          initiated_by)  # fmt: skip
         s = self._searcher(environment, client, actor)
         try:
             out = await s.search(chosen, query, limit=max(1, min(limit, 50)))

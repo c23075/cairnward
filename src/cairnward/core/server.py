@@ -282,9 +282,10 @@ def _core_parts(
                      deep=deep, index=index_library, paths=cfg.paths,
                      cite_engine=cfg.main.research.citation_engine)  # fmt: skip
 
+    online = Online(cfg, engine, backends)
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
                  provenance=tracker, vault=vault, backends=backends,
-                 research_ask=research_ask, jobs=jobs)  # fmt: skip
+                 research_ask=research_ask, jobs=jobs, online=online)  # fmt: skip
     gateway = create_app(
         GatewayDeps(
             cfg,
@@ -315,7 +316,7 @@ def _core_parts(
         dashboard=auth,
         research_ask=research_ask,
         jobs=jobs,
-        online=Online(cfg, engine, backends),
+        online=online,
     )
     return gateway, management, hub, dashboard
 
@@ -331,13 +332,20 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
         inbox = inbox_for(cfg, log)
         sessions = Sessions()
         egress_ctl = LocalEgress(sessions) if with_egress else None
-        core_token = sessions.create(
-            Session(environment=cfg.main.defaults.environment, trusted_core=True)
-        )
-        egress_url = (
-            f"http://cw:{core_token}@127.0.0.1:{server.egress_port}" if with_egress else None
-        )
-        backends = Backends(cfg.backends, egress_url=egress_url)
+        # One trusted session per environment: the core's own connections show under the
+        # environment they were checked in, and egress applies that environment's explicit
+        # allow-list entries (e.g. a server on this machine).
+        core_tokens: dict[str, str] = {}
+
+        def egress_url_for(environment: str | None) -> str | None:
+            if not with_egress:
+                return None
+            name = environment if environment in cfg.environments else cfg.main.defaults.environment
+            if name not in core_tokens:
+                core_tokens[name] = sessions.create(Session(environment=name, trusted_core=True))
+            return f"http://cw:{core_tokens[name]}@127.0.0.1:{server.egress_port}"
+
+        backends = Backends(cfg.backends, egress_url_for=egress_url_for)
         launcher = LocalLauncher(
             cfg,
             srt=_srt_if_wanted(cfg),

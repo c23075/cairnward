@@ -2,7 +2,8 @@
 
 Cairnward starts each server itself (sandboxed; in isolated mode through a socket bridged
 by the outer process), so the SDK's ClientSession runs over the byte streams Cairnward
-already has: newline-delimited JSON-RPC, as in MCP's stdio transport. This module adapts
+already has: newline-delimited JSON-RPC, as in MCP's stdio transport. Remote servers
+(`url` in mcp.toml) use the SDK's streamable-HTTP client instead, through egress. This module adapts
 those asyncio streams to the SDK's and keeps the small interface the hub uses
 (initialize, list_tools, call_tool, close, closed, server_info, protocol_version).
 
@@ -21,6 +22,7 @@ import asyncio
 import contextlib
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import anyio
@@ -35,6 +37,15 @@ from cairnward.mcp.jsonrpc import McpError
 Notify = Callable[[str, dict[str, Any]], None]
 
 
+@dataclass(frozen=True)
+class HttpTarget:
+    """A remote MCP server (streamable HTTP), reached through `proxy` (Cairnward's egress)."""
+
+    url: str
+    headers: dict[str, str]
+    proxy: str | None
+
+
 def dump(model: Any) -> dict[str, Any]:
     """A standard MCP object as plain JSON (the fields it was given, camelCase)."""
     out: dict[str, Any] = model.model_dump(mode="json", by_alias=True, exclude_unset=True)
@@ -44,9 +55,10 @@ def dump(model: Any) -> dict[str, Any]:
 class Connection:
     """One upstream MCP server over a byte stream, via the SDK's ClientSession."""
 
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
-                 on_notification: Notify | None = None) -> None:  # fmt: skip
-        self._reader, self._writer = reader, writer
+    def __init__(self, reader: asyncio.StreamReader | None, writer: asyncio.StreamWriter | None,
+                 *, on_notification: Notify | None = None,
+                 http: HttpTarget | None = None) -> None:  # fmt: skip
+        self._reader, self._writer, self._http = reader, writer, http
         self._on_notification = on_notification
         self.closed = asyncio.Event()
         self.server_info: dict[str, Any] = {}
@@ -61,6 +73,69 @@ class Connection:
     # ------------------------------------------------------------------ plumbing
 
     async def _run(self) -> None:
+        if self._http is not None:
+            await self._run_http(self._http)
+        else:
+            await self._run_stdio()
+
+    async def _session_loop(self, from_server: Any, to_server: Any, eof: anyio.Event | None,
+                            tg: Any) -> None:  # fmt: skip
+        async def handle(message: Any) -> None:
+            if isinstance(message, Exception) or self._on_notification is None:
+                return
+            root = getattr(message, "root", message)
+            method = str(getattr(root, "method", ""))
+            params = getattr(root, "params", None)
+            self._on_notification(method, dump(params) if params is not None else {})
+
+        async def no_roots(context: Any) -> types.ListRootsResult:
+            return types.ListRootsResult(roots=[])
+
+        session = ClientSession(
+            from_server, to_server, message_handler=handle, list_roots_callback=no_roots,
+            client_info=types.Implementation(name="cairnward", version=__version__),
+        )  # fmt: skip
+        async with session:
+            self._session = session
+            self._ready.set()
+            with anyio.CancelScope() as scope:
+                if eof is not None:
+
+                    async def stop_on_eof() -> None:
+                        await eof.wait()
+                        scope.cancel()
+
+                    tg.start_soon(stop_on_eof)
+                await self._stop.wait()
+
+    async def _run_http(self, target: HttpTarget) -> None:
+        import httpx2
+        from mcp.client.streamable_http import streamable_http_client
+
+        try:
+            async with (
+                httpx2.AsyncClient(
+                    headers=target.headers, proxy=target.proxy, trust_env=False,
+                    timeout=httpx2.Timeout(30, read=300), follow_redirects=False,
+                ) as client,
+                streamable_http_client(target.url, http_client=client) as (read, write),
+                anyio.create_task_group() as tg,
+            ):  # fmt: skip
+                await self._session_loop(read, write, None, tg)
+                tg.cancel_scope.cancel()
+        except BaseException as exc:
+            self._failure = exc
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+        finally:
+            self._session = None
+            self.closed.set()
+            self._ready.set()
+
+    async def _run_stdio(self) -> None:
+        reader, writer = self._reader, self._writer
+        if reader is None or writer is None:
+            raise RuntimeError("a stdio connection needs a reader and a writer")
         to_session, from_server = anyio.create_memory_object_stream[SessionMessage | Exception](64)
         to_server, from_session = anyio.create_memory_object_stream[SessionMessage](64)
         eof = anyio.Event()
@@ -69,7 +144,7 @@ class Connection:
             try:
                 while True:
                     try:
-                        line = await self._reader.readuntil(b"\n")
+                        line = await reader.readuntil(b"\n")
                     except (asyncio.IncompleteReadError, asyncio.LimitOverrunError,
                             ConnectionError):  # fmt: skip
                         break  # closed, or a message over the limit (can't resync)
@@ -90,39 +165,14 @@ class Connection:
             async with from_session:
                 async for item in from_session:
                     data = item.message.model_dump_json(by_alias=True, exclude_unset=True)
-                    self._writer.write(data.encode() + b"\n")
-                    await self._writer.drain()
-
-        async def handle(message: Any) -> None:
-            if isinstance(message, Exception) or self._on_notification is None:
-                return
-            root = getattr(message, "root", message)
-            method = str(getattr(root, "method", ""))
-            params = getattr(root, "params", None)
-            self._on_notification(method, dump(params) if params is not None else {})
-
-        async def no_roots(context: Any) -> types.ListRootsResult:
-            return types.ListRootsResult(roots=[])
+                    writer.write(data.encode() + b"\n")
+                    await writer.drain()
 
         try:
             async with anyio.create_task_group() as tg:
                 tg.start_soon(pump_in)
                 tg.start_soon(pump_out)
-                session = ClientSession(
-                    from_server, to_server, message_handler=handle, list_roots_callback=no_roots,
-                    client_info=types.Implementation(name="cairnward", version=__version__),
-                )  # fmt: skip
-                async with session:
-                    self._session = session
-                    self._ready.set()
-                    with anyio.CancelScope() as scope:
-
-                        async def stop_on_eof() -> None:
-                            await eof.wait()
-                            scope.cancel()
-
-                        tg.start_soon(stop_on_eof)
-                        await self._stop.wait()
+                await self._session_loop(from_server, to_server, eof, tg)
                 tg.cancel_scope.cancel()
         except BaseException as exc:
             self._failure = exc
@@ -133,7 +183,7 @@ class Connection:
             self.closed.set()
             self._ready.set()
             with contextlib.suppress(Exception):
-                self._writer.close()
+                writer.close()
 
     def _tap(self, raw: Any) -> None:
         result = raw.get("result") if isinstance(raw, dict) else None

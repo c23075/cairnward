@@ -352,7 +352,8 @@ def management_app(
         for name, s in cfg.mcp.servers.items():
             out.append({
                 "name": name, "description": s.description, "version": s.version,
-                "command": s.command, "environments": [
+                "command": s.command, "url": s.url, "headers": sorted(s.headers),
+                "environments": [
                     n for n, e in cfg.environments.items() if name in e.mcp_servers],
                 "permissions": s.permissions.model_dump(), "default_tool": s.default_tool,
                 "tools": s.tools,

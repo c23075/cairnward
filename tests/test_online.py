@@ -108,3 +108,49 @@ async def test_management_endpoints(paths: Paths, tmp_path: Path) -> None:
             assert bad.status_code == 400 and "off" in bad.json()["detail"]
             missing = await c.post("/v1/research/fetch", json={"library": "nope", "ids": ["x"]})
             assert missing.status_code == 404
+
+
+async def test_lit_find_mcp_tool(paths: Paths) -> None:
+    """The model searches online through MCP: offered only where sources are on, refused
+    hosts and secrets stop it, results are untrusted content, the query isn't logged."""
+    from cairnward.mcp.hub import McpHub
+    from cairnward.mcp.launch import LocalLauncher
+    from cairnward.mcp.pins import PinStore
+    from cairnward.policy.provenance import ProvenanceTracker
+
+    calls: list[str] = []
+    with AuditLog.open(paths) as audit:
+        o = online(paths, audit, [], calls)
+        cfg, tracker = o.cfg, ProvenanceTracker()
+        hub = McpHub(cfg, o.engine, LocalLauncher(cfg, srt=None), PinStore.at(paths.data_dir),
+                     audit, provenance=tracker, online=o)  # fmt: skip
+
+        def names(env: str) -> list[str]:
+            return [t["name"] for t in hub._builtin_tools(env)]
+
+        assert "cairnward__lit_find" in names("litreview-online")
+        assert "cairnward__lit_find" not in names("litreview-offline")
+        assert "cairnward__lit_find" not in names("closed")  # sources on, but no research tool
+        out = await hub.call("litreview-online", "cairnward__lit_find",
+                             {"query": "sleep and working memory", "limit": 3},
+                             client="jan")  # fmt: skip
+        assert not out.get("isError") and calls
+        text = out["content"][0]["text"]
+        assert "doi:" in text and len(out["structuredContent"]["records"]) <= 3
+        assert tracker.current("jan", None)[0]  # tainted: results are outside content
+        secret = await hub.call("litreview-online", "cairnward__lit_find",
+                                {"query": "keys AKIAIOSFODNN7EXAMPLE"}, client="jan")  # fmt: skip
+        assert secret["isError"] and "not sent" in secret["content"][0]["text"]
+        (paths.config_dir / "environments" / "closed.toml").write_text(
+            'research_sources = ["openalex"]\ntools = ["scholar"]\n[privacy]\nnetwork = "off"\n'
+        )
+        hub.cfg = o.cfg = load_config(paths)
+        o.engine.cfg = hub.cfg
+        n = len(calls)
+        closed = await hub.call("closed", "cairnward__lit_find", {"query": "sleep and memory"},
+                                client="jan")  # fmt: skip
+        assert "refused" in closed["content"][0]["text"] and len(calls) == n
+        recs = audit.records()
+        tool_calls = [r for r in recs if r.action == "tool.call" and "lit_find" in (r.target or "")]
+        assert tool_calls and all(r.actor == "client:jan" for r in tool_calls)
+        assert "working memory" not in json.dumps([r.details for r in recs])

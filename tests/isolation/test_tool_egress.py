@@ -60,3 +60,71 @@ def test_helper_traffic_goes_through_egress(tmp_path: Path) -> None:
     assert {r["decision"] for r in connects if r["phase"] == "pre"} >= {"allow"}
     assert any(r["decision"] == "deny" for r in connects)
     assert any(r["action"] == "run.start" and r.get("client") == "restic" for r in recs)
+
+
+MCP_SERVER = r"""
+import sys
+import uvicorn
+from mcp.server.mcpserver import MCPServer
+
+srv = MCPServer("remote-notes")
+
+
+@srv.tool()
+def shout(text: str) -> str:
+    "Upper-case some text."
+    return text.upper()
+
+
+uvicorn.run(srv.streamable_http_app(), host="127.0.0.1", port=int(sys.argv[1]),
+            log_level="error")
+"""
+
+
+def test_remote_mcp_server_through_egress(tmp_path: Path) -> None:
+    """A remote MCP server (url in mcp.toml) under a real serve: reached through egress
+    in the environment, so the egress records show it."""
+    import socket
+    import subprocess
+    import time
+
+    from tests.isolation.harness import free_port
+
+    port = free_port()
+    script = tmp_path / "remote_mcp.py"
+    script.write_text(MCP_SERVER)
+    remote = subprocess.Popen([sys.executable, str(script), str(port)])
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=1).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        cw = Cairnward(tmp_path, "off", privacy='preset = "strict"\n')
+        (cw.paths.config_dir / "mcp.toml").write_text(
+            f'[servers.notes]\nurl = "http://127.0.0.1:{port}/mcp"\n'
+        )
+        (cw.paths.config_dir / "environments" / "work.toml").write_text(
+            'mcp_servers = ["notes"]\n[privacy]\nnetwork = "allowlist"\n'
+            f'network_allow_hosts = ["127.0.0.1:{port}"]\n'
+        )
+        with cw:
+            listed = cw.cw("mcp", "list")
+            assert "remote  : http://127.0.0.1" in listed.stdout, listed.stderr
+            tools = cw.cw("mcp", "--env", "work", "tools", "notes")
+            assert "shout" in tools.stdout, (
+                tools.stdout
+                + tools.stderr
+                + str([r for r in cw.audit() if r["action"] in ("net.connect", "mcp.start")])
+            )
+            recs = cw.audit()
+    finally:
+        remote.terminate()
+        remote.wait(10)
+    start = [r for r in recs if r["action"] == "mcp.start" and r.get("outcome") == "ok"]
+    assert start and start[0]["details"]["via_egress"]
+    egress = [r for r in recs if r["action"] == "net.connect" and r.get("phase") == "pre"
+              and str(port) in str(r.get("target"))]  # fmt: skip
+    assert egress and all(r["decision"] == "allow" for r in egress)

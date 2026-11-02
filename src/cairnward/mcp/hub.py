@@ -9,17 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from cairnward.audit.log import AuditLog, canonical, digest
 from cairnward.config.loader import Config
 from cairnward.mcp.jsonrpc import McpError
 from cairnward.mcp.launch import Launcher, LaunchError, Started
 from cairnward.mcp.pins import PinStore, ToolState
-from cairnward.mcp.upstream import Connection
+from cairnward.mcp.upstream import Connection, HttpTarget
 from cairnward.policy.engine import Action, PolicyEngine
 from cairnward.policy.provenance import ProvenanceTracker
 from cairnward.redaction import check_outbound, value_texts
@@ -34,7 +37,7 @@ def exposed_name(server: str, tool: str) -> str:
 
 @dataclass
 class _Server:
-    started: Started
+    started: Started | None  # None: a remote server (nothing to stop)
     conn: Connection
     tools: list[dict[str, Any]] | None = None  # None: (re)list on next use
 
@@ -60,6 +63,7 @@ class McpHub:
     backends: Any = None  # for research tools (embeddings through the gateway's drivers)
     research_ask: Any = None  # async (library, question, **kw) -> research.ask.Answer
     jobs: Any = None  # research.jobs.JobRunner
+    online: Any = None  # research.online.Online (academic APIs, through egress)
     _servers: dict[tuple[str, str], _Server] = field(default_factory=dict)
     _locks: dict[tuple[str, str], asyncio.Lock] = field(default_factory=dict)
     _reported: set[tuple[str, str, str]] = field(default_factory=set)
@@ -80,6 +84,10 @@ class McpHub:
             if current is not None:  # it exited: clean up and start again
                 await self._drop(key)
             spec = self.cfg.mcp.servers[server]
+            if spec.url is not None:
+                remote = await self._remote(server, environment)
+                self._servers[key] = remote
+                return remote
             try:
                 started = await self.launcher.start(server, environment)
             except (LaunchError, OSError) as exc:
@@ -112,11 +120,63 @@ class McpHub:
             self._servers[key] = entry
             return entry
 
+    async def _remote(self, server: str, environment: str) -> _Server:
+        """A remote MCP server: its host is checked like any connection in the
+        environment (off refuses, ask asks, an allow-list must list it), then the SDK's
+        streamable-HTTP client connects through egress, so the egress report shows it."""
+        spec = self.cfg.mcp.servers[server]
+        url = spec.url or ""
+        parts = urlsplit(url)
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        action = Action(kind="net.connect", target=f"{parts.hostname}:{port}",
+                        environment=environment, actor="cairnward",
+                        details={"via": "mcp", "server": server})  # fmt: skip
+        decision = await asyncio.to_thread(self.engine.check, action)
+        if not decision.allowed:
+            await asyncio.to_thread(self.engine.audit_deny, decision)
+            raise McpError(f"{server}: {parts.hostname} refused ({decision.reason})")
+
+        def fail(why: str) -> McpError:
+            self._audit("mcp.start", actor="cairnward", target=server, outcome="error",
+                        environment=environment,
+                        details={"error": why[:300], "remote": True})  # fmt: skip
+            return McpError(f"{server}: {why}")
+
+        try:
+            headers = resolve_headers(spec.headers)
+        except KeyError as exc:
+            raise fail(
+                f"environment variable {exc.args[0]} isn't set (used in its headers)"
+            ) from None
+        proxy = self.backends.web_proxy(environment) if self.backends is not None else None
+        target = HttpTarget(url, headers, proxy)
+
+        def on_note(method: str, params: dict[str, Any]) -> None:
+            key = (server, environment)
+            if method == "notifications/tools/list_changed" and key in self._servers:
+                self._servers[key].tools = None
+
+        conn = Connection(None, None, on_notification=on_note, http=target)
+        try:
+            await conn.initialize(timeout=min(spec.call_timeout_s, 60))
+        except McpError as exc:
+            await conn.close()
+            raise fail(f"couldn't connect to {parts.hostname}: {exc}") from None
+        self._audit("mcp.start", actor="cairnward", target=server, outcome="ok",
+                    environment=environment, details={
+                        "remote": True, "host": parts.hostname, "via_egress": proxy is not None,
+                        "configured_version": spec.version,
+                        "server_name": str(conn.server_info.get("name", ""))[:100],
+                        "server_version": str(conn.server_info.get("version", ""))[:50],
+                    })  # fmt: skip
+        return _Server(None, conn)
+
     async def _drop(self, key: tuple[str, str]) -> None:
         entry = self._servers.pop(key, None)
         if entry is not None:
             await entry.conn.close()
-            await entry.started.stop()
+            if entry.started is not None:
+                await entry.started.stop()
 
     async def aclose(self) -> None:
         for key in list(self._servers):
@@ -307,6 +367,24 @@ class McpHub:
                         }},
                         "annotations": {"readOnlyHint": True},
                     })  # fmt: skip
+        if _finds_online(env) and self.online is not None:
+            tools.append({
+                "name": exposed_name(BUILTIN, "lit_find"),
+                "description": (
+                    "Search academic databases online (" + ", ".join(env.research_sources)
+                    + ") for papers: titles, authors, year, venue, DOI, abstract and whether "
+                    "an open-access PDF exists. The query leaves this computer, so keep it to "
+                    "the topic: no names or private details. The user adds papers to a "
+                    "library themselves (`cairnward research add`)."
+                ),
+                "inputSchema": {"type": "object", "required": ["query"], "properties": {
+                    "query": {"type": "string", "description": "topic keywords"},
+                    "sources": {"type": "array", "items": {
+                        "type": "string", "enum": list(env.research_sources)}},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 10},
+                }},
+                "annotations": {"readOnlyHint": True, "openWorldHint": True},
+            })  # fmt: skip
         if "artifacts" in env.tools:
             tools += [
                 {"name": exposed_name(BUILTIN, "artifact_write"),
@@ -346,6 +424,8 @@ class McpHub:
         )
         if tool == "lit_search":
             return await self._lit_search(environment, arguments, client=client, run_id=run_id)
+        if tool == "lit_find":
+            return await self._lit_find(environment, arguments, client=client, run_id=run_id)
         if tool == "lit_ask":
             return await self._lit_ask(environment, arguments, client=client, run_id=run_id)
         if tool == "lit_review_start":
@@ -420,6 +500,81 @@ class McpHub:
                 "title": h.title, "file": Path(h.path).name, "pages": h.pages, "text": h.text,
                 "score": round(h.score, 4)} for h in hits]},
         }  # fmt: skip
+
+    async def _lit_find(self, environment: str, arguments: dict[str, Any], *, client: str,
+                        run_id: str | None) -> dict[str, Any]:  # fmt: skip
+        from cairnward.research.online import OnlineError
+
+        env = self.cfg.environments[environment]
+        if self.online is None or not _finds_online(env):
+            return _tool_error(f"online search is off in '{environment}'")
+        query = str(arguments.get("query", "")).strip()
+        raw = arguments.get("sources")
+        sources = [str(x) for x in raw] if isinstance(raw, list) and raw else None
+        try:
+            limit = max(1, min(int(arguments.get("limit", 10) or 10), 25))
+        except (TypeError, ValueError):
+            return _tool_error("limit must be a number from 1 to 25")
+        actor = f"agent:{client}" if run_id else f"client:{client}"
+        action = Action(
+            kind="tool.call", target=f"{BUILTIN}/lit_find", environment=environment,
+            client=client, run_id=run_id, actor=actor, initiated_by="model",
+            details={"sources": sources or list(env.research_sources), "limit": limit},
+        )  # fmt: skip
+        decision = await asyncio.to_thread(self.engine.check, action)
+        if not decision.allowed:
+            await asyncio.to_thread(self.engine.audit_deny, decision)
+            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
+        pre = await asyncio.to_thread(self.engine.audit_pre, decision, query)
+        try:
+            out = await self.online.search(environment, query, sources=sources, limit=limit,
+                                           client=client, actor=actor,
+                                           initiated_by="model")  # fmt: skip
+        except OnlineError as exc:
+            await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
+                                    details={"error": str(exc)[:300]})  # fmt: skip
+            return _tool_error(f"search failed: {exc}")
+        if self.provenance is not None:  # titles and abstracts are untrusted content
+            self.provenance.note_tool(client, run_id, "lit_find (online)")
+        records = out["records"][:limit]
+        await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok",
+                                details={"results": len(records)})  # fmt: skip
+        lines = []
+        for r in records:
+            ident = (
+                f"doi:{r['doi']}"
+                if r.get("doi")
+                else (f"arxiv:{r['arxiv']}" if r.get("arxiv") else r.get("url") or r["id"])
+            )
+            who = ", ".join(r.get("authors", [])[:3]) + (
+                " et al." if len(r.get("authors", [])) > 3 else ""
+            )
+            lines.append(f"- {r['title']} ({who}, {r.get('year') or 'n.d.'}"
+                         f"{', ' + r['venue'] if r.get('venue') else ''}) {ident}"
+                         f"{' [open-access PDF]' if r.get('pdf_url') else ''}")  # fmt: skip
+        failed = [f"{k}: {v['error']}" for k, v in out["sources"].items() if "error" in v]
+        text = "\n".join(lines) or "No papers found."
+        if failed:
+            text += "\n\nSources that failed: " + "; ".join(failed)
+        if out.get("warning"):
+            text += f"\n\nNote: {out['warning']}"
+        keep = (
+            "title",
+            "authors",
+            "year",
+            "venue",
+            "doi",
+            "arxiv",
+            "pmid",
+            "abstract",
+            "url",
+            "pdf_url",
+            "cited_by",
+            "source",
+        )
+        return {"content": [{"type": "text", "text": text}],
+                "structuredContent": {"records": [{k: r.get(k) for k in keep} for r in records],
+                                      "sources": out["sources"]}}  # fmt: skip
 
     async def _lit_ask(self, environment: str, arguments: dict[str, Any], *, client: str,
                        run_id: str | None) -> dict[str, Any]:  # fmt: skip
@@ -583,6 +738,19 @@ class McpHub:
         self._audit("mcp.approve", actor="user", target=server, environment=environment,
                     decision="allow", details={"tools": sorted(approvals),
                                                "server_version": version[:50]})  # fmt: skip
+
+
+_ENV_REF = re.compile(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def resolve_headers(headers: dict[str, str]) -> dict[str, str]:
+    """`${env:NAME}` in header values from Cairnward's environment (KeyError if unset)."""
+    return {k: _ENV_REF.sub(lambda m: os.environ[m.group(1)], v) for k, v in headers.items()}
+
+
+def _finds_online(env: Any) -> bool:
+    """lit_find: the environment has online sources and the "research" (or "scholar") tool."""
+    return bool(env.research_sources) and bool({"research", "scholar"} & set(env.tools))
 
 
 def _tool_error(text: str) -> dict[str, Any]:

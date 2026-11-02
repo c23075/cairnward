@@ -229,6 +229,12 @@ class PolicyEngine:
                     needed = "artifacts"
                 if needed and needed in env.tools:
                     return Rule("allow", "low", f"Cairnward's {tool} (read-only, local)")
+                if (
+                    tool == "lit_find"
+                    and env.research_sources
+                    and ({"research", "scholar"} & set(env.tools))
+                ):  # each host it contacts is checked again as net.connect
+                    return Rule("allow", "low", "Cairnward's lit_find (online sources on here)")
                 return Rule("deny", "high", f"Cairnward's {tool} isn't enabled here")
             if server is None or env is None or server_name not in env.mcp_servers:
                 return Rule("deny", "high", f"MCP server '{server_name}' isn't enabled here")

@@ -59,11 +59,10 @@
           "type": "integer"
         },
         "command": {
-          "description": "stdio server command and arguments",
+          "description": "stdio server command and arguments (or `url`)",
           "items": {
             "type": "string"
           },
-          "minItems": 1,
           "title": "Command",
           "type": "array"
         },
@@ -102,6 +101,14 @@
           },
           "description": "fixed environment variables",
           "title": "Env",
+          "type": "object"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "HTTP headers for a remote server; secrets as ${env:NAME}, never literal",
+          "title": "Headers",
           "type": "object"
         },
         "permissions": {
@@ -153,6 +160,19 @@
           "title": "Tools",
           "type": "object"
         },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "a remote server (streamable HTTP): https, or http on this machine; reached through egress in the environment",
+          "title": "Url"
+        },
         "version": {
           "default": "",
           "description": "the version you reviewed (shown, audited)",
@@ -160,9 +180,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "command"
-      ],
       "title": "McpServer",
       "type": "object"
     }
