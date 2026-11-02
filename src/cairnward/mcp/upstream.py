@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -44,6 +44,10 @@ class HttpTarget:
     url: str
     headers: dict[str, str]
     proxy: str | None
+    auth: Any = None  # an httpx2 Auth (the SDK's OAuth provider)
+    # called before every request (OAuth discovery and token endpoints included) with
+    # host and port; raises to refuse
+    check_host: Callable[[str, int], Awaitable[None]] | None = None
 
 
 def dump(model: Any) -> dict[str, Any]:
@@ -112,11 +116,21 @@ class Connection:
         import httpx2
         from mcp.client.streamable_http import streamable_http_client
 
+        hooks: dict[str, list[Any]] = {}
+        if target.check_host is not None:
+            check = target.check_host
+
+            async def before(request: Any) -> None:
+                url = request.url
+                await check(url.host, url.port or (443 if url.scheme == "https" else 80))
+
+            hooks["request"] = [before]
         try:
             async with (
                 httpx2.AsyncClient(
                     headers=target.headers, proxy=target.proxy, trust_env=False,
                     timeout=httpx2.Timeout(30, read=300), follow_redirects=False,
+                    auth=target.auth, event_hooks=hooks,
                 ) as client,
                 streamable_http_client(target.url, http_client=client) as (read, write),
                 anyio.create_task_group() as tg,
