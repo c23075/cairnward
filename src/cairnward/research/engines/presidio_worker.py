@@ -18,8 +18,14 @@ import sys
 def main() -> int:
     os.environ.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "DO_NOT_TRACK": "1"})
     from presidio_analyzer import AnalyzerEngine
+    from presidio_analyzer.nlp_engine import NlpEngineProvider
 
-    engine = AnalyzerEngine()
+    # The model that was installed; AnalyzerEngine() alone would load en_core_web_lg.
+    model = sys.argv[1] if len(sys.argv) > 1 else "en_core_web_sm"
+    nlp = NlpEngineProvider(nlp_configuration={
+        "nlp_engine_name": "spacy", "models": [{"lang_code": "en", "model_name": model}],
+    }).create_engine()  # fmt: skip
+    engine = AnalyzerEngine(nlp_engine=nlp, supported_languages=["en"])
     print("READY", flush=True)
     for line in sys.stdin:
         try:

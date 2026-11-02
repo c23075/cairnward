@@ -596,6 +596,11 @@ class McpServer(_Strict):
     )
     tools: dict[str, ToolSetting] = Field(default_factory=dict, description="per-tool policy")
     call_timeout_s: int = Field(default=120, ge=1, le=3600)
+    idle_stop_minutes: int = Field(
+        default=30, ge=0, le=24 * 60,
+        description="stop the server after this long unused (0: keep it running); it "
+        "starts again on the next use",
+    )  # fmt: skip
 
     @model_validator(mode="after")
     def _pin_pair(self) -> McpServer:

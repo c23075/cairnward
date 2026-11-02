@@ -44,6 +44,11 @@ class Session:
     # The core's own connections (model calls it already policy-checked under the right
     # environment): logged, address-checked, not decided twice.
     trusted_core: bool = False
+    # The isolated core's one session: its connections were checked in their own
+    # environment, which egress can't see (the sandbox's proxy chains with one
+    # credential), so an address on this machine or the LAN is accepted when any
+    # environment lists it exactly.
+    any_environment: bool = False
 
 
 @dataclass
@@ -181,10 +186,16 @@ class EgressProxy:
         infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
         return list(dict.fromkeys(str(info[4][0]) for info in infos))
 
-    def _explicitly_allowed_ip(self, action: Action, ip: str, port: int) -> bool:
-        eff = self.engine.privacy_for(action)
+    def _explicitly_allowed_ip(self, action: Action, ip: str, port: int,
+                               any_environment: bool = False) -> bool:  # fmt: skip
         target = f"[{ip}]:{port}" if ":" in ip else f"{ip}:{port}"
-        return any(host_matches(target, p) or host_matches(ip, p) for p in eff.network_allow_hosts)
+        cfg = self.engine.config
+        if any_environment:
+            scopes = [cfg.privacy(), *(cfg.privacy(n) for n in cfg.environments)]
+        else:
+            scopes = [self.engine.privacy_for(action)]
+        return any(host_matches(target, p) or host_matches(ip, p)
+                   for eff in scopes for p in eff.network_allow_hosts)  # fmt: skip
 
     async def _decide(self, action: Action) -> Decision:
         try:
@@ -272,6 +283,8 @@ class EgressProxy:
         )  # fmt: skip
         if session.trusted_core:
             decision = Decision(action, "allow", "low", "requested by the core (already checked)")
+            if session.any_environment:
+                action.details["environment"] = "checked by the core in its own environment"
         elif self.sessions.approved(session.run_id, display):
             decision = Decision(action, "allow", self.engine.rule_for(action).risk,
                                 "approved for this run when the sandbox asked",
@@ -295,7 +308,8 @@ class EgressProxy:
         chosen, refused = None, []
         for ip in addresses:
             why = special_reason(ip)
-            if why is None or self._explicitly_allowed_ip(action, ip, port):
+            if why is None or self._explicitly_allowed_ip(action, ip, port,
+                                                          session.any_environment):  # fmt: skip
                 chosen = ip
                 break
             refused.append(why)

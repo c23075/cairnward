@@ -218,7 +218,9 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--no-screen", action="store_true",
                     help="read every paper in full (no title/abstract screening)")  # fmt: skip
     eng = rs_sub.add_parser("engine", help="optional engines (PaperQA2, citeproc-js, pandoc)")
-    eng.add_argument("action", choices=["install", "status"])
+    eng.add_argument("action", choices=["install", "status", "export-lock"],
+                     help="export-lock: copy the lock recorded on this machine into the "
+                     "repository (to review and commit)")  # fmt: skip
     eng.add_argument("name", choices=["paperqa", "citeproc-js", "pandoc", "docling"])
     rsearch = rs_sub.add_parser("search", help="search OpenAlex, Semantic Scholar, arXiv, "
                                 "Crossref, PubMed (opt-in per environment)")  # fmt: skip
@@ -1218,19 +1220,39 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
             found = csl.citeproc_js(cfg.paths)
             print(f"citeproc-js: {'installed (' + str(found) + ')' if found else 'not installed'}")
             return 0 if found else 1
+        if args.action == "export-lock":
+            from cairnward.research.engines import docling, locks
+
+            if args.name != "docling":
+                print("cairnward: only Docling's lock is recorded on install (Presidio's ships "
+                      "with Cairnward)", file=sys.stderr)  # fmt: skip
+                return 2
+            try:
+                dest = locks.export(
+                    "docling", docling.engine_dir(cfg.paths) / "requirements.lock.txt"
+                )
+            except OSError as exc:
+                print(f"cairnward: {exc}", file=sys.stderr)
+                return 1
+            print(f"wrote {dest}\nReview it, then commit it: installs on {locks.platform_tag()} "
+                  "will use it instead of resolving")  # fmt: skip
+            return 0
         if args.name == "docling":
             from cairnward.research.engines import docling
 
             if args.action == "install":
-                print("Installing Docling with CPU-only PyTorch and its models (about 3 GB). The "
-                      "exact versions and hashes are recorded on this first install.")  # fmt: skip
+                print("Installing Docling with CPU-only PyTorch and its models (about 3 GB).")
                 try:
                     record = docling.install(cfg.paths)
                 except (docling.DoclingError, subprocess.CalledProcessError) as exc:
                     print(f"cairnward: {exc}", file=sys.stderr)
                     return 1
-                print(f"Docling installed; lock sha256 {record['lock_sha256'][:16]}..., models "
-                      f"sha256 {record['models_sha256'][:16]}...")  # fmt: skip
+                print(f"Docling installed from the {record['lock_source']} lock (sha256 "
+                      f"{record['lock_sha256'][:16]}...), models sha256 "
+                      f"{record['models_sha256'][:16]}...")  # fmt: skip
+                if not record["lock_source"].startswith("repository"):
+                    print("To ship this lock: cairnward research engine export-lock docling, "
+                          "then commit the file")  # fmt: skip
                 return 0
             exe = docling.python(cfg.paths)
             problems = docling.verify(cfg.paths) if exe else []

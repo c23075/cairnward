@@ -144,3 +144,34 @@ def test_remote_settings_accepted() -> None:
     McpServer(url="https://mcp.example.org/mcp",
               headers={"Authorization": "Bearer ${env:TOKEN}", "X-Team": "lab"})  # fmt: skip
     McpServer(url="http://localhost:8080/mcp")
+
+
+async def test_idle_servers_stop_and_come_back(
+    tmp_path: Path, remote: tuple[int, list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time as _time
+
+    port, _seen = remote
+    monkeypatch.setenv("NOTES_TOKEN", TOKEN)
+    paths = make(tmp_path, port, "allowlist")
+    text = paths.mcp_config.read_text().replace(
+        'version = "1.0"\n', 'version = "1.0"\nidle_stop_minutes = 1\n'
+    )
+    paths.mcp_config.write_text(text)
+    with AuditLog.open(paths) as audit:
+        hub = hub_for(paths, audit)
+        try:
+            await hub.list_tools("work")
+            assert await hub.stop_idle() == []  # just used
+            entry = hub._servers[("notes", "work")]
+            entry.busy = 1  # a call in flight: never stopped
+            assert await hub.stop_idle(_time.monotonic() + 120) == []
+            entry.busy = 0
+            assert await hub.stop_idle(_time.monotonic() + 120) == [("notes", "work")]
+            assert entry.conn.closed.is_set() and not hub._servers
+            out = await hub.call("work", "notes__shout", {"text": "again"}, client="jan")
+            assert out["content"][0]["text"] == "AGAIN"  # started on demand
+        finally:
+            await hub.aclose()
+        assert any(r.action == "mcp.stop" and r.details["reason"] == "idle"
+                   for r in audit.records())  # fmt: skip

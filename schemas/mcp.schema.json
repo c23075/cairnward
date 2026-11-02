@@ -111,6 +111,14 @@
           "title": "Headers",
           "type": "object"
         },
+        "idle_stop_minutes": {
+          "default": 30,
+          "description": "stop the server after this long unused (0: keep it running); it starts again on the next use",
+          "maximum": 1440,
+          "minimum": 0,
+          "title": "Idle Stop Minutes",
+          "type": "integer"
+        },
         "permissions": {
           "$ref": "#/$defs/McpPermissions",
           "default": {

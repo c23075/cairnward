@@ -100,7 +100,7 @@ async def retention_loop(cfg: Config, vault: Vault, log: Log) -> None:
 def core_background(cfg: Config, vault: Vault, hub: McpHub, log: Log) -> list[Any]:
     """Background work of the core, the same in both modes (isolated core, single process):
     one list so a mode can't silently miss one (the job runner once was)."""
-    return [retention_loop(cfg, vault, log), hub.jobs.run_forever()]
+    return [retention_loop(cfg, vault, log), hub.jobs.run_forever(), hub.idle_loop()]
 
 
 async def backup_loop(cfg: Config, log: Log) -> None:
@@ -535,7 +535,9 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
         record_settings(cfg, audit)
         sessions = Sessions()
         core_token = sessions.create(
-            Session(environment=cfg.main.defaults.environment, trusted_core=True)
+            Session(
+                environment=cfg.main.defaults.environment, trusted_core=True, any_environment=True
+            )
         )
         # Asks go to the inbox in the core (its management socket).
         asker = RemoteApprover(str(socks["management"]), cfg.main.egress.approval_timeout_s)

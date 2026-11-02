@@ -5,10 +5,10 @@ docling`; pypdfium2 stays the default and the fallback for any PDF Docling can't
 Installed into its own virtual environment in the data folder (Cairnward's core never
 imports it): `cairnward research engine install docling` resolves Docling (pinned below)
 with CPU-only PyTorch, records the exact versions and hashes it got in
-`requirements.lock.txt` (trust on first use: the repository can't ship that lock yet,
-see docs), installs from that lock with hashes required, and downloads Docling's models
-once. After that the worker runs with no network at all, sandboxed when the library's
-environment has isolation on.
+`requirements.lock.txt` (trust on first use, unless the repository ships a lock for this
+platform: see engines/locks.py), installs from that lock with hashes required, and
+downloads Docling's models once. After that the worker runs with no network at all,
+sandboxed when the library's environment has isolation on.
 """
 
 from __future__ import annotations
@@ -51,10 +51,17 @@ def install(paths: Paths, log: Any = print) -> dict[str, Any]:
     root = engine_dir(paths)
     root.mkdir(parents=True, exist_ok=True)
     venv, lock, models = root / "venv", root / "requirements.lock.txt", root / "models"
-    log(f"resolving {PIN} with CPU-only PyTorch ...")
-    subprocess.run([uv, "pip", "compile", "-", "--quiet", "--generate-hashes",
-                    "--torch-backend", "cpu", "--python-version", "3.12", "-o", str(lock)],
-                   input=PIN + "\n", text=True, check=True)  # fmt: skip
+    from cairnward.research.engines import locks
+
+    ready = locks.shipped("docling")
+    if ready is not None:
+        log(f"using the lock shipped with Cairnward ({ready.name})")
+        shutil.copyfile(ready, lock)
+    else:
+        log(f"resolving {PIN} with CPU-only PyTorch (recorded: trust on first use) ...")
+        subprocess.run([uv, "pip", "compile", "-", "--quiet", "--generate-hashes",
+                        "--torch-backend", "cpu", "--python-version", "3.12", "-o", str(lock)],
+                       input=PIN + "\n", text=True, check=True)  # fmt: skip
     log("installing (about 2 GB) ...")
     subprocess.run([uv, "venv", "--quiet", "--python", "3.12", str(venv)], check=True)
     subprocess.run([uv, "pip", "install", "--quiet", "--require-hashes", "--torch-backend", "cpu",
@@ -63,6 +70,7 @@ def install(paths: Paths, log: Any = print) -> dict[str, Any]:
     log("downloading Docling's models (layout, tables, OCR) ...")
     subprocess.run([str(tools), "models", "download", "-o", str(models)], check=True)
     record = {"pin": PIN, "installed": time.strftime("%Y-%m-%dT%H:%M:%S"),
+              "lock_source": f"repository ({ready.name})" if ready else "resolved on this machine",
               "lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest(),
               "models_sha256": tree_digest(models)}  # fmt: skip
     (root / "install.json").write_text(json.dumps(record, indent=1), encoding="utf-8")

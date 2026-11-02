@@ -24,6 +24,9 @@ class _R:
 
 
 class AnalyzerEngine:
+    def __init__(self, nlp_engine, supported_languages):
+        assert nlp_engine.model == "en_core_web_sm" and supported_languages == ["en"]
+
     def analyze(self, text, language, entities=None):
         if "CRASH" in text:
             os._exit(3)
@@ -37,6 +40,21 @@ class AnalyzerEngine:
 """
 
 
+FAKE_NLP = """
+class _Nlp:
+    def __init__(self, model):
+        self.model = model
+
+
+class NlpEngineProvider:
+    def __init__(self, nlp_configuration):
+        self.cfg = nlp_configuration
+
+    def create_engine(self):
+        return _Nlp(self.cfg["models"][0]["model_name"])
+"""
+
+
 @pytest.fixture
 def paths(tmp_path: Path) -> Paths:
     if sys.platform == "win32":
@@ -47,6 +65,7 @@ def paths(tmp_path: Path) -> Paths:
     site = next((venv / "lib").glob("python*/site-packages"))
     (site / "presidio_analyzer").mkdir()
     (site / "presidio_analyzer" / "__init__.py").write_text(FAKE)
+    (site / "presidio_analyzer" / "nlp_engine.py").write_text(FAKE_NLP)
     return p
 
 

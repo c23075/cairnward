@@ -40,6 +40,8 @@ class _Server:
     started: Started | None  # None: a remote server (nothing to stop)
     conn: Connection
     tools: list[dict[str, Any]] | None = None  # None: (re)list on next use
+    last_used: float = field(default_factory=time.monotonic)
+    busy: int = 0  # calls in flight (never stopped while > 0)
 
 
 @dataclass
@@ -80,6 +82,7 @@ class McpHub:
         async with lock:
             current = self._servers.get(key)
             if current is not None and not current.conn.closed.is_set():
+                current.last_used = time.monotonic()
                 return current
             if current is not None:  # it exited: clean up and start again
                 await self._drop(key)
@@ -177,6 +180,32 @@ class McpHub:
             await entry.conn.close()
             if entry.started is not None:
                 await entry.started.stop()
+
+    async def stop_idle(self, now: float | None = None) -> list[tuple[str, str]]:
+        """Stop servers unused for longer than their idle_stop_minutes (0 = never); they
+        start again on the next use. Returns (server, environment) of those stopped."""
+        now = time.monotonic() if now is None else now
+        stopped = []
+        for key, entry in list(self._servers.items()):
+            spec = self.cfg.mcp.servers.get(key[0])
+            limit = (spec.idle_stop_minutes if spec else 0) * 60
+            if not limit or entry.busy or now - entry.last_used < limit:
+                continue
+            async with self._locks.setdefault(key, asyncio.Lock()):
+                if self._servers.get(key) is not entry or entry.busy:
+                    continue
+                await self._drop(key)
+            idle = round(now - entry.last_used)
+            self._audit("mcp.stop", actor="cairnward", target=key[0], environment=key[1],
+                        details={"reason": "idle", "idle_s": idle})  # fmt: skip
+            stopped.append(key)
+        return stopped
+
+    async def idle_loop(self, every_s: float = 60) -> None:
+        while True:
+            await asyncio.sleep(every_s)
+            with contextlib.suppress(Exception):  # never take the server down for this
+                await self.stop_idle()
 
     async def aclose(self) -> None:
         for key in list(self._servers):
@@ -285,9 +314,15 @@ class McpHub:
         pre = await asyncio.to_thread(self.engine.audit_pre, decision, args_text)
         started = time.monotonic()
         spec = self.cfg.mcp.servers[server]
+        entry = None
         try:
             entry = await self._server(server, environment)
-            result = await entry.conn.call_tool(tool, arguments, timeout=spec.call_timeout_s)
+            entry.busy += 1
+            try:
+                result = await entry.conn.call_tool(tool, arguments, timeout=spec.call_timeout_s)
+            finally:
+                entry.busy -= 1
+                entry.last_used = time.monotonic()
             if not isinstance(result, dict):
                 raise McpError("unexpected tools/call answer")
         except McpError as exc:

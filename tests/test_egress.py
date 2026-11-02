@@ -326,3 +326,24 @@ def test_split_hostport_rejects(value: str) -> None:
 )
 def test_special_addresses(ip: str, special: bool) -> None:
     assert (special_reason(ip) is not None) is special
+
+
+def test_isolated_core_session_and_listed_local_addresses(
+    start: Callable[..., Running], origin: int
+) -> None:
+    """The isolated core's one session: its connections were checked in their own
+    environment, so an address on this machine is dialled when *some* environment lists
+    it exactly; a core session for one environment (single process) only uses that
+    environment's list."""
+    r = start(allow_local(origin))  # listed in environment "e" only
+    shared = r.proxy.sessions.create(Session(environment="coding", trusted_core=True,
+                                             any_environment=True))  # fmt: skip
+    per_env = r.proxy.sessions.create(Session(environment="coding", trusted_core=True))
+    for token, expect in ((shared, b"HTTP/1.0 200"), (per_env, b"HTTP/1.1 403")):
+        r.token = token
+        assert r.get(f"http://127.0.0.1:{origin}/").startswith(expect)
+    r.token = shared
+    assert r.get(f"http://127.0.0.1:{origin + 1}/").startswith(b"HTTP/1.1 403")  # unlisted
+    recs = wait_records(r.log, 3)
+    assert any(x.details.get("environment") == "checked by the core in its own environment"
+               for x in recs)  # fmt: skip

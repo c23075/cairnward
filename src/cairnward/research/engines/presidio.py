@@ -3,8 +3,8 @@ names, places and groups that patterns can't find. `[redaction] presidio = true`
 findings (category "personal") to the regex scanner's.
 
 Installed into its own virtual environment (`cairnward redaction install presidio`):
-presidio-analyzer (pinned below, MIT) and spaCy's small English model, with the exact
-versions and hashes recorded on that first install (trust on first use, as for Docling).
+presidio-analyzer (pinned below, MIT) and spaCy's small English model, from the lock
+shipped in engines/locks/presidio.txt (every package and the model wheel hash-pinned).
 The worker is a long-running child process (the model loads once), started on first use
 by whichever process scans: inside the core's sandbox when the core is isolated; it needs
 no network. If it can't start or stops answering, the regex scanner still applies and the
@@ -27,6 +27,9 @@ from cairnward.config.paths import Paths
 
 PIN = "presidio-analyzer==2.2.364"
 SPACY_MODEL = "en_core_web_sm"
+# The model is a wheel in the lock (with its hash), not `spacy download` (no hash check).
+SPACY_MODEL_URL = ("https://github.com/explosion/spacy-models/releases/download/"
+                   "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl")  # fmt: skip
 WORKER = Path(__file__).with_name("presidio_worker.py")
 START_TIMEOUT_S = 120
 REQUEST_TIMEOUT_S = 20
@@ -52,21 +55,27 @@ def install(paths: Paths, log: Any = print) -> dict[str, Any]:
     root = engine_dir(paths)
     root.mkdir(parents=True, exist_ok=True)
     venv, lock = root / "venv", root / "requirements.lock.txt"
-    log(f"resolving {PIN} ...")
-    subprocess.run([uv, "pip", "compile", "-", "--quiet", "--generate-hashes",
-                    "--python-version", "3.12", "-o", str(lock)],
-                   input=PIN + "\n", text=True, check=True)  # fmt: skip
+    from cairnward.research.engines import locks
+
+    ready = locks.shipped("presidio")
+    if ready is not None:
+        log(f"using the lock shipped with Cairnward ({ready.name})")
+        shutil.copyfile(ready, lock)
+    else:
+        log(f"resolving {PIN} (recorded: trust on first use) ...")
+        subprocess.run([uv, "pip", "compile", "-", "--quiet", "--generate-hashes",
+                        "--python-version", "3.12", "-o", str(lock)],
+                       input=f"{PIN}\n{SPACY_MODEL} @ {SPACY_MODEL_URL}\n", text=True,
+                       check=True)  # fmt: skip
     subprocess.run([uv, "venv", "--quiet", "--python", "3.12", str(venv)], check=True)
     subprocess.run([uv, "pip", "install", "--quiet", "--require-hashes", "-r", str(lock),
                     "--python", str(venv)], check=True)  # fmt: skip
-    exe = python(paths)
-    if exe is None:
+    if python(paths) is None:
         raise PresidioError("the virtual environment wasn't created")
-    log(f"downloading spaCy's {SPACY_MODEL} model ...")
-    subprocess.run([str(exe), "-m", "spacy", "download", SPACY_MODEL], check=True)
     frozen = subprocess.run([uv, "pip", "freeze", "--python", str(venv)], capture_output=True,
                             text=True, check=True).stdout  # fmt: skip
     record = {"pin": PIN, "installed": time.strftime("%Y-%m-%dT%H:%M:%S"),
+              "lock_source": f"repository ({ready.name})" if ready else "resolved on this machine",
               "lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest(),
               "freeze_sha256": hashlib.sha256(frozen.encode()).hexdigest()}  # fmt: skip
     (root / "install.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
@@ -88,7 +97,7 @@ class Presidio:
             raise PresidioError("Presidio isn't installed: cairnward redaction install presidio")
         env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TZ") if k in os.environ}
         env.update(HOME=str(engine_dir(self.paths)), NO_PROXY="*")
-        proc = subprocess.Popen([str(exe), "-I", str(WORKER)], stdin=subprocess.PIPE,
+        proc = subprocess.Popen([str(exe), "-I", str(WORKER), SPACY_MODEL], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
                                 env=env, bufsize=1)  # fmt: skip
         line = self._readline(proc, START_TIMEOUT_S)
