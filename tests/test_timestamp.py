@@ -51,7 +51,7 @@ def make_tsa(base: Path) -> Path:
     run("x509", "-req", "-in", "tsa.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial",
         "-out", "tsa.crt", "-days", "2", "-extfile", "ext.cnf", cwd=d)  # fmt: skip
     (d / "serial").write_text("01\n")
-    (d / "tsa.cnf").write_text(TSA_CONF.format(dir=d))
+    (d / "tsa.cnf").write_text(TSA_CONF.format(dir=d.as_posix()))  # openssl: no backslashes
     return d
 
 
