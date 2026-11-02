@@ -717,10 +717,57 @@ def socket_path_problem(cfg: Config) -> str | None:
     return None
 
 
+def _already_running(cfg: Config) -> bool:
+    import socket as _socket
+
+    path = sockets(cfg)["management"]
+    if os.name == "nt" or not path.exists():
+        return False
+    s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    try:
+        s.settimeout(2)
+        s.connect(str(path))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def port_problems(cfg: Config, *, with_egress: bool) -> list[str]:
+    """Ports Cairnward listens on that something else already holds."""
+    import socket as _socket
+
+    server = cfg.main.server
+    wanted = [("gateway_port", server.gateway_port), ("dashboard_port", server.dashboard_port)]
+    if with_egress:
+        wanted.append(("egress_port", server.egress_port))
+    busy = []
+    for name, port in wanted:
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        try:
+            if os.name != "nt":  # as asyncio and uvicorn bind (TIME_WAIT doesn't count)
+                s.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            busy.append(f"{name} {port}")
+        finally:
+            s.close()
+    return busy
+
+
 def serve(cfg: Config, *, with_egress: bool = True, log: Log) -> int:
     """Isolated mode when the privacy settings ask for it and it's available."""
     if problem := socket_path_problem(cfg):
         log(f"cairnward: can't start: {problem}")
+        return 2
+    if busy := port_problems(cfg, with_egress=with_egress):
+        if _already_running(cfg):
+            log("cairnward: already running (`cairnward status`); stop that one first")
+        else:
+            log(f"cairnward: can't start: in use by another program: {', '.join(busy)}. "
+                "Find it with `ss -ltnp 'sport = :<port>'`, or choose other ports under "
+                f"[server] in {cfg.paths.main_config}")  # fmt: skip
         return 2
     if cfg.privacy().value("isolation") == "on" and with_egress:
         try:
