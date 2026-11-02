@@ -135,6 +135,32 @@ class AnchorConfig(_Strict):
     interval_minutes: int = Field(default=60, ge=5, le=1440)
 
 
+class BackupConfig(_Strict):
+    """Encrypted backups with restic (spec §4.8, FR-SYNC-1/3/8)."""
+
+    mode: Literal["none", "on_demand", "auto"] = Field(
+        default="none",
+        description="none: no backups; on_demand: `cairnward backup run`; auto: also by serve",
+    )
+    repository: str | None = Field(
+        default=None,
+        description="a folder for the restic repository: a second disk, NAS mount or synced "
+        "folder (contents are encrypted by restic)",
+    )
+    interval_hours: int = Field(default=24, ge=1, le=24 * 30, description="auto mode: how often")
+    keep_daily: int = Field(default=7, ge=0, le=3650)
+    keep_weekly: int = Field(default=4, ge=0, le=520)
+    keep_monthly: int = Field(default=12, ge=0, le=1200)
+    password_command: str | None = Field(
+        default=None,
+        description="command printing the repository password (e.g. `pass show cairnward`); "
+        "default: a generated password in the state folder",
+    )
+    include_research: bool = Field(default=True, description="research.db (indexed libraries)")
+    include_artifacts: bool = True
+    include_config: bool = Field(default=True, description="the config folder (no secrets)")
+
+
 class ResearchConfig(_Strict):
     """Research workflows (spec §4.6)."""
 
@@ -156,6 +182,7 @@ class MainConfig(_Strict):
     redaction: RedactionConfig = RedactionConfig()
     anchor: AnchorConfig = AnchorConfig()
     research: ResearchConfig = ResearchConfig()
+    backup: BackupConfig = BackupConfig()
 
 
 # --------------------------------------------------------------------------- backends.toml

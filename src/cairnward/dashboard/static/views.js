@@ -183,6 +183,12 @@ export async function vault(main, params) {
     "x: egress report · l: audit records · ?: this help",
     prefs.noKeys ? "Single-key shortcuts are OFF (Settings)." : "Turn single-key shortcuts off in Settings." ] });
 
+  const backupNote = h("p", { class: "muted", role: "status" });
+  api("/api/backup").then(b => {
+    if (b.pending_purges) {
+      backupNote.textContent = `${b.pending_purges} purged conversation(s) pending removal from backups (done on the next backup run).`;
+    }
+  }).catch(() => {});
   const reload = async () => {
     const q = search.value.trim();
     rows = await api(`/api/vault?${new URLSearchParams({ ...(q ? { q } : {}), ...(trash ? { trash: "true" } : {}) })}`);
@@ -287,7 +293,7 @@ export async function vault(main, params) {
   };
   document.addEventListener("keydown", keys);
   search.addEventListener("keydown", ev => { if (ev.key === "Enter") reload(); if (ev.key === "Escape") search.blur(); });
-  put(main, h("h1", {}, trash ? "Vault: trash" : "Vault"),
+  put(main, h("h1", {}, trash ? "Vault: trash" : "Vault"), backupNote,
     h("div", { class: "actions" }, search, h("button", { type: "button", onclick: reload }, "Search"),
       h("a", { href: trash ? "#/vault" : "#/vault?trash=1" }, trash ? "Back to conversations" : "Trash"),
       h("button", { type: "button", onclick: help }, "Shortcuts (?)")),

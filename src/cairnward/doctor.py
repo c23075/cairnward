@@ -405,7 +405,43 @@ def run_checks(paths: Paths) -> list[Check]:
     checks += check_data(cfg)
     checks.append(check_disk_encryption())
     checks.append(check_citation_engine(cfg))
+    checks.append(check_backup(cfg))
     return checks
+
+
+def check_backup(cfg: Any) -> Check:
+    from datetime import UTC, datetime
+
+    from cairnward import backup
+
+    b = cfg.main.backup
+    if b.mode == "none":
+        return Check("backup", "warn", "off: conversations, library and artifacts aren't backed up",
+                     'set [backup] mode = "auto" and repository = "<folder on another disk>", '
+                     "then cairnward backup init")  # fmt: skip
+    try:
+        st = backup.status(cfg)
+    except backup.BackupError as exc:
+        return Check("backup", "fail", str(exc))
+    if not st["restic"]:
+        return Check("backup", "fail", "restic isn't installed", "e.g. sudo apt install restic")
+    if st.get("problem") or not st.get("initialised"):
+        return Check("backup", "fail", st.get("problem") or "repository not set up",
+                     "cairnward backup init")  # fmt: skip
+    notes = []
+    if st["pending_purges"]:
+        notes.append(f"{st['pending_purges']} purged conversation(s) still to remove from backups")
+    last = st["last"]
+    if last is None:
+        return Check("backup", "warn", "no backup yet", "cairnward backup run")
+    age_h = (datetime.now(UTC) - datetime.fromisoformat(last["time"])).total_seconds() / 3600
+    if b.mode == "auto" and age_h > 2 * b.interval_hours + 1:
+        notes.append(f"last backup {age_h:.0f} h ago")
+    if st.get("cloud_warning"):
+        notes.append(st["cloud_warning"])
+    detail = f"{b.mode}, {st.get('snapshots', '?')} snapshots, last {last['time'][:16]}"
+    return Check("backup", "warn" if notes else "ok",
+                 detail + ("; " + "; ".join(notes) if notes else ""))  # fmt: skip
 
 
 def check_citation_engine(cfg: Any) -> Check:

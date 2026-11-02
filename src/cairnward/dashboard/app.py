@@ -377,6 +377,19 @@ def dashboard_app(
         convs = v.list_conversations(environment=env, only_deleted=trash, folder_id=folder)
         return [conv_dict(c) for c in convs]
 
+    @app.get("/api/backup")
+    def backup_state() -> dict[str, Any]:
+        """Mode and purged conversations still to remove from old backups (FR-SYNC-8)."""
+        from cairnward import backup
+
+        b = cfg.main.backup
+        return {
+            "mode": b.mode,
+            "repository": bool(b.repository),
+            "pending_purges": len(backup.pending(cfg)),
+            "last": backup.last_run(cfg),
+        }
+
     @app.get("/api/vault/folders")
     def folders() -> list[dict[str, Any]]:
         return [dataclasses.asdict(f) for f in need_vault().list_folders()]

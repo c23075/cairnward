@@ -547,6 +547,11 @@ class Vault:
             from cairnward.artifacts import remove_tree
 
             remove_tree(repo)
+        # 4. Old backups hold it too: queue its removal from every snapshot (D50).
+        if self._data_dir is not None:
+            from cairnward.backup import request_purge
+
+            request_purge(self._data_dir, conversation_id)
 
     def purge_expired(self, *, older_than_days: int = TRASH_DAYS) -> list[str]:
         """Purge conversations that have been in the trash longer than the limit."""

@@ -102,6 +102,30 @@ def core_background(cfg: Config, vault: Vault, hub: McpHub, log: Log) -> list[An
     return [retention_loop(cfg, vault, log), hub.jobs.run_forever()]
 
 
+async def backup_loop(cfg: Config, log: Log) -> None:
+    """Backups (spec §4.8): with mode = "auto", a snapshot every interval_hours; in any
+    mode with a repository, purged conversations are removed from old snapshots within
+    the hour. Run by the process that can reach the backup folder (not the isolated core)."""
+    from cairnward import backup
+
+    b = cfg.main.backup
+    if b.mode == "none" or not b.repository:
+        return
+    await asyncio.sleep(60)  # let startup settle
+    while True:
+        try:
+            if b.mode == "auto" and await asyncio.to_thread(backup.due, cfg):
+                r = await asyncio.to_thread(backup.run, cfg, log)
+                log(f"backup {r['snapshot']}: {r['conversations']} conversations")
+            elif backup.pending(cfg):
+                await asyncio.to_thread(backup.process_purges, cfg, log)
+        except backup.BackupError as exc:
+            log(f"backup: {exc}")
+        except Exception as exc:  # a failed backup must not stop the server
+            log(f"backup: unexpected error: {exc}")
+        await asyncio.sleep(3600)
+
+
 async def anchor_loop(cfg: Config, audit: AuditLog, log: Log) -> None:
     """audit_anchor = "git": push a signed checkpoint every interval (spec §5.2, D49)."""
     if cfg.privacy().value("audit_anchor") != "git":
@@ -319,6 +343,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 gw.serve(),
                 _serve_uds(mgmt, socks["management"]),
                 anchor_loop(cfg, audit, log),
+                backup_loop(cfg, log),
                 *core_background(cfg, vault, hub, log),
             ]
             if with_egress:
@@ -501,6 +526,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                 )
                 serve_task = asyncio.create_task(proxy.serve_forever())
                 anchors = asyncio.create_task(anchor_loop(cfg, audit, log))
+                backups = asyncio.create_task(backup_loop(cfg, log))
                 try:
                     return await core.wait()
                 finally:
@@ -515,6 +541,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                     ctl.should_exit = True
                     serve_task.cancel()
                     anchors.cancel()
+                    backups.cancel()
                     await bridge.aclose()
                     await proxy.close()
                     with contextlib.suppress(asyncio.CancelledError, Exception):

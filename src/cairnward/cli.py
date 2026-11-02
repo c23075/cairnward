@@ -111,6 +111,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     doc = sub.add_parser("doctor", help="check prerequisites and that protections work")
     doc.add_argument("--json", action="store_true", help="machine-readable output")
+    bk = sub.add_parser("backup", help="encrypted backups with restic (vault, library, artifacts)")
+    bk_sub = bk.add_subparsers(dest="backup_command", metavar="ACTION", required=True)
+    bk_sub.add_parser("init", help="create the repository set in [backup] repository")
+    bk_sub.add_parser("run", help="back up now (and remove purged conversations from old backups)")
+    bk_sub.add_parser("list", help="the snapshots")
+    bk_sub.add_parser("status", help="mode, repository, last backup, pending removals")
+    bk_res = bk_sub.add_parser("restore", help="bring back conversations from a backup")
+    bk_res.add_argument("--snapshot", help="snapshot ID (default: the latest)")
+    bk_res.add_argument("--at", help="the latest backup from this date or earlier (YYYY-MM-DD)")
+    bk_res.add_argument("--to", type=Path, help="only extract the backup into this folder")
     chk = sub.add_parser("check", help="doctor + evals + client checks on this machine, one report")
     chk.add_argument("--env", default="litreview-offline", help="environment for the lit.ask eval")
     chk.add_argument("--no-paperqa", action="store_true", help="don't compare with PaperQA2")
@@ -1158,6 +1168,83 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
         return 0
 
 
+def _cmd_backup(args: argparse.Namespace) -> int:
+    import tempfile
+
+    from cairnward import backup
+
+    cfg = _load(args)
+    action = args.backup_command
+    try:
+        if action == "init":
+            password = backup.init(cfg)
+            if password:
+                print(f"Backup repository created at {backup.repository(cfg)}.")
+                print(f"Its password is in {backup.password_file(cfg)} (owner-only). Keep a copy"
+                      " somewhere safe (a password manager): without it the backups can't be"
+                      " restored.")  # fmt: skip
+                print(f"  password: {password}")
+            elif cfg.main.backup.password_command:
+                print("Backup repository created (password from password_command).")
+            if cfg.main.backup.mode == "none":
+                print('Set [backup] mode = "on_demand" or "auto" in cairnward.toml to use it.')
+            return 0
+        if action == "run":
+            if cfg.main.backup.mode == "none":
+                print('cairnward: backups are off ([backup] mode = "none")', file=sys.stderr)
+                return 1
+            r = backup.run(cfg)
+            print(f"snapshot {r['snapshot']}: {r['conversations']} conversations, "
+                  f"{r['files']} files, {(r['bytes_added'] or 0) // 1024} KiB new, "
+                  f"{r['seconds']:.0f}s")  # fmt: skip
+            return 0
+        if action == "list":
+            for snap in backup.snapshots(cfg):
+                print(
+                    f"{snap['short_id']}  {snap['time'][:19].replace('T', ' ')}  "
+                    f"{snap.get('summary', {}).get('total_files_processed', '?')} files"
+                )
+            print("(each holds the conversations, library and artifacts as they were)")
+            return 0
+        if action == "status":
+            st = backup.status(cfg)
+            print(f"mode: {st['mode']}")
+            print(
+                f"repository: {st['repository'] or '(not set)'}"
+                + ("" if st.get("initialised") else "  (not set up: cairnward backup init)")
+            )
+            print(f"restic: {st['restic'] or 'not installed (e.g. sudo apt install restic)'}")
+            if "snapshots" in st:
+                print(f"snapshots: {st['snapshots']}")
+            last = st["last"]
+            print(
+                f"last backup: {last['time'] + ' (' + last['snapshot'] + ')' if last else 'never'}"
+            )
+            if st["pending_purges"]:
+                print(f"pending removal from backups: {st['pending_purges']} purged "
+                      "conversation(s) (done on the next run)")  # fmt: skip
+            for key in ("cloud_warning", "problem"):
+                if st.get(key):
+                    print(f"note: {st[key]}")
+            return 0
+        if action == "restore":
+            if args.to:
+                snap, folder = backup.restore(cfg, args.to, snapshot=args.snapshot, at=args.at)
+                print(f"backup {snap['short_id']} ({snap['time'][:19]}) extracted to {folder}")
+                return 0
+            with tempfile.TemporaryDirectory(prefix="cw-restore-") as tmp:
+                snap, folder = backup.restore(cfg, Path(tmp), snapshot=args.snapshot, at=args.at)
+                counts = backup.import_conversations(cfg, folder)
+            print(f"from backup {snap['short_id']} ({snap['time'][:19]}): "
+                  f"{counts['added']} conversation(s) brought back, {counts['skipped']} already "
+                  "here (left as they are)")  # fmt: skip
+            return 0
+    except backup.BackupError as exc:
+        print(f"cairnward backup: {exc}", file=sys.stderr)
+        return 1
+    return 2
+
+
 def _cmd_artifacts(args: argparse.Namespace) -> int:
     from cairnward.artifacts import ArtifactError, ArtifactStore
 
@@ -1639,6 +1726,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return vault_cli.run(_load(args), args, sys.stdout)
         if args.command == "doctor":
             return _cmd_doctor(args)
+        if args.command == "backup":
+            return _cmd_backup(args)
         if args.command == "check":
             from cairnward import check
 

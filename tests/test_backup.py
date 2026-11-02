@@ -1,0 +1,151 @@
+"""restic backups (FR-SYNC-1/3/6/8, D50): snapshots hold a per-conversation export;
+restoring brings back what's missing; purging a conversation removes it from every
+snapshot (the M3 test: purged content absent from all snapshots afterwards).
+Skipped unless restic (>= 0.15) is installed."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from cairnward import backup
+from cairnward.cli import main
+from cairnward.config import load_config
+from cairnward.config.paths import Paths
+from cairnward.store import Vault
+
+pytestmark = pytest.mark.skipif(backup.restic() is None, reason="restic not installed")
+
+
+@pytest.fixture
+def cfg_paths(tmp_path: Path) -> Paths:
+    p = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
+    p.config_dir.mkdir(parents=True)
+    (p.config_dir / "cairnward.toml").write_text(
+        f'[backup]\nmode = "on_demand"\nrepository = "{(tmp_path / "repo").as_posix()}"\n'
+        "keep_daily = 2\n"
+    )
+    return p
+
+
+def seed(paths: Paths) -> dict[str, str]:
+    with Vault.open(paths) as v:
+        keep = v.create_conversation(environment="coding", client="aider", title="Keep me")
+        v.add_message(keep, {"role": "user", "content": "the parser drops quotes"})
+        gone = v.create_conversation(environment="coding", client="jan", title="Secret plan")
+        v.add_message(gone, {"role": "user", "content": "SECRET-PLAN-TEXT"})
+        locked = v.create_conversation(environment="coding", client="jan", title="Locked")
+        v.add_message(locked, {"role": "user", "content": "behind a passphrase"})
+        v.lock(locked, "correct horse battery staple")
+    art = paths.data_dir / "artifacts" / "conversation" / gone
+    art.mkdir(parents=True)
+    (art / "plan.md").write_text("SECRET-PLAN-TEXT")
+    return {"keep": keep, "gone": gone, "locked": locked}
+
+
+def test_backup_restore_and_purge_from_every_snapshot(cfg_paths: Paths, tmp_path: Path) -> None:
+    cfg = load_config(cfg_paths)
+    ids = seed(cfg_paths)
+    password = backup.init(cfg, log=lambda m: None)
+    assert password and backup.password_file(cfg).stat().st_mode & 0o777 == 0o600
+    first = backup.run(cfg, log=lambda m: None)
+    assert first["conversations"] == 3 and first["snapshot"]
+    assert not (backup.backup_dir(cfg) / "staging").exists()  # export not left behind
+    with Vault.open(cfg_paths) as v:  # a second snapshot with more content
+        v.add_message(ids["keep"], {"role": "assistant", "content": "fixed"})
+    backup.run(cfg, log=lambda m: None)
+    assert len(backup.snapshots(cfg)) == 2
+    assert sorted(backup.remaining(cfg, list(ids.values()))) == sorted(ids.values())
+
+    # the export: one folder per conversation; locked keys stay wrapped
+    snap, export = backup.restore(cfg, tmp_path / "restored")
+    conv = json.loads((export / "conversations" / ids["keep"] / "conversation.json").read_text())
+    assert len(conv["messages"]) == 2 and conv["conversation"]["enc"] == "age"
+    key = json.loads((export / "conversations" / ids["locked"] / "key.json").read_text())
+    assert key["kind"] == "wrapped"
+
+    # purge: gone from every snapshot (both of them), artifacts too
+    with Vault.open(cfg_paths) as v:
+        v.soft_delete(ids["gone"])
+        v.purge(ids["gone"])
+    assert [p["id"] for p in backup.pending(cfg)] == [ids["gone"]]
+    assert backup.process_purges(cfg, log=lambda m: None) == 1
+    assert backup.pending(cfg) == []
+    assert backup.remaining(cfg, [ids["gone"]]) == []
+    assert sorted(backup.remaining(cfg, [ids["keep"], ids["locked"]])) == sorted(
+        [ids["keep"], ids["locked"]])  # fmt: skip
+    assert len(backup.snapshots(cfg)) == 2  # rewritten, not dropped
+    for snap in backup.snapshots(cfg):
+        listing = backup.run_restic(cfg, "ls", "--json", snap["id"]).stdout
+        assert ids["gone"] not in listing and ids["keep"] in listing
+
+    # restore after losing the vault: everything that wasn't purged comes back
+    for name in ("vault.db", "keys.db"):
+        for f in cfg_paths.data_dir.glob(name + "*"):
+            f.unlink()
+    _snap, export = backup.restore(cfg, tmp_path / "again")
+    assert backup.import_conversations(cfg, export) == {"added": 2, "skipped": 0}
+    with Vault.open(cfg_paths) as v:
+        texts = [m.body["content"] for m in v.messages(ids["keep"])]
+        assert texts == ["the parser drops quotes", "fixed"]
+        assert v.conversation(ids["locked"]).locked
+        with pytest.raises(Exception):  # noqa: B017 - purged: not in any backup
+            v.conversation(ids["gone"])
+    # importing again adds nothing
+    assert backup.import_conversations(cfg, export) == {"added": 0, "skipped": 2}
+
+
+def test_purge_stays_pending_while_the_repository_is_away(cfg_paths: Paths) -> None:
+    cfg = load_config(cfg_paths)
+    ids = seed(cfg_paths)
+    backup.init(cfg, log=lambda m: None)
+    backup.run(cfg, log=lambda m: None)
+    with Vault.open(cfg_paths) as v:
+        v.soft_delete(ids["gone"])
+        v.purge(ids["gone"])
+    repo = backup.repository(cfg)
+    moved = repo.with_name("unplugged")
+    repo.rename(moved)  # the backup disk is unplugged
+    assert backup.process_purges(cfg, log=lambda m: None) == 0
+    assert backup.pending(cfg)[0]["id"] == ids["gone"]
+    moved.rename(repo)
+    backup.run(cfg, log=lambda m: None)  # the next run catches up first
+    assert backup.pending(cfg) == [] and backup.remaining(cfg, [ids["gone"]]) == []
+
+
+def test_without_backups_purges_are_not_kept(tmp_path: Path) -> None:
+    paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
+    cfg = load_config(paths)
+    with Vault.open(paths) as v:
+        c = v.create_conversation(environment="coding", client="x", title="t")
+        v.soft_delete(c)
+        v.purge(c)
+    assert len(backup.pending(cfg)) == 1
+    assert backup.process_purges(cfg, log=lambda m: None) == 0 and backup.pending(cfg) == []
+
+
+def test_settings_checks(tmp_path: Path) -> None:
+    paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
+    paths.config_dir.mkdir(parents=True)
+    (paths.config_dir / "cairnward.toml").write_text('[backup]\nrepository = "s3:bucket/x"\n')
+    with pytest.raises(backup.BackupError, match="isn't a local folder"):
+        backup.repository(load_config(paths))
+    assert backup.cloud_warning(Path("/home/me/Dropbox/backup"))
+    assert backup.cloud_warning(Path("/media/usb/backup")) is None
+
+
+def test_cli(cfg_paths: Paths, capsys: pytest.CaptureFixture[str],
+             monkeypatch: pytest.MonkeyPatch) -> None:  # fmt: skip
+    for k, v in (("CAIRNWARD_DATA_DIR", cfg_paths.data_dir),
+                 ("CAIRNWARD_STATE_DIR", cfg_paths.state_dir)):  # fmt: skip
+        monkeypatch.setenv(k, str(v))
+    seed(cfg_paths)
+    base = ["--config-dir", str(cfg_paths.config_dir), "backup"]
+    assert main([*base, "init"]) == 0
+    out = capsys.readouterr().out
+    assert "password" in out.lower()
+    assert main([*base, "run"]) == 0
+    assert main([*base, "list"]) == 0
+    assert "conversations" in capsys.readouterr().out
+    assert main([*base, "status"]) == 0
+    assert "snapshots: 1" in capsys.readouterr().out

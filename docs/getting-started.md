@@ -158,7 +158,26 @@ uv run cairnward research ask thesis questions.txt --engine paperqa --at 23:30
 ```
 Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
-## 7. Check everything on your machine
+## 7. Back up
+Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. Add to `cairnward.toml`, with a folder on another disk:
+```toml
+[backup]
+mode = "auto"            # or "on_demand"
+repository = "/media/backup/cairnward"
+```
+Then create the repository (keep the password it shows somewhere safe) and take the first backup:
+```bash
+uv run cairnward backup init
+```
+```bash
+uv run cairnward backup run
+```
+With `serve` running, `auto` backs up every 24 hours. Purging a conversation also removes it from every earlier backup. To bring conversations back (only ones the vault doesn't have):
+```bash
+uv run cairnward backup restore --at 2026-11-01
+```
+
+## 8. Check everything on your machine
 With `cairnward serve` running and your models pulled, one command runs the doctor, the lit.ask eval (and PaperQA2 next to it when installed), the coding eval with each installed agent, and summarises what your chat clients did:
 ```bash
 uv run cairnward check
