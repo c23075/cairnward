@@ -155,6 +155,9 @@ def pdf_qa_section(env: str, engines: list[str], log: Callable[[str], None]) -> 
     for engine, s in out["summaries"].items():
         sec.lines.append(f"| {engine} | {s['passed']}/{s['questions']} | "
                          f"{s['invented_citations']} | {s['seconds_total']} |")  # fmt: skip
+    for engine, s in out["summaries"].items():
+        if s.get("failed"):
+            sec.lines.append(f"\n{engine} stopped at {s['failed']}")
     sec.lines += ["", "| Question | Engine | Pass | Cited page | Content | Honest | Seconds |",
                   "|---|---|---|---|---|---|---|"]  # fmt: skip
     for r in out["results"]:
@@ -168,7 +171,7 @@ def pdf_qa_section(env: str, engines: list[str], log: Callable[[str], None]) -> 
     exit_ok = (
         bool(lean)
         and lean["passed"] == lean["questions"]
-        and not any(s["invented_citations"] for s in out["summaries"].values())
+        and not any(s["invented_citations"] or s.get("failed") for s in out["summaries"].values())
     )
     sec.status = "pass" if exit_ok else "fail"
     sec.lines += ["", "M1 exit criteria (lean engine passes every question, zero invented "

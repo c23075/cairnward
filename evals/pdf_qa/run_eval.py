@@ -101,7 +101,7 @@ def brief(output: str, limit: int = 600) -> str:
 
 
 def run(env: str = "litreview-offline", engines: list[str] | None = None, *, keep: bool = False,
-        emit: Any = print) -> dict[str, Any]:  # fmt: skip
+        emit: Any = print, only: list[str] | None = None) -> dict[str, Any]:  # fmt: skip
     """Build the library, ask every question with each engine, score; returns
     {"summaries": {engine: {...}}, "results": [...]}. Needs `cairnward serve`."""
     engines = engines or ["lean"]
@@ -119,24 +119,35 @@ def run(env: str = "litreview-offline", engines: list[str] | None = None, *, kee
                 if r.returncode != 0:
                     raise EvalError(f"`cairnward {' '.join(step[:2])}` failed: "
                                     f"{brief(r.stdout + r.stderr)}")  # fmt: skip
+            questions = [q for q in spec["questions"] if not only or q["id"] in only]
             for engine in engines:
                 mine = []
-                for q in spec["questions"]:
+                failed = None
+                for q in questions:
                     t0 = time.monotonic()
                     r = cw("library", "ask", name, q["question"], "--json", "--engine", engine)
                     took = round(time.monotonic() - t0, 1)
-                    if r.returncode != 0:
-                        raise EvalError(f"ask failed ({engine}): {brief(r.stdout + r.stderr)}")
+                    if r.returncode != 0:  # this engine stops; the others' results stay
+                        failed = f"{q['id']}: {brief(r.stdout + r.stderr)}"
+                        emit(json.dumps({"engine": engine, "failed": failed}))
+                        break
                     answer = json.loads(r.stdout)
                     answer["seconds"] = answer.get("seconds") or took  # wall clock if not given
                     res = score(q, answer) | {"engine": engine}
                     mine.append(res)
                     emit(json.dumps(res))
+                    if res["invented"]:  # to the terminal only, not into reports
+                        emit("    why: " + json.dumps({
+                            "citations_without_a_passage": answer.get("invalid_citations"),
+                            "quotations_not_found": [str(p)[:200] for p in
+                                                     answer.get("quote_problems", [])],
+                            "answer": str(answer.get("text", ""))[:400]}))  # fmt: skip
                 results += mine
                 summaries[engine] = {
                     "questions": len(mine), "passed": sum(r["pass"] for r in mine),
                     "invented_citations": sum(r["invented"] for r in mine),
                     "seconds_total": round(sum(r["seconds"] for r in mine), 1),
+                    **({"failed": failed} if failed else {}),
                 }  # fmt: skip
         finally:
             if not keep:
@@ -151,16 +162,19 @@ def main() -> int:
     ap.add_argument("--engine", choices=["lean", "paperqa"], default="lean")
     ap.add_argument("--compare", action="store_true",
                     help="run both engines on the same questions (FR-RES-13)")  # fmt: skip
+    ap.add_argument("--only", help="comma-separated question ids, e.g. q5,u2")
     args = ap.parse_args()
     engines = ["lean", "paperqa"] if args.compare else [args.engine]
+    only = [x.strip() for x in args.only.split(",")] if args.only else None
     try:
-        out = run(args.env, engines, keep=args.keep)
+        out = run(args.env, engines, keep=args.keep, only=only)
     except EvalError as exc:
         print(exc)
         return 2
     for engine, summary in out["summaries"].items():
         print(json.dumps({"engine": engine, "summary": summary}))
-    return 0 if all(s["passed"] == s["questions"] for s in out["summaries"].values()) else 1
+    return 0 if all(s["passed"] == s["questions"] and "failed" not in s
+                    for s in out["summaries"].values()) else 1  # fmt: skip
 
 
 if __name__ == "__main__":
