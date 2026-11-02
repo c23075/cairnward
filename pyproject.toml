@@ -69,7 +69,7 @@ ignore = []
 "src/cairnward/research/library.py" = ["S608"]
 
 [[tool.mypy.overrides]]
-module = ["paperqa", "paperqa.*", "citeproc", "citeproc.*", "docling", "docling.*"]  # optional engines, separate environments
+module = ["paperqa", "paperqa.*", "citeproc", "citeproc.*", "docling", "docling.*", "presidio_analyzer", "presidio_analyzer.*"]  # optional engines, separate environments
 ignore_missing_imports = true
 
 [tool.mypy]

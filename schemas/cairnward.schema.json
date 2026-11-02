@@ -508,6 +508,27 @@
           },
           "title": "Ignore",
           "type": "array"
+        },
+        "presidio": {
+          "default": false,
+          "description": "also use Presidio (optional engine: cairnward redaction install presidio) for names, places and groups",
+          "title": "Presidio",
+          "type": "boolean"
+        },
+        "presidio_entities": {
+          "description": "Presidio entity types to report (patterns already cover emails, phones, cards and IBANs)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Presidio Entities",
+          "type": "array"
+        },
+        "presidio_min_score": {
+          "default": 0.6,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Presidio Min Score",
+          "type": "number"
         }
       },
       "title": "RedactionConfig",
@@ -600,6 +621,34 @@
       },
       "title": "ServerConfig",
       "type": "object"
+    },
+    "TelemetryConfig": {
+      "additionalProperties": false,
+      "description": "OpenTelemetry export of model and tool calls (FR-AUD-5): off unless an endpoint is set.",
+      "properties": {
+        "interval_s": {
+          "default": 30,
+          "maximum": 3600,
+          "minimum": 5,
+          "title": "Interval S",
+          "type": "integer"
+        },
+        "otlp_endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "an OTLP/HTTP collector on this machine, e.g. http://127.0.0.1:4318 (Langfuse, Phoenix, Jaeger); no prompts or answers are sent",
+          "title": "Otlp Endpoint"
+        }
+      },
+      "title": "TelemetryConfig",
+      "type": "object"
     }
   },
   "$id": "https://github.com/c23075/cairnward/schemas/cairnward.schema.json",
@@ -672,7 +721,14 @@
       "$ref": "#/$defs/RedactionConfig",
       "default": {
         "custom": [],
-        "ignore": []
+        "ignore": [],
+        "presidio": false,
+        "presidio_entities": [
+          "PERSON",
+          "LOCATION",
+          "NRP"
+        ],
+        "presidio_min_score": 0.6
       }
     },
     "research": {
@@ -697,6 +753,13 @@
         "gateway_host": "127.0.0.1",
         "gateway_port": 8484,
         "socket_path": null
+      }
+    },
+    "telemetry": {
+      "$ref": "#/$defs/TelemetryConfig",
+      "default": {
+        "interval_s": 30,
+        "otlp_endpoint": null
       }
     }
   },

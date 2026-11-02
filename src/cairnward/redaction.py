@@ -83,13 +83,40 @@ class Finding:
 class Scanner:
     custom: list[tuple[str, Category, re.Pattern[str]]] = field(default_factory=list)
     ignore: list[re.Pattern[str]] = field(default_factory=list)
+    presidio: Any = None  # research.engines.presidio.Presidio (optional, FR-RED-2)
+    presidio_entities: list[str] = field(default_factory=list)
+    presidio_min_score: float = 0.6
+    unavailable: list[str] = field(default_factory=list)  # optional detectors that failed
 
     @classmethod
-    def from_config(cls, redaction: Any) -> Scanner:
+    def from_config(cls, redaction: Any, paths: Any = None) -> Scanner:
+        presidio = None
+        if getattr(redaction, "presidio", False) and paths is not None:
+            from cairnward.research.engines import presidio as presidio_engine
+
+            presidio = presidio_engine.shared(paths)
         return cls(
             [(c.name, c.category, re.compile(c.regex)) for c in redaction.custom],
             [re.compile(rx) for rx in redaction.ignore],
+            presidio,
+            list(getattr(redaction, "presidio_entities", [])),
+            float(getattr(redaction, "presidio_min_score", 0.6)),
         )
+
+    def _presidio(self, text: str) -> Iterator[Finding]:
+        if self.presidio is None or not text.strip():
+            return
+        from cairnward.research.engines.presidio import PresidioError
+
+        try:
+            found = self.presidio.analyze(text, self.presidio_entities, self.presidio_min_score)
+        except PresidioError as exc:
+            if not self.unavailable:
+                self.unavailable.append(f"presidio: {exc}")
+            return
+        for f in found:
+            yield Finding(f"presidio:{str(f['type']).lower()}", "personal", int(f["start"]),
+                          int(f["end"]))  # fmt: skip
 
     def _personal(self, text: str) -> Iterator[Finding]:
         for m in _EMAIL.finditer(text):
@@ -133,6 +160,7 @@ class Scanner:
         for name, category, rx in self.custom:
             candidates += [Finding(name, category, m.start(), m.end()) for m in rx.finditer(text)]
         candidates += list(self._personal(text))
+        candidates += list(self._presidio(text))  # after the patterns: they win on overlaps
         for f in candidates:  # in priority order: built-in secrets, custom, personal
             if f.end > f.start and not overlaps(f) and not ignored(f):
                 found.append(f)
@@ -146,6 +174,7 @@ class Scanner:
 class Report:
     secrets: Counter[str]
     personal: Counter[str]
+    unavailable: list[str] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -164,7 +193,7 @@ def scan_texts(scanner: Scanner, texts: Iterable[str]) -> Report:
     for text in texts:
         for f in scanner.scan(text):
             (secrets if f.category == "secret" else personal)[f.kind] += 1
-    return Report(secrets, personal)
+    return Report(secrets, personal, list(scanner.unavailable))
 
 
 def message_texts(messages: list[dict[str, Any]]) -> Iterator[str]:
@@ -225,7 +254,11 @@ def check_outbound(
     mode = cfg.privacy(environment).value("redaction")
     if mode == "off":
         return Verdict(True)
-    report = scan_texts(Scanner.from_config(cfg.main.redaction), texts)
+    report = scan_texts(Scanner.from_config(cfg.main.redaction, cfg.paths), texts)
+    if report.unavailable and engine.audit:  # say so: fewer detectors than configured
+        engine.audit.append("redaction", actor="cairnward", target=destination,
+                            environment=environment, client=client, run_id=run_id,
+                            details={"mode": mode, "unavailable": report.unavailable})  # fmt: skip
     if report.empty:
         return Verdict(True)
     common: dict[str, Any] = dict(

@@ -276,6 +276,12 @@ def build_parser() -> argparse.ArgumentParser:
     cite.add_argument("--engine", choices=["auto", "builtin", "citeproc-js", "pandoc"],
                       help="CSL engine (default: [research] citation_engine, auto)")  # fmt: skip
 
+    red = sub.add_parser("redaction", help="the redaction scanner: optional Presidio, try it out")
+    red_sub = red.add_subparsers(dest="redaction_command", metavar="ACTION", required=True)
+    red_sub.add_parser("install", help="install the optional Presidio detector").add_argument(
+        "engine", choices=["presidio"])  # fmt: skip
+    red_sub.add_parser("status", help="is Presidio installed and answering")
+    red_sub.add_parser("scan", help="show what the scanner finds in a text").add_argument("text")
     bke = sub.add_parser("backend", help="hosted provider templates for backends.toml")
     bke_sub = bke.add_subparsers(dest="backend_command", metavar="ACTION", required=True)
     bke_sub.add_parser("providers", help="the hosted providers with templates")
@@ -1330,6 +1336,45 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
         return 0
 
 
+def _cmd_redaction(args: argparse.Namespace) -> int:
+    import subprocess
+
+    from cairnward.redaction import Scanner, scan_texts
+    from cairnward.research.engines import presidio
+
+    cfg = _load(args)
+    if args.redaction_command == "install":
+        try:
+            record = presidio.install(cfg.paths)
+        except (presidio.PresidioError, subprocess.CalledProcessError) as exc:
+            print(f"cairnward: {exc}", file=sys.stderr)
+            return 1
+        print(f"Presidio installed (lock sha256 {record['lock_sha256'][:16]}...). Switch it on "
+              "with [redaction] presidio = true in cairnward.toml.")  # fmt: skip
+        return 0
+    if args.redaction_command == "status":
+        if presidio.python(cfg.paths) is None:
+            print("presidio: not installed")
+            return 1
+        try:
+            presidio.shared(cfg.paths).analyze("Ada Lovelace lived in London.", ["PERSON"], 0.0)
+        except presidio.PresidioError as exc:
+            print(f"presidio: installed but not working: {exc}")
+            return 1
+        on = "on" if cfg.main.redaction.presidio else "off ([redaction] presidio = true)"
+        print(f"presidio: installed and answering; {on}")
+        return 0
+    scanner = Scanner.from_config(cfg.main.redaction, cfg.paths)
+    found = scanner.scan(args.text)
+    for f in found:
+        print(f"{f.category:9} {f.kind:22} {args.text[f.start : f.end]!r}")
+    if not found:
+        print("nothing found")
+    for note in scan_texts(scanner, []).unavailable or scanner.unavailable:
+        print(f"note: {note}", file=sys.stderr)
+    return 0
+
+
 def _cmd_backup(args: argparse.Namespace) -> int:
     import tempfile
 
@@ -2011,6 +2056,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_doctor(args)
         if args.command == "backup":
             return _cmd_backup(args)
+        if args.command == "redaction":
+            return _cmd_redaction(args)
         if args.command == "backend":
             from cairnward.backends.providers import PROVIDERS, template
 

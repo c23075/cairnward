@@ -351,6 +351,13 @@ class AuditLog:
             rows = conn.execute(query).all()
         return sorted((_row_to_record(r) for r in rows), key=lambda r: r.seq)
 
+    def since(self, seq: int, limit: int = 500) -> list[AuditRecord]:
+        """Records after `seq`, oldest first (for exporters that keep their place)."""
+        query = (select(audit_records).where(audit_records.c.seq > seq)
+                 .order_by(audit_records.c.seq).limit(limit))  # fmt: skip
+        with self._engine.connect() as conn:
+            return [_row_to_record(r) for r in conn.execute(query).all()]
+
     def latest(self, *actions: str) -> AuditRecord | None:
         query = select(audit_records).order_by(audit_records.c.seq.desc()).limit(1)
         if actions:

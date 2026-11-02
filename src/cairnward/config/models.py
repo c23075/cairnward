@@ -109,6 +109,17 @@ class RedactionConfig(_Strict):
     """What the redaction scanner looks for, besides its built-in patterns (spec §5.4)."""
 
     custom: list[CustomPattern] = Field(default_factory=list)
+    presidio: bool = Field(
+        default=False,
+        description="also use Presidio (optional engine: cairnward redaction "
+        "install presidio) for names, places and groups",
+    )
+    presidio_entities: list[str] = Field(
+        default_factory=lambda: ["PERSON", "LOCATION", "NRP"],
+        description="Presidio entity types to report (patterns already cover emails, phones, "
+        "cards and IBANs)",
+    )
+    presidio_min_score: float = Field(default=0.6, ge=0, le=1)
     ignore: list[str] = Field(
         default_factory=list,
         description="regular expressions for matches to ignore (e.g. your own public email)",
@@ -169,6 +180,17 @@ class BackupConfig(_Strict):
     include_config: bool = Field(default=True, description="the config folder (no secrets)")
 
 
+class TelemetryConfig(_Strict):
+    """OpenTelemetry export of model and tool calls (FR-AUD-5): off unless an endpoint is set."""
+
+    otlp_endpoint: str | None = Field(
+        default=None,
+        description="an OTLP/HTTP collector on this machine, e.g. "
+        "http://127.0.0.1:4318 (Langfuse, Phoenix, Jaeger); no prompts or answers are sent",
+    )
+    interval_s: int = Field(default=30, ge=5, le=3600)
+
+
 class ResearchConfig(_Strict):
     """Research workflows (spec §4.6)."""
 
@@ -197,6 +219,7 @@ class MainConfig(_Strict):
     anchor: AnchorConfig = AnchorConfig()
     research: ResearchConfig = ResearchConfig()
     backup: BackupConfig = BackupConfig()
+    telemetry: TelemetryConfig = TelemetryConfig()
 
 
 # --------------------------------------------------------------------------- backends.toml

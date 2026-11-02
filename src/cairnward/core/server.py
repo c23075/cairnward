@@ -127,6 +127,30 @@ async def backup_loop(cfg: Config, log: Log) -> None:
         await asyncio.sleep(3600)
 
 
+async def otel_loop(cfg: Config, audit: AuditLog, log: Log) -> None:
+    """OpenTelemetry export (FR-AUD-5), when [telemetry] otlp_endpoint is set."""
+    endpoint = cfg.main.telemetry.otlp_endpoint
+    if not endpoint:
+        return
+    from cairnward.audit.otel import Exporter, OtelError
+
+    try:
+        exporter = Exporter(endpoint, cfg.paths.state_dir / "otel.json")
+    except OtelError as exc:
+        log(f"telemetry: {exc}")
+        return
+    reported = False
+    while True:
+        try:
+            await asyncio.to_thread(exporter.export_once, audit)
+            reported = False
+        except OtelError as exc:
+            if not reported:  # say it once, keep trying quietly
+                log(f"telemetry: {exc}")
+                reported = True
+        await asyncio.sleep(cfg.main.telemetry.interval_s)
+
+
 async def anchor_loop(cfg: Config, audit: AuditLog, log: Log) -> None:
     """audit_anchor = "git": push a signed checkpoint every interval (spec §5.2, D49)."""
     if cfg.privacy().value("audit_anchor") != "git":
@@ -353,6 +377,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 _serve_uds(mgmt, socks["management"]),
                 anchor_loop(cfg, audit, log),
                 backup_loop(cfg, log),
+                otel_loop(cfg, audit, log),
                 *core_background(cfg, vault, hub, log),
             ]
             if with_egress:
@@ -570,6 +595,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                 serve_task = asyncio.create_task(proxy.serve_forever())
                 anchors = asyncio.create_task(anchor_loop(cfg, audit, log))
                 backups = asyncio.create_task(backup_loop(cfg, log))
+                telemetry = asyncio.create_task(otel_loop(cfg, audit, log))
                 try:
                     return await core.wait()
                 finally:
@@ -585,6 +611,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                     serve_task.cancel()
                     anchors.cancel()
                     backups.cancel()
+                    telemetry.cancel()
                     await bridge.aclose()
                     await proxy.close()
                     with contextlib.suppress(asyncio.CancelledError, Exception):
