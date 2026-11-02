@@ -171,7 +171,7 @@ uv run cairnward library set thesis --parser docling --metadata grobid
 uv run cairnward library index thesis --rebuild
 ```
 
-Mirror a Google Drive folder (read-only; set up an rclone remote first with `rclone config`, ideally with `scope = drive.readonly`; the library's environment must allow network access):
+Mirror a Google Drive folder (read-only; set up an rclone remote first with `rclone config`, ideally with `scope = drive.readonly`; `serve` must be running, and the library's environment must allow Google's hosts, since rclone's traffic goes through Cairnward's egress):
 ```bash
 uv run cairnward library drive thesis --remote gdrive:Papers/Thesis --preview
 ```
@@ -205,6 +205,8 @@ Backups use [restic](https://restic.net) (`sudo apt install restic`), always enc
 mode = "auto"            # or "on_demand"
 repository = "/media/backup/cairnward"
 ```
+A remote repository works too (`s3:`, `rest:`, `b2:`, `azure:`, `gs:`, `swift:` or `rclone:`, e.g. `repository = "s3:s3.eu-central-1.amazonaws.com/my-bucket/cairnward"`, with the provider's keys in restic's usual environment variables). Its traffic goes through Cairnward's egress, so `serve` must be running and the backup environment (`[backup] environment`, default the default one) must allow the host, e.g. by adding it to `network_allow_hosts`.
+
 Then create the repository (keep the password it shows somewhere safe) and take the first backup:
 ```bash
 uv run cairnward backup init

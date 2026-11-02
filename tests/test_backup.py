@@ -103,7 +103,7 @@ def test_purge_stays_pending_while_the_repository_is_away(cfg_paths: Paths) -> N
     with Vault.open(cfg_paths) as v:
         v.soft_delete(ids["gone"])
         v.purge(ids["gone"])
-    repo = backup.repository(cfg)
+    repo = Path(backup.repository(cfg))
     moved = repo.with_name("unplugged")
     repo.rename(moved)  # the backup disk is unplugged
     assert backup.process_purges(cfg, log=lambda m: None) == 0
@@ -127,8 +127,11 @@ def test_without_backups_purges_are_not_kept(tmp_path: Path) -> None:
 def test_settings_checks(tmp_path: Path) -> None:
     paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
     paths.config_dir.mkdir(parents=True)
-    (paths.config_dir / "cairnward.toml").write_text('[backup]\nrepository = "s3:bucket/x"\n')
-    with pytest.raises(backup.BackupError, match="isn't a local folder"):
+    (paths.config_dir / "cairnward.toml").write_text('[backup]\nrepository = "s3:s3.example/b"\n')
+    assert backup.repository(load_config(paths)) == "s3:s3.example/b"  # remote, via egress
+    assert backup.remote_kind(load_config(paths)) == "s3"
+    (paths.config_dir / "cairnward.toml").write_text('[backup]\nrepository = "sftp:me@nas:/b"\n')
+    with pytest.raises(backup.BackupError, match="wouldn't go through"):
         backup.repository(load_config(paths))
     assert backup.cloud_warning(Path("/home/me/Dropbox/backup"))
     assert backup.cloud_warning(Path("/media/usb/backup")) is None

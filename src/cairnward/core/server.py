@@ -115,11 +115,19 @@ async def backup_loop(cfg: Config, log: Log) -> None:
     await asyncio.sleep(60)  # let startup settle
     while True:
         try:
-            if b.mode == "auto" and await asyncio.to_thread(backup.due, cfg):
-                r = await asyncio.to_thread(backup.run, cfg, log)
-                log(f"backup {r['snapshot']}: {r['conversations']} conversations")
-            elif backup.pending(cfg):
-                await asyncio.to_thread(backup.process_purges, cfg, log)
+
+            def once() -> dict[str, Any] | None:
+                with backup.remote_access(cfg):  # a remote repository: through egress
+                    if b.mode == "auto" and backup.due(cfg):
+                        return backup.run(cfg, log)
+                    if backup.pending(cfg):
+                        backup.process_purges(cfg, log)
+                return None
+
+            if b.mode == "auto" or backup.pending(cfg):
+                r = await asyncio.to_thread(once)
+                if r:
+                    log(f"backup {r['snapshot']}: {r['conversations']} conversations")
         except backup.BackupError as exc:
             log(f"backup: {exc}")
         except Exception as exc:  # a failed backup must not stop the server

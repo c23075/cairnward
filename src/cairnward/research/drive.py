@@ -11,15 +11,16 @@ and indexes them. Nothing is ever written to the remote: rclone runs `lsjson` an
 from the remote only. Files removed from Drive are reported and kept, unless `--prune`
 (which deletes them from `drive/` only).
 
-The connection is checked by the policy engine first, as a `net.connect` to Google's API
-host in the library's environment (refused where the network is off; asks where it says
-ask), and each run is audited. rclone connects itself, so its traffic is not counted in
-the egress report.
+rclone's traffic goes through Cairnward's egress proxy in a short session for the library's
+environment, so that environment's network policy applies (an allow-list must list
+Google's hosts; "ask" asks in `cairnward approvals`) and the egress report shows it. The
+server must be running. Each run is also audited as `drive.mirror`.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -35,13 +36,27 @@ class DriveError(Exception):
     pass
 
 
-def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    exe = shutil.which("rclone")
-    if exe is None:
-        raise DriveError("rclone isn't installed (e.g. sudo apt install rclone), then set up a "
-                         "remote with: rclone config")  # fmt: skip
-    return subprocess.run([exe, *args], capture_output=True, text=True, timeout=3600,  # noqa: S603
-                          check=False)  # fmt: skip
+def make_runner(proxy: str | None) -> Runner:
+    """rclone with its traffic through Cairnward's egress (rclone honours HTTPS_PROXY)."""
+
+    def run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        exe = shutil.which("rclone")
+        if exe is None:
+            raise DriveError("rclone isn't installed (e.g. sudo apt install rclone), then set "
+                             "up a remote with: rclone config")  # fmt: skip
+        env = dict(os.environ)
+        for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY",
+                  "no_proxy", "ALL_PROXY", "all_proxy"):  # fmt: skip
+            env.pop(k, None)
+        if proxy:
+            env.update(HTTPS_PROXY=proxy, HTTP_PROXY=proxy)
+        return subprocess.run([exe, *args], capture_output=True, text=True, timeout=3600,  # noqa: S603
+                              check=False, env=env)  # fmt: skip
+
+    return run
+
+
+_run = make_runner(None)
 
 
 def check_remote(remote: str, run: Runner = _run) -> list[str]:

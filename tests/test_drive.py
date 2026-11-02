@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,7 @@ import json, os, shutil, sys
 from pathlib import Path
 root = Path(os.environ["FAKE_DRIVE"])
 with open(os.environ["FAKE_RCLONE_LOG"], "a") as log:
-    log.write(json.dumps(sys.argv[1:]) + "\n")
+    log.write(json.dumps(sys.argv[1:] + ["proxy=" + os.environ.get("HTTPS_PROXY", "")]) + "\n")
 args = sys.argv[1:]
 if args[:2] == ["config", "dump"]:
     print(json.dumps({"gdrive": {"type": "drive", "scope": os.environ.get("FAKE_SCOPE", "")}}))
@@ -81,7 +82,7 @@ def test_preview_mirror_prune(fake_rclone: Path, tmp_path: Path) -> None:
     assert not (local / "sub" / "b.pdf").exists()
     # only reading: config dump, lsjson, and copy FROM the remote TO the library
     for cmd in commands(tmp_path):
-        assert cmd[0] in ("config", "lsjson", "copy")
+        assert cmd[0] in ("config", "lsjson", "copy") and cmd[-1] == "proxy="
         if cmd[0] == "copy":
             assert cmd[1] == "gdrive:Papers" and cmd[2] == str(local)
     with pytest.raises(drive.DriveError, match="no rclone remote 'other'"):
@@ -92,6 +93,18 @@ def test_cli_follows_the_policy(fake_rclone: Path, tmp_path: Path,
                                 monkeypatch: pytest.MonkeyPatch,
                                 capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
     monkeypatch.setenv("FAKE_SCOPE", "drive.readonly")
+    import contextlib
+
+    import cairnward.run.runner as runner
+
+    sessions: list[str] = []
+
+    @contextlib.contextmanager
+    def fake_session(cfg: object, environment: str, program: str) -> Iterator[str]:
+        sessions.append(f"{environment}/{program}")
+        yield "http://cw:token@127.0.0.1:9"  # rclone gets this as HTTPS_PROXY
+
+    monkeypatch.setattr(runner, "egress_session", fake_session)
     paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
     monkeypatch.setenv("CAIRNWARD_DATA_DIR", str(paths.data_dir))
     monkeypatch.setenv("CAIRNWARD_STATE_DIR", str(paths.state_dir))
@@ -108,6 +121,8 @@ def test_cli_follows_the_policy(fake_rclone: Path, tmp_path: Path,
     assert "would copy 2 new" in capsys.readouterr().out and not (folder / "drive").exists()
     assert main([*base, "online", "--remote", "gdrive:Papers", "--no-index"]) == 0
     assert (folder / "drive" / "a.pdf").exists()
+    assert sessions == ["scratch/rclone", "scratch/rclone"]  # through an egress session
+    assert all(c[-1] == "proxy=http://cw:token@127.0.0.1:9" for c in commands(tmp_path))
     from cairnward.audit import AuditLog
 
     with AuditLog.open(paths) as audit:

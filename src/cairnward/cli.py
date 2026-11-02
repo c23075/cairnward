@@ -370,7 +370,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="delete local copies of PDFs no longer on the remote (drive/ only)",
     )
     ldr.add_argument("--no-index", action="store_true")
-    ldr.add_argument("--yes", action="store_true", help="answer the network question with yes")
     lz = lib_sub.add_parser("zotero", help="copy PDFs and metadata from Zotero (read-only, "
                             "local API), then index")  # fmt: skip
     lz.add_argument("name", help="the library to fill")
@@ -1379,79 +1378,84 @@ def _cmd_redaction(args: argparse.Namespace) -> int:
 
 
 def _cmd_backup(args: argparse.Namespace) -> int:
-    import tempfile
-
     from cairnward import backup
 
     cfg = _load(args)
     action = args.backup_command
     try:
-        if action == "init":
-            password = backup.init(cfg)
-            if password:
-                print(f"Backup repository created at {backup.repository(cfg)}.")
-                print(f"Its password is in {backup.password_file(cfg)} (owner-only). Keep a copy"
-                      " somewhere safe (a password manager): without it the backups can't be"
-                      " restored.")  # fmt: skip
-                print(f"  password: {password}")
-            elif cfg.main.backup.password_command:
-                print("Backup repository created (password from password_command).")
-            if cfg.main.backup.mode == "none":
-                print('Set [backup] mode = "on_demand" or "auto" in cairnward.toml to use it.')
-            return 0
-        if action == "run":
-            if cfg.main.backup.mode == "none":
-                print('cairnward: backups are off ([backup] mode = "none")', file=sys.stderr)
-                return 1
-            r = backup.run(cfg)
-            print(f"snapshot {r['snapshot']}: {r['conversations']} conversations, "
-                  f"{r['files']} files, {(r['bytes_added'] or 0) // 1024} KiB new, "
-                  f"{r['seconds']:.0f}s")  # fmt: skip
-            return 0
-        if action == "list":
-            for snap in backup.snapshots(cfg):
-                print(
-                    f"{snap['short_id']}  {snap['time'][:19].replace('T', ' ')}  "
-                    f"{snap.get('summary', {}).get('total_files_processed', '?')} files"
-                )
-            print("(each holds the conversations, library and artifacts as they were)")
-            return 0
-        if action == "status":
-            st = backup.status(cfg)
-            print(f"mode: {st['mode']}")
-            print(
-                f"repository: {st['repository'] or '(not set)'}"
-                + ("" if st.get("initialised") else "  (not set up: cairnward backup init)")
-            )
-            print(f"restic: {st['restic'] or 'not installed (e.g. sudo apt install restic)'}")
-            if "snapshots" in st:
-                print(f"snapshots: {st['snapshots']}")
-            last = st["last"]
-            print(
-                f"last backup: {last['time'] + ' (' + last['snapshot'] + ')' if last else 'never'}"
-            )
-            if st["pending_purges"]:
-                print(f"pending removal from backups: {st['pending_purges']} purged "
-                      "conversation(s) (done on the next run)")  # fmt: skip
-            for key in ("cloud_warning", "problem"):
-                if st.get(key):
-                    print(f"note: {st[key]}")
-            return 0
-        if action == "restore":
-            if args.to:
-                snap, folder = backup.restore(cfg, args.to, snapshot=args.snapshot, at=args.at)
-                print(f"backup {snap['short_id']} ({snap['time'][:19]}) extracted to {folder}")
-                return 0
-            with tempfile.TemporaryDirectory(prefix="cw-restore-") as tmp:
-                snap, folder = backup.restore(cfg, Path(tmp), snapshot=args.snapshot, at=args.at)
-                counts = backup.import_conversations(cfg, folder)
-            print(f"from backup {snap['short_id']} ({snap['time'][:19]}): "
-                  f"{counts['added']} conversation(s) brought back, {counts['skipped']} already "
-                  "here (left as they are)")  # fmt: skip
-            return 0
+        with backup.remote_access(cfg):
+            return _backup_action(cfg, args, action)
     except backup.BackupError as exc:
         print(f"cairnward backup: {exc}", file=sys.stderr)
         return 1
+
+
+def _backup_action(cfg: Config, args: argparse.Namespace, action: str) -> int:
+    import tempfile
+
+    from cairnward import backup
+
+    if action == "init":
+        password = backup.init(cfg)
+        if password:
+            print(f"Backup repository created at {backup.repository(cfg)}.")
+            print(f"Its password is in {backup.password_file(cfg)} (owner-only). Keep a copy"
+                  " somewhere safe (a password manager): without it the backups can't be"
+                  " restored.")  # fmt: skip
+            print(f"  password: {password}")
+        elif cfg.main.backup.password_command:
+            print("Backup repository created (password from password_command).")
+        if cfg.main.backup.mode == "none":
+            print('Set [backup] mode = "on_demand" or "auto" in cairnward.toml to use it.')
+        return 0
+    if action == "run":
+        if cfg.main.backup.mode == "none":
+            print('cairnward: backups are off ([backup] mode = "none")', file=sys.stderr)
+            return 1
+        r = backup.run(cfg)
+        print(f"snapshot {r['snapshot']}: {r['conversations']} conversations, "
+              f"{r['files']} files, {(r['bytes_added'] or 0) // 1024} KiB new, "
+              f"{r['seconds']:.0f}s")  # fmt: skip
+        return 0
+    if action == "list":
+        for snap in backup.snapshots(cfg):
+            print(
+                f"{snap['short_id']}  {snap['time'][:19].replace('T', ' ')}  "
+                f"{snap.get('summary', {}).get('total_files_processed', '?')} files"
+            )
+        print("(each holds the conversations, library and artifacts as they were)")
+        return 0
+    if action == "status":
+        st = backup.status(cfg)
+        print(f"mode: {st['mode']}")
+        print(
+            f"repository: {st['repository'] or '(not set)'}"
+            + ("" if st.get("initialised") else "  (not set up: cairnward backup init)")
+        )
+        print(f"restic: {st['restic'] or 'not installed (e.g. sudo apt install restic)'}")
+        if "snapshots" in st:
+            print(f"snapshots: {st['snapshots']}")
+        last = st["last"]
+        print(f"last backup: {last['time'] + ' (' + last['snapshot'] + ')' if last else 'never'}")
+        if st["pending_purges"]:
+            print(f"pending removal from backups: {st['pending_purges']} purged "
+                  "conversation(s) (done on the next run)")  # fmt: skip
+        for key in ("cloud_warning", "problem"):
+            if st.get(key):
+                print(f"note: {st[key]}")
+        return 0
+    if action == "restore":
+        if args.to:
+            snap, folder = backup.restore(cfg, args.to, snapshot=args.snapshot, at=args.at)
+            print(f"backup {snap['short_id']} ({snap['time'][:19]}) extracted to {folder}")
+            return 0
+        with tempfile.TemporaryDirectory(prefix="cw-restore-") as tmp:
+            snap, folder = backup.restore(cfg, Path(tmp), snapshot=args.snapshot, at=args.at)
+            counts = backup.import_conversations(cfg, folder)
+        print(f"from backup {snap['short_id']} ({snap['time'][:19]}): "
+              f"{counts['added']} conversation(s) brought back, {counts['skipped']} already "
+              "here (left as they are)")  # fmt: skip
+        return 0
     return 2
 
 
@@ -1673,18 +1677,23 @@ def _library_drive(cfg: Config, research: Any, args: argparse.Namespace) -> int:
         if rule.base == "deny":
             _log(f"not allowed in environment '{lib.environment}': {rule.reason}")
             return 1
-        if rule.base == "ask" and not args.yes:
-            answer = input(f"Connect to Google Drive ({drive.HOST}) for '{args.name}'? [y/N] ")
-            if answer.strip().lower() not in ("y", "yes"):
-                return 1
+        if rule.base == "ask":
+            print("note: new hosts are asked about; answer with: cairnward approvals")
+        from cairnward.run.runner import RunError, egress_session
+
         try:
-            for warning in drive.check_remote(args.remote):
-                print(f"note: {warning}")
-            local = lib.folder / "drive"
-            if args.preview:
-                todo = drive.plan(drive.listing(args.remote), local)
-            else:
-                todo = drive.mirror(args.remote, local, prune=args.prune)
+            with egress_session(cfg, lib.environment, "rclone") as proxy:
+                run = drive.make_runner(proxy)
+                for warning in drive.check_remote(args.remote, run):
+                    print(f"note: {warning}")
+                local = lib.folder / "drive"
+                if args.preview:
+                    todo = drive.plan(drive.listing(args.remote, run), local)
+                else:
+                    todo = drive.mirror(args.remote, local, prune=args.prune, run=run)
+        except RunError as exc:
+            _log(str(exc))
+            return 1
         except drive.DriveError as exc:
             audit.append(
                 "drive.mirror",

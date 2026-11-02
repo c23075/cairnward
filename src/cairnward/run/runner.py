@@ -380,3 +380,36 @@ def run_agent(
             f"Undo: cairnward runs revert {short}"
         )
     return code
+
+
+@contextlib.contextmanager
+def egress_session(cfg: Config, environment: str, program: str) -> Any:
+    """An egress proxy URL for a helper program Cairnward starts (rclone, restic): a short
+    run-like session in `environment`, so the egress proxy applies that environment's
+    network policy (asking where it says ask) and the egress report shows the traffic.
+    Needs the server running."""
+    try:
+        mgmt = management(cfg)
+    except RunError as exc:
+        raise RunError(f"{exc}: {program}'s traffic goes through Cairnward's egress") from None
+    with mgmt:
+        resp = mgmt.post("/v1/runs", json={
+            "environment": environment, "client": program, "profile": "generic",
+            "workspace": str(cfg.paths.data_dir), "program": program, "arg_count": 0,
+            "sandbox": "none"})  # fmt: skip
+        if resp.status_code != 200:
+            raise RunError(f"Cairnward refused: {resp.text[:300]}")
+        run = resp.json()
+        if not run.get("egress_token"):
+            raise RunError("this server runs without egress (serve --no-egress)")
+        started = time.monotonic()
+        code = 1
+        try:
+            yield f"http://cw:{run['egress_token']}@127.0.0.1:{run['egress_port']}"
+            code = 0
+        finally:
+            with contextlib.suppress(httpx.HTTPError):
+                mgmt.post(
+                    f"/v1/runs/{run['run_id']}/end",
+                    json={"exit_code": code, "duration_s": time.monotonic() - started},
+                )

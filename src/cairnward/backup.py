@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import contextvars
 import json
 import os
 import re
@@ -80,17 +81,56 @@ def pending_file(cfg: Config) -> Path:
     return cfg.paths.data_dir / "backup-purges.json"
 
 
-def repository(cfg: Config) -> Path:
+REMOTE_KINDS = ("s3", "rest", "b2", "azure", "gs", "swift", "rclone")  # HTTP: through egress
+
+
+def remote_kind(cfg: Config) -> str | None:
+    """The restic backend of a remote repository ("s3", "rest"...), or None for a folder."""
+    repo = cfg.main.backup.repository or ""
+    m = re.match(r"^([a-z0-9]+):", repo)
+    if m is None or re.match(r"^[A-Za-z]:[\\/]", repo):
+        return None
+    return m.group(1)
+
+
+def repository(cfg: Config) -> Path | str:
     repo = cfg.main.backup.repository
     if not repo:
         raise BackupError('no backup repository: set [backup] repository = "/path/to/folder" '
-                          "in cairnward.toml")  # fmt: skip
-    if re.match(r"^[a-z0-9]+:", repo) and not re.match(r"^[A-Za-z]:[\\/]", repo):
-        raise BackupError(
-            f"'{repo}' isn't a local folder: remote repositories come later; "
-            "mount the remote locally (e.g. rclone mount) and use that folder"
-        )
-    return Path(repo).expanduser()
+                          "(or a remote such as s3:... or rest:...) in cairnward.toml")  # fmt: skip
+    kind = remote_kind(cfg)
+    if kind is None:
+        return Path(repo).expanduser()
+    if kind not in REMOTE_KINDS:
+        raise BackupError(f"'{kind}:' repositories aren't supported ({kind} wouldn't go through "
+                          f"Cairnward's egress); use a folder or one of: "
+                          f"{', '.join(k + ':' for k in REMOTE_KINDS)}")  # fmt: skip
+    return repo
+
+
+_PROXY: contextvars.ContextVar[str | None] = contextvars.ContextVar("restic_proxy", default=None)
+
+
+@contextlib.contextmanager
+def remote_access(cfg: Config) -> Iterator[None]:
+    """For a remote repository: restic's traffic goes through an egress session in the
+    backup environment (its network policy applies; the egress report shows it). The
+    server must be running. A folder repository needs nothing."""
+    if remote_kind(cfg) is None:
+        yield
+        return
+    from cairnward.run.runner import RunError, egress_session
+
+    env = cfg.main.backup.environment or cfg.main.defaults.environment
+    try:
+        with egress_session(cfg, env, "restic") as proxy:
+            token = _PROXY.set(proxy)
+            try:
+                yield
+            finally:
+                _PROXY.reset(token)
+    except RunError as exc:
+        raise BackupError(str(exc)) from None
 
 
 def cloud_warning(path: Path) -> str | None:
@@ -122,6 +162,8 @@ def _env(cfg: Config) -> dict[str, str]:
            "TMPDIR": tempfile.gettempdir(), "RESTIC_PROGRESS_FPS": "0.2"}  # fmt: skip
     if os.name == "nt":
         env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
+    if proxy := _PROXY.get():
+        env.update(HTTPS_PROXY=proxy, HTTP_PROXY=proxy)
     if cfg.main.backup.password_command:
         env["RESTIC_PASSWORD_COMMAND"] = cfg.main.backup.password_command
     else:
@@ -172,7 +214,10 @@ def _audit(cfg: Config, action: str, outcome: str = "ok", **details: Any) -> Non
 
 
 def initialised(cfg: Config) -> bool:
-    return (repository(cfg) / "config").is_file()
+    repo = repository(cfg)
+    if isinstance(repo, Path):
+        return (repo / "config").is_file()
+    return run_restic(cfg, "cat", "config", check=False, timeout=120).returncode == 0
 
 
 def init(cfg: Config, log: Log = print) -> str | None:
@@ -195,10 +240,13 @@ def init(cfg: Config, log: Log = print) -> str | None:
             pw.write_text(new_password + "\n", encoding="utf-8")
             if os.name != "nt":
                 pw.chmod(0o600)
-    repo.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(repo, Path):
+        repo.parent.mkdir(parents=True, exist_ok=True)
     run_restic(cfg, "init")
     _audit(cfg, "backup.init", repository=str(repo))
-    if warning := cloud_warning(repo):
+    if warning := (cloud_warning(repo) if isinstance(repo, Path) else
+                   f"{repo} is a remote repository: its contents are encrypted by restic, "
+                   "but the provider sees sizes and times"):  # fmt: skip
         log(f"note: {warning}")
     return new_password
 

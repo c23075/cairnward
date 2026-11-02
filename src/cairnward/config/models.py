@@ -175,6 +175,11 @@ class BackupConfig(_Strict):
         description="command printing the repository password (e.g. `pass show cairnward`); "
         "default: a generated password in the state folder",
     )
+    environment: str | None = Field(
+        default=None,
+        description="whose network policy a remote repository's traffic follows "
+        "(default: [defaults] environment)",
+    )
     include_research: bool = Field(default=True, description="research.db (indexed libraries)")
     include_artifacts: bool = True
     include_config: bool = Field(default=True, description="the config folder (no secrets)")

@@ -64,6 +64,19 @@
       "additionalProperties": false,
       "description": "Encrypted backups with restic (spec \u00a74.8, FR-SYNC-1/3/8).",
       "properties": {
+        "environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "whose network policy a remote repository's traffic follows (default: [defaults] environment)",
+          "title": "Environment"
+        },
         "include_artifacts": {
           "default": true,
           "title": "Include Artifacts",
@@ -669,6 +682,7 @@
     "backup": {
       "$ref": "#/$defs/BackupConfig",
       "default": {
+        "environment": null,
         "include_artifacts": true,
         "include_config": true,
         "include_research": true,
