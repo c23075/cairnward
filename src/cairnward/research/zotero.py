@@ -19,7 +19,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -121,7 +121,7 @@ class Zotero:
     def _attachment_file(self, att: dict[str, Any]) -> Path | None:
         href = ((att.get("links") or {}).get("enclosure") or {}).get("href", "")
         if href.startswith("file://"):
-            return Path(unquote(urlsplit(href).path))
+            return _file_path(href)
         data = att.get("data", {})
         stored = str(data.get("path") or "")
         if stored.startswith("storage:"):
@@ -131,8 +131,15 @@ class Zotero:
         resp = self._get(f"/items/{att.get('key', '')}/file")  # the local API redirects
         location = resp.headers.get("location", "")
         if location.startswith("file://"):
-            return Path(unquote(urlsplit(location).path))
+            return _file_path(location)
         return None
+
+
+def _file_path(url: str) -> Path:
+    """file:///C:/x/y.pdf or file:///home/x/y.pdf as a path on this system."""
+    from urllib.request import url2pathname
+
+    return Path(url2pathname(urlsplit(url).path))
 
 
 def _slug(csl: dict[str, Any], key: str) -> str:

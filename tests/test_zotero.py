@@ -67,7 +67,7 @@ def fake_zotero(tmp: Path, *, page_size_seen: list[int]) -> httpx.MockTransport:
         if path.startswith("/items/") and path.endswith("/children"):
             return page(children[path.split("/")[2]])
         if path == "/items/ATTC/file":
-            return httpx.Response(302, headers={"location": f"file://{redirected}"})
+            return httpx.Response(302, headers={"location": redirected.as_uri()})
         return httpx.Response(404)
 
     return httpx.MockTransport(handle)
