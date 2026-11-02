@@ -212,7 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="read every paper in full (no title/abstract screening)")  # fmt: skip
     eng = rs_sub.add_parser("engine", help="optional engines (PaperQA2, citeproc-js, pandoc)")
     eng.add_argument("action", choices=["install", "status"])
-    eng.add_argument("name", choices=["paperqa", "citeproc-js", "pandoc"])
+    eng.add_argument("name", choices=["paperqa", "citeproc-js", "pandoc", "docling"])
     rsearch = rs_sub.add_parser("search", help="search OpenAlex, Semantic Scholar, arXiv, "
                                 "Crossref, PubMed (opt-in per environment)")  # fmt: skip
     rsearch.add_argument("query")
@@ -335,6 +335,18 @@ def build_parser() -> argparse.ArgumentParser:
     lc.add_argument("name")
     lc.add_argument("folder", type=Path)
     lc.add_argument("--env", default="litreview-offline", help="environment (privacy, models)")
+    lset = lib_sub.add_parser("set", help="parsing options: --parser docling, --metadata grobid")
+    lset.add_argument("name")
+    lset.add_argument(
+        "--parser",
+        choices=["basic", "docling"],
+        help="text extraction (docling: layout, tables, OCR; optional engine)",
+    )
+    lset.add_argument(
+        "--metadata",
+        choices=["pdf", "grobid"],
+        help="metadata and reference lists (grobid: your GROBID service)",
+    )
     lz = lib_sub.add_parser("zotero", help="copy PDFs and metadata from Zotero (read-only, "
                             "local API), then index")  # fmt: skip
     lz.add_argument("name", help="the library to fill")
@@ -1167,6 +1179,25 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
             found = csl.citeproc_js(cfg.paths)
             print(f"citeproc-js: {'installed (' + str(found) + ')' if found else 'not installed'}")
             return 0 if found else 1
+        if args.name == "docling":
+            from cairnward.research.engines import docling
+
+            if args.action == "install":
+                print("Installing Docling with CPU-only PyTorch and its models (about 3 GB). The "
+                      "exact versions and hashes are recorded on this first install.")  # fmt: skip
+                try:
+                    record = docling.install(cfg.paths)
+                except (docling.DoclingError, subprocess.CalledProcessError) as exc:
+                    print(f"cairnward: {exc}", file=sys.stderr)
+                    return 1
+                print(f"Docling installed; lock sha256 {record['lock_sha256'][:16]}..., models "
+                      f"sha256 {record['models_sha256'][:16]}...")  # fmt: skip
+                return 0
+            exe = docling.python(cfg.paths)
+            problems = docling.verify(cfg.paths) if exe else []
+            print(f"docling: {'installed' if exe else 'not installed'}"
+                  + "".join(f"; {p}" for p in problems))  # fmt: skip
+            return 0 if exe and not problems else 1
         if args.name == "pandoc":
             pandoc_exe = csl.pandoc()
             if args.action == "install":
@@ -1633,11 +1664,27 @@ def _cmd_library(args: argparse.Namespace) -> int:
                 return _library_ask(cfg, research, args)
             if cmd == "zotero":
                 return _library_zotero(cfg, research, args)
+            if cmd == "set":
+                from cairnward.research.parsing import set_options
+
+                lib = research.get(args.name)
+                opts = set_options(cfg.paths.data_dir, args.name, parser=args.parser,
+                                   metadata=args.metadata)  # fmt: skip
+                print(f"{args.name}: parser {opts['parser']}, metadata {opts['metadata']}")
+                if opts["metadata"] == "grobid" and not cfg.main.research.grobid_url:
+                    print('note: set [research] grobid_url = "http://127.0.0.1:8070" in '
+                          "cairnward.toml (your GROBID service)")  # fmt: skip
+                print(f"Re-read the PDFs with: cairnward library index {args.name} --rebuild")
+                return 0
             if cmd == "refs":
                 from cairnward.research.cite import from_documents
 
                 docs = [d for d in research.documents(args.name) if d.status == "indexed"]
-                refs = from_documents(docs, research.get(args.name).folder)
+                from cairnward.research import grobid
+
+                refs = from_documents(docs, research.get(args.name).folder,
+                                      lambda rel: grobid.load(cfg.paths.data_dir, args.name,
+                                                              rel)[0])  # fmt: skip
                 print(json.dumps(refs, indent=2, ensure_ascii=False))
                 return 0
             if cmd == "check":
@@ -1670,6 +1717,11 @@ def _cmd_library(args: argparse.Namespace) -> int:
             embedder, audit, backends = _embedder(cfg, lib.environment)
             try:
                 if cmd == "index":
+                    from cairnward.research.parsing import hooks
+
+                    parse_many, enrich = hooks(
+                        cfg, args.name, lib.environment, proxy=backends.web_proxy(lib.environment)
+                    )
                     report = asyncio.run(
                         research.index(
                             args.name,
@@ -1677,6 +1729,8 @@ def _cmd_library(args: argparse.Namespace) -> int:
                             prune=args.prune,
                             rebuild=args.rebuild,
                             progress=print,
+                            parse_many=parse_many,
+                            enrich=enrich,
                         )
                     )
                     audit.append(
@@ -1719,7 +1773,7 @@ def _cmd_library(args: argparse.Namespace) -> int:
                 print(f"{i}. {title} ({h.pages})  score {h.score}")
                 print(f"   {h.text[:300]}{'…' if len(h.text) > 300 else ''}\n")
             return 0
-    except (LibraryError, EmbeddingDenied) as exc:
+    except (LibraryError, EmbeddingDenied, ValueError) as exc:
         _log(f"cairnward library: {exc}")
         return 1
 

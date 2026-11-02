@@ -198,6 +198,7 @@ def _core_parts(
     launcher: Launcher,
     log: Log = lambda m: None,
     deep_executor: Any = None,
+    docling_runner: Any = None,
 ) -> tuple[Any, Any, McpHub, Any]:
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     run_keys = RunKeys()
@@ -225,7 +226,12 @@ def _core_parts(
         with Research.open(cfg.paths) as research:
             env = research.get(library).environment
             embedder = InProcessEmbedder(cfg, engine, backends, environment=env, actor=actor)
-            report = await research.index(library, embedder, only=files)
+            from cairnward.research.parsing import hooks
+
+            parse_many, enrich = hooks(cfg, library, env, docling_runner=docling_runner,
+                                       proxy=backends.web_proxy(env))  # fmt: skip
+            report = await research.index(library, embedder, only=files, parse_many=parse_many,
+                                          enrich=enrich)  # fmt: skip
         fields = ("added", "updated", "unchanged", "no_text", "failed", "missing", "chunks",
                   "seconds")  # fmt: skip
         details = {k: getattr(report, k) for k in fields}
@@ -431,11 +437,39 @@ async def _client_socket(cfg: Config, opener: Opener) -> asyncio.Server | None:
     return srv
 
 
+class RemoteDocling:
+    """The isolated core asks the outer process to run Docling (srt can't nest)."""
+
+    def __init__(self, control_socket: str) -> None:
+        self.socket = control_socket
+
+    async def __call__(self, environment: str, files: list[Path]) -> list[dict[str, Any]]:
+        import httpx
+
+        from cairnward.research.engines.docling import DoclingError
+
+        transport = httpx.AsyncHTTPTransport(uds=self.socket)
+        async with httpx.AsyncClient(transport=transport, base_url="http://egress",
+                                     timeout=httpx.Timeout(None, connect=10)) as c:  # fmt: skip
+            resp = await c.post(
+                "/v1/engines/docling/parse",
+                json={"environment": environment, "files": [str(f) for f in files]},
+            )
+        if resp.status_code != 200:
+            raise DoclingError(resp.json().get("detail", resp.text))
+        results: list[dict[str, Any]] = resp.json()["results"]
+        return results
+
+
 def core_sandbox(cfg: Config) -> SandboxSpec:
-    """What the core may reach: local model servers and backend hosts (handed to egress)."""
+    """What the core may reach: local model servers and backend hosts (handed to egress),
+    and the GROBID service when one is set."""
     hosts = []
-    for b in cfg.backends.backends.values():
-        u = urlsplit(b.url)
+    urls = [b.url for b in cfg.backends.backends.values()]
+    if cfg.main.research.grobid_url:
+        urls.append(cfg.main.research.grobid_url)
+    for url in urls:
+        u = urlsplit(url)
         port = u.port or (443 if u.scheme == "https" else 80)
         host = u.hostname or ""
         hosts.append(f"[{host}]:{port}" if ":" in host else f"{host}:{port}")
@@ -480,7 +514,13 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
         async def deep(**kw: Any) -> dict[str, Any]:
             return await asyncio.to_thread(run_worker, cfg, log=log, **kw)
 
-        ctl = _uds_server(control_app(sessions, mcp=bridge, deep=deep), socks["egress"])
+        async def docling(environment: str, files: list[Path]) -> list[dict[str, Any]]:
+            from cairnward.research.engines import docling as dl
+
+            return await asyncio.to_thread(dl.run_worker, cfg, environment, files, log=log)
+
+        ctl = _uds_server(control_app(sessions, mcp=bridge, deep=deep, docling=docling),
+                          socks["egress"])  # fmt: skip
 
         with tempfile.TemporaryDirectory(prefix="cairnward-core-") as tmp:
             settings = core_sandbox(cfg).write(Path(tmp) / "srt.json")
@@ -581,6 +621,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             launcher=RemoteLauncher(str(egress_control)),
             log=log,
             deep_executor=RemoteExecutor(str(egress_control)),
+            docling_runner=RemoteDocling(str(egress_control)),
         )
         gw = _uds_server(gateway, socks["gateway"])
         mgmt = _uds_server(management, socks["management"])

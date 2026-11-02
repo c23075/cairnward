@@ -486,6 +486,19 @@
           ],
           "title": "Citation Engine",
           "type": "string"
+        },
+        "grobid_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "your GROBID service on this machine, e.g. http://127.0.0.1:8070 (libraries with --metadata grobid)",
+          "title": "Grobid Url"
         }
       },
       "title": "ResearchConfig",
@@ -620,7 +633,8 @@
     "research": {
       "$ref": "#/$defs/ResearchConfig",
       "default": {
-        "citation_engine": "auto"
+        "citation_engine": "auto",
+        "grobid_url": null
       }
     },
     "schema_version": {

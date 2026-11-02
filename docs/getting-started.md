@@ -160,6 +160,17 @@ uv run cairnward research ask thesis questions.txt --engine paperqa --at 23:30
 ```
 Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
+Scanned PDFs, tables or messy layouts: switch a library to Docling (optional, about 3 GB, installed once, then offline and sandboxed). For better metadata and reference lists, run GROBID (`docker run --rm --network none -p 127.0.0.1:8070:8070 grobid/grobid:<version>`) and set `[research] grobid_url = "http://127.0.0.1:8070"` in `cairnward.toml`:
+```bash
+uv run cairnward research engine install docling
+```
+```bash
+uv run cairnward library set thesis --parser docling --metadata grobid
+```
+```bash
+uv run cairnward library index thesis --rebuild
+```
+
 Bring papers in from Zotero (Zotero 7 running, with Settings → Advanced → "Allow other applications on this computer to communicate with Zotero" on; read-only):
 ```bash
 uv run cairnward library zotero thesis --collection "Thesis"

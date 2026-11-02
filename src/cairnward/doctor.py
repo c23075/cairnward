@@ -406,7 +406,57 @@ def run_checks(paths: Paths) -> list[Check]:
     checks.append(check_disk_encryption())
     checks.append(check_citation_engine(cfg))
     checks.append(check_backup(cfg))
+    checks += check_parsers(cfg)
     return checks
+
+
+def check_parsers(cfg: Any) -> list[Check]:
+    """Docling and GROBID, when a library uses them (D68)."""
+    import json
+
+    from cairnward.research.parsing import options_file
+
+    try:
+        opts = json.loads(options_file(cfg.paths.data_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    uses = {o.get(k) for o in opts.values() if isinstance(o, dict) for k in ("parser", "metadata")}
+    out = []
+    if "docling" in uses:
+        from cairnward.research.engines import docling
+
+        if docling.python(cfg.paths) is None:
+            out.append(Check("docling", "fail", "a library uses Docling but it isn't installed",
+                             "cairnward research engine install docling"))  # fmt: skip
+        else:
+            problems = docling.verify(cfg.paths)
+            out.append(
+                Check(
+                    "docling",
+                    "warn" if problems else "ok",
+                    "; ".join(problems) or "installed, unchanged since install",
+                )
+            )
+    if "grobid" in uses:
+        from cairnward.research.grobid import Grobid, GrobidError
+
+        url = cfg.main.research.grobid_url
+        if not url:
+            out.append(Check("grobid", "fail", "a library uses GROBID but grobid_url isn't set",
+                             '[research] grobid_url = "http://127.0.0.1:8070"'))  # fmt: skip
+        else:
+            try:
+                g = Grobid(url, timeout=5)
+                alive = g.alive()
+                g.close()
+            except GrobidError as exc:
+                out.append(Check("grobid", "fail", str(exc)))
+            else:
+                out.append(Check("grobid", "ok" if alive else "warn",
+                                 f"{url} {'answers' if alive else 'is not answering'}",
+                                 "" if alive else "start it: docker run --rm --network none "
+                                 "-p 127.0.0.1:8070:8070 grobid/grobid:<version>"))  # fmt: skip
+    return out
 
 
 def check_backup(cfg: Any) -> Check:

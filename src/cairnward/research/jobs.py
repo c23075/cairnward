@@ -439,7 +439,11 @@ class JobRunner:
                 research.close()
             ids = [s.params["document_id"] for s in job.steps if s.name == "notes"
                    and s.status == "done"]  # fmt: skip
-            items = from_documents([docs[i] for i in ids if i in docs], folder)
+            from cairnward.research import grobid
+
+            data_dir = self.store.root.parent
+            items = from_documents([docs[i] for i in ids if i in docs], folder,
+                                   lambda rel: grobid.load(data_dir, library, rel)[0])  # fmt: skip
             from cairnward.research.cite import to_bibtex
 
             self.store.write_file(job, "references.bib", to_bibtex(items))

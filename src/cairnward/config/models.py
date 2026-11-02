@@ -164,6 +164,12 @@ class BackupConfig(_Strict):
 class ResearchConfig(_Strict):
     """Research workflows (spec §4.6)."""
 
+    grobid_url: str | None = Field(
+        default=None,
+        description="your GROBID service on this machine, e.g. "
+        "http://127.0.0.1:8070 (libraries with --metadata grobid)",
+    )
+
     citation_engine: Literal["auto", "builtin", "citeproc-js", "pandoc"] = Field(
         default="auto",
         description="reference formatting: auto = citeproc-js if installed, else pandoc, "

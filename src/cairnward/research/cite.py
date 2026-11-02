@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -372,7 +372,8 @@ def _builtin(items: list[Item], style: str, md: bool) -> list[str]:
     raise CiteError(f"unknown style '{style}': apa, ieee, or a .csl file")
 
 
-def from_documents(rows: Iterable[Any], folder: Path | None = None) -> list[Item]:
+def from_documents(rows: Iterable[Any], folder: Path | None = None,
+                   extra: Callable[[str], Item | None] | None = None) -> list[Item]:  # fmt: skip
     """CSL-JSON for a library's papers: from a `<file>.csl.json` next to the PDF when there
     is one (written by `research add` and the Zotero import), else from the PDF's own
     metadata (title, authors, year), a starting point to complete in a reference manager."""
@@ -387,6 +388,10 @@ def from_documents(rows: Iterable[Any], folder: Path | None = None) -> list[Item
             if isinstance(given, dict) and given.get("title"):
                 out.append({**given, "id": f"doc{d.id}"})
                 continue
+        found = extra(d.path) if extra is not None else None  # e.g. GROBID's metadata
+        if found and found.get("title"):
+            out.append({**found, "id": f"doc{d.id}"})
+            continue
         item: Item = {"id": f"doc{d.id}", "type": "article-journal",
                       "title": d.title or Path(d.path).stem, "note": f"file: {d.path}"}  # fmt: skip
         if d.authors:

@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +27,7 @@ from cairnward.config.models import _check_name
 from cairnward.config.paths import Paths
 from cairnward.research.chunking import chunk_pages
 from cairnward.research.embedder import Embedder
-from cairnward.research.pdf import PdfError, read_pdf
+from cairnward.research.pdf import PdfError, PdfText, read_pdf
 from cairnward.store.db import make_engine, upgrade
 from cairnward.store.schema import chunks, documents, libraries
 
@@ -247,7 +247,12 @@ class Research:
         progress: Callable[[str], None] | None = None,
         target_tokens: int = 350,
         overlap_tokens: int = 60,
+        parse_many: Callable[[list[Path]], Awaitable[dict[str, PdfText]]] | None = None,
+        enrich: Callable[[Path, str], Awaitable[None]] | None = None,
     ) -> IndexReport:
+        """Index new and changed PDFs. `parse_many` (Docling) reads the files that need
+        reading in one go; any it can't read fall back to pypdfium2. `enrich` (GROBID) is
+        called for each newly indexed file; its failures are reported, not fatal."""
         say = progress or (lambda _m: None)
         lib = self.get(name)
         if rebuild:
@@ -270,10 +275,26 @@ class Research:
                 p for p in lib.folder.rglob("*") if p.suffix.lower() == ".pdf" and p.is_file()
             )
         seen: set[str] = set()
+        digests = {path: sha256_file(path) for path in files}
+        pre: dict[str, PdfText] = {}
+        if parse_many is not None:
+            todo = []
+            for path in files:
+                row = known.get(path.relative_to(lib.folder).as_posix())
+                if row is None or row.sha256 != digests[path] or row.status not in (
+                        "indexed", "no_text", "missing"):  # fmt: skip
+                    todo.append(path)
+            if todo:
+                say(f"reading {len(todo)} PDF(s) with the richer parser ...")
+                try:
+                    pre = await parse_many(todo)
+                except Exception as exc:  # the default parser still works
+                    report.errors.append(f"richer parser: {exc}")
+                    say(f"richer parser failed ({exc}); using the default for these")
         for n, path in enumerate(files, start=1):
             rel = path.relative_to(lib.folder).as_posix()
             seen.add(rel)
-            digest = sha256_file(path)
+            digest = digests[path]
             old = known.get(rel)
             if old is not None and old.sha256 == digest and old.status in ("indexed", "no_text"):
                 report.unchanged += 1
@@ -287,7 +308,7 @@ class Research:
                 continue
             t0 = time.monotonic()
             try:
-                parsed = read_pdf(path)
+                parsed = pre.get(str(path)) or read_pdf(path)
             except PdfError as exc:
                 self._store_doc(lib, rel, digest, status="failed", error=str(exc))
                 report.failed += 1
@@ -344,6 +365,12 @@ class Research:
                 report.added += 1
             else:
                 report.updated += 1
+            if enrich is not None:
+                try:
+                    await enrich(path, rel)
+                except Exception as exc:  # metadata is extra; the text is indexed anyway
+                    report.errors.append(f"{rel}: metadata: {exc}")
+                    say(f"[{n}/{len(files)}] {rel}: metadata not extracted ({exc})")
             say(
                 f"[{n}/{len(files)}] {rel}: {len(parsed.pages)} pages, {len(pieces)} chunks "
                 f"({time.monotonic() - t0:.1f}s)"

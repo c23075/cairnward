@@ -7,6 +7,7 @@ API on a Unix socket (owner-only permissions).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -58,6 +59,11 @@ class McpStartIn(BaseModel):
     environment: str = Field(max_length=63)
 
 
+class DoclingIn(BaseModel):
+    environment: str = Field(max_length=63)
+    files: list[str] = Field(min_length=1, max_length=5000)
+
+
 class DeepRunIn(BaseModel):
     library: str = Field(max_length=200)
     question: str = Field(min_length=3, max_length=4000)
@@ -68,7 +74,9 @@ class DeepRunIn(BaseModel):
     skip_summary: bool = False
 
 
-def control_app(sessions: Sessions, mcp: Any = None, deep: Any = None) -> FastAPI:
+def control_app(
+    sessions: Sessions, mcp: Any = None, deep: Any = None, docling: Any = None
+) -> FastAPI:
     app = FastAPI(title="cairnward-egress control", docs_url=None, redoc_url=None)
 
     @app.get("/v1/health")
@@ -116,6 +124,19 @@ def control_app(sessions: Sessions, mcp: Any = None, deep: Any = None) -> FastAP
         except (EngineError, LibraryError) as exc:
             raise HTTPException(400, str(exc)) from None
         return result
+
+    @app.post("/v1/engines/docling/parse")
+    async def docling_parse(body: DoclingIn) -> dict[str, Any]:
+        """Run the Docling worker for the isolated core (it can't start sandboxes)."""
+        from cairnward.research.engines.docling import DoclingError
+
+        if docling is None:
+            raise HTTPException(404, "Docling isn't available here")
+        try:
+            results = await docling(body.environment, [Path(f) for f in body.files])
+        except DoclingError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return {"results": results}
 
     return app
 
