@@ -63,7 +63,11 @@ class ScriptedOllama(BaseHTTPRequestHandler):
                    "message": {"role": "assistant", "content": text}})  # fmt: skip
 
 
-def test_paperqa_through_cairnward(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode", ["isolated", "single"])
+def test_paperqa_through_cairnward(tmp_path: Path, mode: str) -> None:
+    """isolated: the core is sandboxed, so the outer process runs the worker for jobs;
+    single: isolation off, the server runs it (unsandboxed, as the setting says)."""
+    CALLS.clear()
     paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
     env = {**os.environ, "CAIRNWARD_CONFIG_DIR": str(paths.config_dir),
            "CAIRNWARD_DATA_DIR": str(paths.data_dir), "CAIRNWARD_STATE_DIR": str(paths.state_dir),
@@ -76,7 +80,7 @@ def test_paperqa_through_cairnward(tmp_path: Path) -> None:
     (paths.config_dir / "environments").mkdir(parents=True)
     (paths.config_dir / "cairnward.toml").write_text(
         f"[server]\ngateway_port = {gw}\ndashboard_port = {dash}\negress_port = {eg}\n"
-        '[privacy]\npreset = "strict"\n'
+        '[privacy]\npreset = "strict"\n' + ("" if mode == "isolated" else 'isolation = "off"\n')
     )
     (paths.config_dir / "backends.toml").write_text(
         f'[backends.local-ollama]\ndriver = "ollama"\nurl = "http://127.0.0.1:{srv.server_address[1]}"\n'
@@ -105,7 +109,8 @@ def test_paperqa_through_cairnward(tmp_path: Path) -> None:
     try:
         st = subprocess.run([*cw, "status", "--wait", "60"], env=env, capture_output=True,
                             text=True, check=False)  # fmt: skip
-        assert "core isolated" in st.stdout, st.stdout + st.stderr
+        expected = "core isolated" if mode == "isolated" else "single process"
+        assert expected in st.stdout, st.stdout + st.stderr
         for step in (["library", "create", "thesis", str(papers), "--env", "litreview-offline"],
                      ["library", "index", "thesis"]):  # fmt: skip
             r = subprocess.run([*cw, *step], env=env, capture_output=True, text=True, check=False)
@@ -117,6 +122,27 @@ def test_paperqa_through_cairnward(tmp_path: Path) -> None:
         )  # fmt: skip
         assert ask.returncode == 0, ask.stdout + ask.stderr
         answer = json.loads(ask.stdout)
+        # the same through an overnight-style job, run by the server
+        questions = tmp_path / "questions.txt"
+        questions.write_text("Does sleep help working memory?\n")
+        queued = subprocess.run([*cw, "research", "ask", "thesis", str(questions), "--engine",
+                                 "paperqa", "--evidence-k", "3"], env=env, capture_output=True,
+                                text=True, check=False)  # fmt: skip
+        assert queued.returncode == 0, queued.stdout + queued.stderr
+        job_id = queued.stdout.split()[1]
+        import time as _time
+
+        deadline = _time.monotonic() + 600
+        while _time.monotonic() < deadline:
+            shown = subprocess.run([*cw, "jobs", "show", job_id], env=env, capture_output=True,
+                                   text=True, check=False).stdout  # fmt: skip
+            if " done " in shown or " failed " in shown:
+                break
+            _time.sleep(2)
+        assert " done " in shown and "[ok ]" in shown, shown
+        result = subprocess.run([*cw, "jobs", "result", job_id], env=env, capture_output=True,
+                                text=True, check=True).stdout  # fmt: skip
+        assert "Longer sleep improved working memory [1]" in result and "sleep.pdf" in result
     finally:
         serve.terminate()
         try:
@@ -135,5 +161,10 @@ def test_paperqa_through_cairnward(tmp_path: Path) -> None:
     calls = [r for r in recs if r["action"] == "model.call" and r["client"] == "paperqa"
              and r["phase"] == "pre"]  # fmt: skip
     assert calls, "PaperQA2's calls should appear in the audit log as client 'paperqa'"
-    assert any(r["action"] == "research.ask" and r["details"].get("engine") == "paperqa"
+    asks = [r for r in recs if r["action"] == "research.ask"
+            and r["details"].get("engine") == "paperqa"]  # fmt: skip
+    assert {r["actor"] for r in asks} == {"user", f"job:{job_id}"}
+    job_run = next(r["run_id"] for r in asks if r["actor"] == f"job:{job_id}")
+    assert any(r["action"] == "model.call" and r["run_id"] == job_run for r in recs)
+    assert any(r["action"] == "run.end" and r["run_id"] == job_run and r["outcome"] == "ok"
                for r in recs)  # fmt: skip

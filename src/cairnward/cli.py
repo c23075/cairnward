@@ -189,6 +189,14 @@ def build_parser() -> argparse.ArgumentParser:
     rb.add_argument("library")
     rb.add_argument("file", type=Path)
     rb.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
+    rb.add_argument(
+        "--engine",
+        choices=["lean", "paperqa"],
+        default="lean",
+        help="paperqa: the optional deep engine (slower; good for overnight)",
+    )
+    rb.add_argument("--evidence-k", type=int, default=10, help="paperqa: passages to weigh")
+    rb.add_argument("--skip-summary", action="store_true", help="paperqa: no summaries")
 
     jb = sub.add_parser("jobs", help="research jobs: list, progress, results")
     jb_sub = jb.add_subparsers(dest="jobs_command", metavar="ACTION")
@@ -1042,8 +1050,9 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
         when = (
             f", starts {j['not_before']}" if j.get("not_before") and j["status"] == "queued" else ""
         )
+        engine = " (paperqa)" if j.get("engine") == "paperqa" else ""
         return (f"{j['id']}  {j['kind']:6} {j['status']:9} {j['done']}/{j['total']}  "
-                f"{j['library']}{when}{eta}")  # fmt: skip
+                f"{j['library']}{engine}{when}{eta}")  # fmt: skip
 
     with mgmt:
         if args.command == "research":
@@ -1053,7 +1062,9 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
                 body |= {"kind": "review", "question": args.question, "style": args.style}
             else:
                 questions = args.file.read_text(encoding="utf-8").splitlines()
-                body |= {"kind": "ask", "questions": [q for q in questions if q.strip()]}
+                body |= {"kind": "ask", "questions": [q for q in questions if q.strip()],
+                         "engine": args.engine, "evidence_k": args.evidence_k,
+                         "skip_summary": args.skip_summary}  # fmt: skip
             resp = mgmt.post("/v1/jobs", json=body)
             if resp.status_code != 200:
                 return fail(resp)

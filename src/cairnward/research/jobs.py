@@ -86,7 +86,8 @@ class Job:
         return {"id": self.id, "kind": self.kind, "status": self.status, "done": done,
                 "total": total, "created": self.created, "not_before": self.not_before,
                 "finished": self.finished, "eta_s": eta, "error": self.error,
-                "library": self.params.get("library")}  # fmt: skip
+                "library": self.params.get("library"),
+                "engine": self.params.get("engine", "lean")}  # fmt: skip
 
 
 class JobStore:
@@ -135,10 +136,14 @@ def new_job(kind: Literal["ask", "review"], params: dict[str, Any], steps: list[
     return Job(secrets.token_hex(6), kind, params, steps, not_before=not_before, actor=actor)
 
 
-def ask_job(library: str, questions: list[str], **kw: Any) -> Job:
+def ask_job(library: str, questions: list[str], *, engine: str = "lean",
+            evidence_k: int = 10, skip_summary: bool = False, **kw: Any) -> Job:  # fmt: skip
     qs = [q.strip() for q in questions if q.strip()]
     steps = [Step("ask", {"question": q}) for q in qs]
-    return new_job("ask", {"library": library, "questions": len(qs)}, steps, **kw)
+    params: dict[str, Any] = {"library": library, "questions": len(qs), "engine": engine}
+    if engine == "paperqa":
+        params |= {"evidence_k": evidence_k, "skip_summary": skip_summary}
+    return new_job("ask", params, steps, **kw)
 
 
 def review_job(library: str, question: str, documents: list[Any], style: str = "apa",
@@ -194,8 +199,9 @@ class JobRunner:
 
     def __init__(self, store: JobStore, *, research: Callable[[], Any], ask: Ask,
                  chat_for: Callable[[str], Any], audit: Any = None,
-                 log: Callable[[str], None] = lambda m: None):  # fmt: skip
+                 log: Callable[[str], None] = lambda m: None, deep: Any = None):  # fmt: skip
         self.store, self.research, self.ask, self.chat_for = store, research, ask, chat_for
+        self.deep = deep  # research.engines.deep.DeepEngine (PaperQA2), optional
         self.audit, self.log = audit, log
         self.wake = asyncio.Event()
         self._cancelled: set[str] = set()
@@ -279,7 +285,16 @@ class JobRunner:
     async def _step(self, job: Job, step: Step) -> Any:
         library = job.params["library"]
         if step.name == "ask":
-            answer = await self.ask(library, step.params["question"], actor=f"job:{job.id}")
+            if job.params.get("engine") == "paperqa":
+                if self.deep is None:
+                    raise RuntimeError("the PaperQA2 engine isn't available in this server")
+                answer = await self.deep.ask(
+                    library, step.params["question"], actor=f"job:{job.id}",
+                    evidence_k=int(job.params.get("evidence_k", 10)),
+                    skip_summary=bool(job.params.get("skip_summary", False)),
+                )  # fmt: skip
+            else:
+                answer = await self.ask(library, step.params["question"], actor=f"job:{job.id}")
             return answer.as_dict()
         if step.name == "notes":
             research = self.research()

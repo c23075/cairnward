@@ -41,6 +41,7 @@ from cairnward.mcp.launch import BridgeLauncher, Launcher, LocalLauncher, Remote
 from cairnward.mcp.pins import PinStore
 from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
 from cairnward.policy.provenance import ProvenanceTracker
+from cairnward.research.engines.deep import RemoteExecutor, run_worker
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
 
@@ -165,8 +166,10 @@ def _core_parts(
     isolated: bool,
     launcher: Launcher,
     log: Log = lambda m: None,
+    deep_executor: Any = None,
 ) -> tuple[Any, Any, McpHub, Any]:
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
+    run_keys = RunKeys()
     tracker = ProvenanceTracker()
     scheduler = Scheduler({n: b.max_parallel for n, b in cfg.backends.backends.items()})
 
@@ -185,15 +188,18 @@ def _core_parts(
                              purpose="review")  # fmt: skip
 
     from cairnward.research import Research
+    from cairnward.research.engines.deep import DeepEngine, LocalExecutor
     from cairnward.research.jobs import JobRunner, JobStore
 
+    deep = DeepEngine(cfg, run_keys=run_keys, audit=audit,
+                      executor=deep_executor or LocalExecutor(cfg, log))  # fmt: skip
     jobs = JobRunner(JobStore(cfg.paths.data_dir), research=lambda: Research.open(cfg.paths),
-                     ask=research_ask, chat_for=chat_for, audit=audit, log=log)  # fmt: skip
+                     ask=research_ask, chat_for=chat_for, audit=audit, log=log,
+                     deep=deep)  # fmt: skip
 
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
                  provenance=tracker, vault=vault, backends=backends,
                  research_ask=research_ask, jobs=jobs)  # fmt: skip
-    run_keys = RunKeys()
     gateway = create_app(
         GatewayDeps(
             cfg,
@@ -292,6 +298,8 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 gw.serve(),
                 _serve_uds(mgmt, socks["management"]),
                 anchor_loop(cfg, audit, log),
+                retention_loop(cfg, vault, log),
+                hub.jobs.run_forever(),
             ]
             if with_egress:
                 proxy = EgressProxy(cfg, PolicyEngine(cfg, approver=inbox, audit=audit), sessions)
@@ -420,7 +428,11 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
             ),
             cfg.paths.state_dir / "mcp",
         )
-        ctl = _uds_server(control_app(sessions, mcp=bridge), socks["egress"])
+
+        async def deep(**kw: Any) -> dict[str, Any]:
+            return await asyncio.to_thread(run_worker, cfg, log=log, **kw)
+
+        ctl = _uds_server(control_app(sessions, mcp=bridge, deep=deep), socks["egress"])
 
         with tempfile.TemporaryDirectory(prefix="cairnward-core-") as tmp:
             settings = core_sandbox(cfg).write(Path(tmp) / "srt.json")
@@ -518,6 +530,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             isolated=True,
             launcher=RemoteLauncher(str(egress_control)),
             log=log,
+            deep_executor=RemoteExecutor(str(egress_control)),
         )
         gw = _uds_server(gateway, socks["gateway"])
         mgmt = _uds_server(management, socks["management"])

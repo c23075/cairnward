@@ -58,7 +58,17 @@ class McpStartIn(BaseModel):
     environment: str = Field(max_length=63)
 
 
-def control_app(sessions: Sessions, mcp: Any = None) -> FastAPI:
+class DeepRunIn(BaseModel):
+    library: str = Field(max_length=200)
+    question: str = Field(min_length=3, max_length=4000)
+    key: str = Field(max_length=200, repr=False)
+    gateway_port: int = Field(ge=1, le=65535)
+    effort: str | None = Field(default=None, max_length=40)
+    evidence_k: int = Field(default=10, ge=1, le=50)
+    skip_summary: bool = False
+
+
+def control_app(sessions: Sessions, mcp: Any = None, deep: Any = None) -> FastAPI:
     app = FastAPI(title="cairnward-egress control", docs_url=None, redoc_url=None)
 
     @app.get("/v1/health")
@@ -89,6 +99,21 @@ def control_app(sessions: Sessions, mcp: Any = None) -> FastAPI:
         try:
             result: dict[str, Any] = await mcp.start(body.server, body.environment)
         except (LaunchError, OSError) as exc:
+            raise HTTPException(400, str(exc)) from None
+        return result
+
+    @app.post("/v1/engines/paperqa/run")
+    async def deep_run(body: DeepRunIn) -> dict[str, Any]:
+        """Run the PaperQA2 worker for the isolated core (it can't start sandboxes). The
+        papers, models and sandbox come from this process's own configuration."""
+        from cairnward.research import LibraryError
+        from cairnward.research.engines.paperqa import EngineError
+
+        if deep is None:
+            raise HTTPException(404, "the PaperQA2 engine isn't available here")
+        try:
+            result: dict[str, Any] = await deep(**body.model_dump())
+        except (EngineError, LibraryError) as exc:
             raise HTTPException(400, str(exc)) from None
         return result
 

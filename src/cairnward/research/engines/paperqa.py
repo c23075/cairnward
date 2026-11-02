@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -135,17 +136,26 @@ def to_answer(question: str, library: str, result: dict[str, Any],
     return answer
 
 
-def ask(cfg: Config, library: str, question: str, *, effort: str | None = None,
-        evidence_k: int = 10, skip_summary: bool = False, log: Any = print) -> Any:  # fmt: skip
-    from cairnward.audit import AuditLog
-    from cairnward.audit.log import digest
-    from cairnward.research import Research
-    from cairnward.run.runner import RunError, management
-    from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, wrap
-    from cairnward.sandbox.srt import install_dir
+@dataclass
+class Prepared:
+    """What a question needs: the library's papers as PaperQA2 documents, its chunks
+    (for quotation checks), the models, and the engine's working folder."""
 
-    exe = python(cfg.paths)
-    if exe is None:
+    library: str
+    environment: str
+    papers: dict[str, dict[str, Any]]
+    rows: list[Any]
+    models: dict[str, str]
+    work: Path
+
+
+def prepare(cfg: Config, library: str, effort: str | None = None, *,
+            create_work: bool = True) -> Prepared:  # fmt: skip
+    """create_work=False: only what's needed to map an answer (the isolated core can't
+    write the cache folder; the process that runs the worker prepares it)."""
+    from cairnward.research import Research
+
+    if python(cfg.paths) is None:
         raise EngineError("PaperQA2 isn't installed: cairnward research engine install paperqa")
     with Research.open(cfg.paths) as research:
         lib = research.get(library)
@@ -164,6 +174,8 @@ def ask(cfg: Config, library: str, question: str, *, effort: str | None = None,
     models = {"main": f"{env_name}:{main_effort}", "fast": f"{env_name}:low",
               "embed": f"{env_name}:embed"}  # fmt: skip
     work = cache_dir() / re.sub(r"[^A-Za-z0-9._-]", "_", library)
+    if not create_work:
+        return Prepared(library, env_name, papers, rows, models, work)
     for d in (work, work / "home", work / "tmp"):
         d.mkdir(parents=True, exist_ok=True)
     if os.name != "nt":
@@ -173,80 +185,130 @@ def ask(cfg: Config, library: str, question: str, *, effort: str | None = None,
     if meta.exists() and json.loads(meta.read_text()) != models:
         (work / "index.pkl").unlink(missing_ok=True)  # embeddings from other models
     meta.write_text(json.dumps(models))
+    return Prepared(library, env_name, papers, rows, models, work)
 
-    eff = cfg.privacy(env_name)
-    srt = None
-    if eff.value("isolation") == "on":
-        try:
-            srt = require(cfg.paths)
-        except SandboxUnavailable as exc:
-            raise EngineError(f"isolation = on but the sandbox isn't available: {exc}") from None
+
+def sandbox_command(cfg: Config, environment: str) -> list[str] | None:
+    """srt when the environment wants isolation (None: run unsandboxed)."""
+    from cairnward.sandbox import SandboxUnavailable, require
+
+    if cfg.privacy(environment).value("isolation") != "on":
+        return None
+    try:
+        return require(cfg.paths)
+    except SandboxUnavailable as exc:
+        raise EngineError(f"isolation = on but the sandbox isn't available: {exc}") from None
+
+
+def execute(cfg: Config, prep: Prepared, question: str, *, gateway_port: int, key: str,
+            evidence_k: int = 10, skip_summary: bool = False,
+            log: Any = print) -> dict[str, Any]:  # fmt: skip
+    """Run the worker once (sandboxed when the environment says so); its raw result.
+    Called by the CLI process or by whichever server process may start sandboxes."""
+    from cairnward.sandbox import SandboxSpec, secret_dirs, wrap
+    from cairnward.sandbox.srt import install_dir
+
+    exe = python(cfg.paths)
+    if exe is None:
+        raise EngineError("PaperQA2 isn't installed: cairnward research engine install paperqa")
+    srt = sandbox_command(cfg, prep.environment)
+    work = prep.work
+    spec = {"gateway": f"http://127.0.0.1:{gateway_port}/v1", "models": prep.models,
+            "papers": list(prep.papers.values()), "question": question,
+            "cache": str(work / "index.pkl"), "evidence_k": evidence_k,
+            "skip_summary": skip_summary}  # fmt: skip
+    env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TZ") if k in os.environ}
+    env.update(HOME=str(work / "home"), TMPDIR=str(work / "tmp"), CAIRNWARD_API_KEY=key,
+               NO_PROXY="")  # fmt: skip
+    command = [str(exe), "-I", str(WORKER)]
+    if srt is not None:
+        p = cfg.paths
+        sandbox = SandboxSpec(
+            allowed_hosts=[f"127.0.0.1:{gateway_port}"],
+            allow_write=[work],
+            deny_read=[*secret_dirs(), p.config_dir, p.data_dir, p.state_dir],
+            allow_read=(install_dir(p), engine_dir(p)),
+        )
+        with tempfile.TemporaryDirectory(prefix="cairnward-pqa-") as tmp:
+            settings = sandbox.write(Path(tmp) / "srt.json")
+            # srt's own sockets need a short path; the worker gets work/tmp inside
+            argv = wrap(srt, settings, command, tmp_dir=work / "tmp")
+            code, out = _run(argv, spec, {**env, "TMPDIR": tmp}, work)
+    else:
+        log("cairnward: isolation = off: PaperQA2 runs unsandboxed")
+        code, out = _run(command, spec, env, work)
+    line = next((x for x in reversed(out.splitlines()) if x.startswith(("RESULT ", "ERROR "))), "")
+    if not line.startswith("RESULT "):
+        detail = json.loads(line[6:])["error"] if line.startswith("ERROR ") else (
+            f"the worker stopped (exit {code}); see {work / 'worker.log'}")  # fmt: skip
+        raise EngineError(detail)
+    result: dict[str, Any] = json.loads(line[7:])
+    return result
+
+
+def finish(prep: Prepared, question: str, result: dict[str, Any], seconds: float) -> Any:
+    answer = to_answer(question, prep.library, result, prep.papers, prep.rows)
+    answer.seconds = seconds
+    answer.model = f"paperqa ({prep.models['main']})"
+    return answer
+
+
+def audit_answer(audit: Any, prep: Prepared, question: str, answer: Any, *,
+                 run_id: str, actor: str) -> None:  # fmt: skip
+    from cairnward.audit.log import digest
+
+    audit.append(
+        "research.ask",
+        actor=actor,
+        target=prep.library,
+        environment=prep.environment,
+        outcome="ok",
+        run_id=run_id,
+        details={
+            "engine": "paperqa",
+            "question_digest": digest(question),
+            "sources": len(answer.sources),
+            "passages": answer.passages,
+            "uncited": answer.uncited,
+            "cannot_answer": answer.cannot_answer,
+        },
+    )
+
+
+def ask(cfg: Config, library: str, question: str, *, effort: str | None = None,
+        evidence_k: int = 10, skip_summary: bool = False, log: Any = print) -> Any:  # fmt: skip
+    """From the CLI: a run key from the running core, the worker in this process."""
+    from cairnward.audit import AuditLog
+    from cairnward.run.runner import RunError, management
+
+    prep = prepare(cfg, library, effort)
+    srt = sandbox_command(cfg, prep.environment)
     try:
         mgmt = management(cfg)
     except RunError as exc:
         raise EngineError(str(exc)) from None
     with mgmt:
         resp = mgmt.post("/v1/runs", json={
-            "environment": env_name, "client": "paperqa", "profile": "generic",
-            "workspace": str(work), "program": "paperqa", "arg_count": 0,
+            "environment": prep.environment, "client": "paperqa", "profile": "generic",
+            "workspace": str(prep.work), "program": "paperqa", "arg_count": 0,
             "sandbox": "srt" if srt else "none"})  # fmt: skip
         if resp.status_code != 200:
             raise EngineError(f"Cairnward refused the run: {resp.text}")
         run = resp.json()
-        gateway = f"http://127.0.0.1:{run['gateway_port']}/v1"
-        spec = {"gateway": gateway, "models": models, "papers": list(papers.values()),
-                "question": question, "cache": str(work / "index.pkl"),
-                "evidence_k": evidence_k, "skip_summary": skip_summary}  # fmt: skip
-        env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TZ") if k in os.environ}
-        env.update(HOME=str(work / "home"), TMPDIR=str(work / "tmp"),
-                   CAIRNWARD_API_KEY=run["gateway_key"], NO_PROXY="")  # fmt: skip
-        command = [str(exe), "-I", str(WORKER)]
-        code, out = 1, ""
-        started = time.monotonic()
+        started, code = time.monotonic(), 1
         try:
-            if srt is not None:
-                p = cfg.paths
-                sandbox = SandboxSpec(
-                    allowed_hosts=[f"127.0.0.1:{run['gateway_port']}"],
-                    allow_write=[work],
-                    deny_read=[*secret_dirs(), p.config_dir, p.data_dir, p.state_dir],
-                    allow_read=(install_dir(p), engine_dir(p)),
-                )
-                with tempfile.TemporaryDirectory(prefix="cairnward-pqa-") as tmp:
-                    settings = sandbox.write(Path(tmp) / "srt.json")
-                    # srt's own sockets need a short path; the worker gets work/tmp inside
-                    argv = wrap(srt, settings, command, tmp_dir=work / "tmp")
-                    code, out = _run(argv, spec, {**env, "TMPDIR": tmp}, work)
-            else:
-                log("cairnward: isolation = off: PaperQA2 runs unsandboxed")
-                code, out = _run(command, spec, env, work)
+            result = execute(cfg, prep, question, gateway_port=run["gateway_port"],
+                             key=run["gateway_key"], evidence_k=evidence_k,
+                             skip_summary=skip_summary, log=log)  # fmt: skip
+            code = 0
         finally:
-            mgmt.post(f"/v1/runs/{run['run_id']}/end", json={"exit_code": code, "duration_s": 0})
-    line = next((x for x in reversed(out.splitlines()) if x.startswith(("RESULT ", "ERROR "))), "")
-    if not line.startswith("RESULT "):
-        detail = json.loads(line[6:])["error"] if line.startswith("ERROR ") else (
-            f"the worker stopped (exit {code}); see {work / 'worker.log'}")  # fmt: skip
-        raise EngineError(detail)
-    answer = to_answer(question, library, json.loads(line[7:]), papers, rows)
-    answer.seconds = time.monotonic() - started
-    answer.model = f"paperqa ({models['main']})"
+            mgmt.post(
+                f"/v1/runs/{run['run_id']}/end",
+                json={"exit_code": code, "duration_s": time.monotonic() - started},
+            )
+    answer = finish(prep, question, result, time.monotonic() - started)
     with AuditLog.open(cfg.paths) as audit:
-        audit.append(
-            "research.ask",
-            actor="user",
-            target=library,
-            environment=env_name,
-            outcome="ok",
-            run_id=run["run_id"],
-            details={
-                "engine": "paperqa",
-                "question_digest": digest(question),
-                "sources": len(answer.sources),
-                "passages": answer.passages,
-                "uncited": answer.uncited,
-                "cannot_answer": answer.cannot_answer,
-            },
-        )
+        audit_answer(audit, prep, question, answer, run_id=run["run_id"], actor="user")
     return answer
 
 

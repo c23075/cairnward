@@ -86,6 +86,9 @@ class JobIn(BaseModel):
     questions: list[str] = Field(default_factory=list, max_length=500)
     style: Literal["apa", "ieee"] = "apa"
     not_before: str | None = Field(default=None, description="ISO time (UTC) to start after")
+    engine: Literal["lean", "paperqa"] = "lean"
+    evidence_k: int = Field(default=10, ge=1, le=50)
+    skip_summary: bool = False
 
 
 class AskQuestionIn(BaseModel):
@@ -423,7 +426,15 @@ def management_app(
         if body.kind == "ask":
             if not body.questions:
                 raise HTTPException(400, "an ask job needs questions")
-            job = ask_job(body.library, body.questions, not_before=body.not_before)
+            if body.engine == "paperqa":
+                from cairnward.research.engines import paperqa
+
+                if paperqa.python(cfg.paths) is None:
+                    raise HTTPException(400, "PaperQA2 isn't installed: cairnward research "
+                                        "engine install paperqa")  # fmt: skip
+            job = ask_job(body.library, body.questions, not_before=body.not_before,
+                          engine=body.engine, evidence_k=body.evidence_k,
+                          skip_summary=body.skip_summary)  # fmt: skip
         else:
             if not body.question:
                 raise HTTPException(400, "a review job needs a review question")

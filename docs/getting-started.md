@@ -144,6 +144,10 @@ uv run cairnward research engine install paperqa
 ```bash
 uv run cairnward library ask thesis "Does longer sleep improve working memory?" --engine paperqa
 ```
+Or overnight, for a list of questions:
+```bash
+uv run cairnward research ask thesis questions.txt --engine paperqa --at 23:30
+```
 Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
 
 ## Important: Ollama can still be reached directly
