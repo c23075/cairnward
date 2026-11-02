@@ -318,7 +318,41 @@ def _warnings(eff: EffectivePrivacy) -> list[str]:
         out.append(
             "network = 'allowlist' with an empty network_allow_hosts list: nothing can go out."
         )
+    out += [w for h in eff.network_allow_hosts if (w := allow_host_risk(h))]
     return out
+
+
+METADATA_HOSTS = {"169.254.169.254", "fd00:ec2::254", "metadata.google.internal",
+                  "metadata.azure.internal", "100.100.100.200"}  # fmt: skip
+
+
+def allow_host_risk(entry: str) -> str | None:
+    """Risky network_allow_hosts entries (OpenShell review): cloud metadata services (they
+    hand out credentials), catch-alls, and this machine's or the local network's addresses
+    (they reach services that never expected outside callers)."""
+    import ipaddress
+
+    host = entry.strip().lower()
+    if host.startswith("["):
+        host = host[1:].split("]", 1)[0]
+    elif host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    if host in METADATA_HOSTS:
+        return (f"network_allow_hosts lists '{entry}', a cloud metadata service: tools could "
+                "fetch this machine's cloud credentials")  # fmt: skip
+    if host in ("*", "") or (host.startswith("*.") and "." not in host[2:]):
+        return f"network_allow_hosts lists '{entry}', which allows (almost) everything"
+    try:
+        ip = ipaddress.ip_network(host, strict=False)
+    except ValueError:
+        if host in ("localhost",) or host.endswith((".local", ".lan", ".internal")):
+            return (f"network_allow_hosts lists '{entry}': local services become reachable "
+                    "by tools")  # fmt: skip
+        return None
+    if ip.is_loopback or ip.is_private or ip.is_link_local:
+        return (f"network_allow_hosts lists '{entry}', an address on this machine or the "
+                "local network: services there become reachable by tools")  # fmt: skip
+    return None
 
 
 def _notes(eff: EffectivePrivacy) -> list[str]:

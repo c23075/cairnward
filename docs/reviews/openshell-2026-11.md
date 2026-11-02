@@ -38,4 +38,4 @@ A runtime for "fleets of autonomous AI agents": each agent runs in a sandbox who
 6. **Credential placeholders for MCP servers** (large, same dependency as 5). Until then, connectors that need API keys (academic APIs, T3.4) run inside Cairnward, so keys never reach a tool.
 7. **Per-program network rules** aren't possible with srt (the proxy can't see which process connected). They'd come with the OpenShell backend.
 
-Items 1–3 are small enough to do alongside M3; they are listed in [plan/m3.md](../plan/m3.md).
+Items 1–3 are small enough to do alongside M3; they are listed in [plan/m3.md](../plan/m3.md). **Done (2026-11-02).**

@@ -10,10 +10,15 @@
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -195,6 +200,64 @@ def prompt_warnings(cfg: Config, profile: str, environment: str, model: str) -> 
     return out
 
 
+def program_digest(command: list[str]) -> tuple[str, str]:
+    """(what, sha256) of the program a run starts: the executable (symlinks resolved), plus
+    the script when it's an interpreter running a file (python agent.py)."""
+    exe = Path(shutil.which(command[0]) or command[0]).resolve()
+    h = hashlib.sha256(exe.read_bytes())
+    what = str(exe)
+    if len(command) > 1 and Path(command[1]).is_file():
+        script = Path(command[1]).resolve()
+        h.update(b"\0" + script.read_bytes())
+        what += f" {script}"
+    return what, h.hexdigest()
+
+
+def check_program(cfg: Config, environment: str, command: list[str], *, trust_change: bool,
+                  log: Any) -> str:  # fmt: skip
+    """Pin the program per environment (OpenShell review): a changed executable is a
+    warning, and with mcp_pinning = on a refusal until accepted with --trust-program-change."""
+    what, digest = program_digest(command)
+    f = cfg.paths.data_dir / "run-programs.json"
+    try:
+        pins = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pins = {}
+    env_pins = pins.setdefault(environment, {})
+    known = env_pins.get(what)
+    if known is not None and known != digest and not trust_change:
+        msg = (f"{what} changed since it last ran in '{environment}' (an update, or "
+               "something replaced it)")  # fmt: skip
+        if cfg.privacy(environment).value("mcp_pinning") == "on":
+            raise RunError(msg + "; if you expected this: cairnward run --trust-program-change ...")
+        log(f"cairnward: warning: {msg}")
+    env_pins[what] = digest
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(pins, indent=1), encoding="utf-8")
+    return digest
+
+
+def _watch_server(mgmt: Any, proc: subprocess.Popen[bytes], stop: threading.Event,
+                  log: Any, every_s: float = 5.0) -> None:  # fmt: skip
+    """Stop the agent if Cairnward goes away mid-run (OpenShell review: fail closed). Its
+    network went through Cairnward's egress, and its calls can no longer be audited."""
+    misses = 0
+    while not stop.wait(every_s):
+        try:
+            ok = mgmt.get("/v1/status", timeout=5).status_code == 200
+        except Exception:  # the socket is gone
+            ok = False
+        misses = 0 if ok else misses + 1
+        if misses >= 3:
+            log("cairnward: Cairnward stopped during the run; stopping the agent")
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                if os.name != "nt":
+                    os.killpg(proc.pid, signal.SIGTERM)
+                else:
+                    proc.terminate()
+            return
+
+
 def run_agent(
     cfg: Config,
     *,
@@ -206,6 +269,8 @@ def run_agent(
     client: str | None = None,
     budget: dict[str, Any] | None = None,
     log: Any = print,
+    trust_program_change: bool = False,
+    watch_every_s: float = 5.0,
 ) -> int:
     if not command:
         raise RunError("nothing to run: cairnward run [options] -- <command> [args]")
@@ -217,6 +282,7 @@ def run_agent(
         raise RunError(f"unknown profile '{profile_name}' (known: {', '.join(PROFILES)})")
     if shutil.which(command[0]) is None and not Path(command[0]).exists():
         raise RunError(f"command not found: {command[0]}")
+    check_program(cfg, env_name, command, trust_change=trust_program_change, log=log)
     env_cfg = cfg.environments[env_name]
     effort = env_cfg.effort_default or cfg.main.defaults.effort
     model = model or f"cw/{env_name}:{effort}"
@@ -277,9 +343,20 @@ def run_agent(
                     f"cairnward: run {run['run_id'][:8]} in '{env_name}' with {model} "
                     f"({'sandboxed' if plan.sandboxed else 'NOT sandboxed'})"
                 )
-                code = subprocess.run(
-                    plan.argv, env=plan.env, cwd=workspace, check=False
-                ).returncode
+                proc = subprocess.Popen(plan.argv, env=plan.env, cwd=workspace,
+                                        start_new_session=os.name != "nt")  # fmt: skip
+                stop = threading.Event()
+                watcher = threading.Thread(target=_watch_server,
+                                           args=(mgmt, proc, stop, log, watch_every_s),
+                                           daemon=True)  # fmt: skip
+                watcher.start()
+                try:
+                    code = proc.wait()
+                except KeyboardInterrupt:
+                    proc.terminate()
+                    code = proc.wait()
+                finally:
+                    stop.set()
         finally:
             if snaps is not None:
                 try:
@@ -287,14 +364,15 @@ def run_agent(
                     changed = len(snaps.changes(run["run_id"]))
                 except SnapshotError as exc:
                     log(f"cairnward: no snapshot after the run ({exc})")
-            mgmt.post(
-                f"/v1/runs/{run['run_id']}/end",
-                json={
-                    "exit_code": code,
-                    "duration_s": time.monotonic() - started,
-                    "changed_files": changed,
-                },
-            )
+            with contextlib.suppress(httpx.HTTPError):  # the server may be gone
+                mgmt.post(
+                    f"/v1/runs/{run['run_id']}/end",
+                    json={
+                        "exit_code": code,
+                        "duration_s": time.monotonic() - started,
+                        "changed_files": changed,
+                    },
+                )
     if changed:
         short = run["run_id"][:8]
         log(

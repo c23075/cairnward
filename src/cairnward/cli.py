@@ -96,6 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="run a coding agent in the sandbox, pointed at the gateway")
     run.add_argument("--env", help="environment (default: the default environment)")
     run.add_argument("--profile", default="generic", help="aider, qwen-code or generic")
+    run.add_argument("--trust-program-change", action="store_true",
+                     help="accept that the program changed since it last ran here")  # fmt: skip
     run.add_argument("--model", help="virtual model (default: cw/<env>:<env's default effort>)")
     run.add_argument("--workspace", type=Path, help="writable folder (default: current folder)")
     run.add_argument("--client", help="client name in the audit log (default: the profile)")
@@ -811,6 +813,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             workspace=args.workspace,
             client=args.client,
             log=_log,
+            trust_program_change=args.trust_program_change,
             budget={
                 "max_requests": args.max_requests,
                 "max_tokens": args.max_tokens,
