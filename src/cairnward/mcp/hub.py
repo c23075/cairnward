@@ -152,7 +152,28 @@ class McpHub:
                 f"environment variable {exc.args[0]} isn't set (used in its headers)"
             ) from None
         proxy = self.backends.web_proxy(environment) if self.backends is not None else None
-        target = HttpTarget(url, headers, proxy)
+        auth = None
+        if spec.auth == "oauth":
+            from cairnward.mcp import oauth
+
+            auth = oauth.provider_for_core(self.cfg.paths, server, url, spec.oauth_scope)
+        checked = {f"{parts.hostname}:{port}"}
+
+        async def check_host(host: str, port_: int) -> None:
+            """Other hosts (the sign-in server's discovery and token endpoints): checked
+            like any connection in the environment, once each per connection."""
+            target_ = f"{host}:{port_}"
+            if target_ in checked:
+                return
+            act = Action(kind="net.connect", target=target_, environment=environment,
+                         actor="cairnward", details={"via": "mcp", "server": server})  # fmt: skip
+            dec = await asyncio.to_thread(self.engine.check, act)
+            if not dec.allowed:
+                await asyncio.to_thread(self.engine.audit_deny, dec)
+                raise McpError(f"{server}: {host} refused ({dec.reason})")
+            checked.add(target_)
+
+        target = HttpTarget(url, headers, proxy, auth=auth, check_host=check_host)
 
         def on_note(method: str, params: dict[str, Any]) -> None:
             key = (server, environment)
