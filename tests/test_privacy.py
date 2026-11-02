@@ -83,6 +83,7 @@ def test_everything_off_is_possible() -> None:
         "isolation": "off",
         "network": "open",
         "hosted_backends": "allow",
+        "training_backends": "allow",
         "approvals": "off",
         "redaction": "off",
         "vault": "off",

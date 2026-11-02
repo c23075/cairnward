@@ -79,6 +79,12 @@
           "title": "Timeout S",
           "type": "integer"
         },
+        "trains_on_prompts": {
+          "default": false,
+          "description": "the provider may use prompts to train or improve models (most free tiers): allowed only in scratch environments unless training_backends = allow",
+          "title": "Trains On Prompts",
+          "type": "boolean"
+        },
         "url": {
           "title": "Url",
           "type": "string"

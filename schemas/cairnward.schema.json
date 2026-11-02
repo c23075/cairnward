@@ -427,6 +427,22 @@
           "default": null,
           "title": "Redaction"
         },
+        "training_backends": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "scratch_only"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Training Backends"
+        },
         "vault": {
           "anyOf": [
             {
@@ -620,6 +636,7 @@
         "network_allow_hosts": null,
         "preset": null,
         "redaction": null,
+        "training_backends": null,
         "vault": null
       }
     },

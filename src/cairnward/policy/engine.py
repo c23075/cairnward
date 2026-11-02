@@ -184,6 +184,12 @@ class PolicyEngine:
             if backend.location == "local":
                 return Rule("allow", "low", "local model server")
             host = backend.url.split("//", 1)[-1].split("/", 1)[0]
+            if backend.trains_on_prompts and eff.value("training_backends") == "scratch_only":
+                env = self.config.environments.get(action.environment or "")
+                if env is None or not env.scratch:
+                    return Rule("deny", "high", f"'{target}' may train on prompts: allowed only "
+                                "in environments marked scratch (training_backends = "
+                                "scratch_only)")  # fmt: skip
             if backend.location == "hosted":
                 hosted = eff.value("hosted_backends")
                 if hosted == "deny":

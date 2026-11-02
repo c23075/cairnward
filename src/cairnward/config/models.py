@@ -209,6 +209,11 @@ class Backend(_Strict):
         description="llama.cpp only: save/restore each conversation's KV cache when switching "
         "conversations (start llama-server with --slot-save-path; needs max_parallel = 1)",
     )
+    trains_on_prompts: bool = Field(
+        default=False,
+        description="the provider may use prompts to train or improve models (most free "
+        "tiers): allowed only in scratch environments unless training_backends = allow",
+    )
     fallback: str | None = Field(
         default=None,
         description="a LOCAL backend to retry on when this one is unreachable or fails (5xx)",
@@ -450,6 +455,11 @@ class EnvironmentConfig(_Strict):
         default_factory=list, description="MCP servers (mcp.toml) offered in this environment"
     )
     skills: list[str] = Field(default_factory=list)
+    scratch: bool = Field(
+        default=False,
+        description="throwaway work: backends that may train on prompts are allowed here "
+        "(training_backends = scratch_only)",
+    )
     research_sources: list[
         Literal["openalex", "semantic-scholar", "arxiv", "crossref", "pubmed"]
     ] = Field(
@@ -583,6 +593,7 @@ def builtin_environments() -> dict[str, EnvironmentConfig]:
         ),
         "scratch": EnvironmentConfig(
             description="Experiments with no protections in the way",
+            scratch=True,
             effort_default="low",
             privacy=PrivacyOverrides(preset="open"),
         ),

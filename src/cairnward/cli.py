@@ -276,6 +276,10 @@ def build_parser() -> argparse.ArgumentParser:
     cite.add_argument("--engine", choices=["auto", "builtin", "citeproc-js", "pandoc"],
                       help="CSL engine (default: [research] citation_engine, auto)")  # fmt: skip
 
+    bke = sub.add_parser("backend", help="hosted provider templates for backends.toml")
+    bke_sub = bke.add_subparsers(dest="backend_command", metavar="ACTION", required=True)
+    bke_sub.add_parser("providers", help="the hosted providers with templates")
+    bke_sub.add_parser("template", help="print a backends.toml block").add_argument("provider")
     mdl = sub.add_parser("models", help="model files: verified downloads through egress")
     mdl_sub = mdl.add_subparsers(dest="models_command", metavar="ACTION", required=True)
     pull = mdl_sub.add_parser("pull", help="download a GGUF/safetensors file and verify it")
@@ -1932,6 +1936,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_doctor(args)
         if args.command == "backup":
             return _cmd_backup(args)
+        if args.command == "backend":
+            from cairnward.backends.providers import PROVIDERS, template
+
+            if args.backend_command == "providers":
+                for p in PROVIDERS.values():
+                    mark = "may train on prompts" if p.trains_on_prompts else ""
+                    print(f"{p.name:16} {p.title:40} {mark}")
+                return 0
+            try:
+                print(template(args.provider), end="")
+            except KeyError as exc:
+                print(f"cairnward: {exc.args[0]}", file=sys.stderr)
+                return 1
+            return 0
         if args.command == "check":
             from cairnward import check
 

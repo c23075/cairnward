@@ -18,6 +18,7 @@ OnOff = Literal["on", "off"]
 Isolation = OnOff
 Network = Literal["open", "ask", "allowlist", "off"]
 HostedBackends = Literal["allow", "ask", "deny"]
+TrainingBackends = Literal["allow", "scratch_only"]
 Approvals = Literal["off", "high_only", "tiered"]
 Redaction = Literal["off", "warn", "enforce"]
 Vault = Literal["off", "digests", "full"]
@@ -33,6 +34,7 @@ SETTINGS: dict[str, str] = {
     "isolation": "OS sandbox + network namespaces for agents, clients and the core",
     "network": "outbound access for tools and Cairnward",
     "hosted_backends": "use of hosted (cloud) model backends",
+    "training_backends": "backends that may train on prompts (most free tiers): scratch only",
     "approvals": "risk-tiered approval prompts",
     "redaction": "scan outbound content Cairnward handles for secrets and personal data",
     "vault": "transcript vault (Cairnward's copy of conversations)",
@@ -67,6 +69,7 @@ class PrivacyOverrides(BaseModel):
         description="hosts allowed when network = 'allowlist' or pre-approved in 'ask'",
     )
     hosted_backends: HostedBackends | None = None
+    training_backends: TrainingBackends | None = None
     approvals: Approvals | None = None
     redaction: Redaction | None = None
     vault: Vault | None = None
@@ -90,6 +93,7 @@ PRESETS: dict[str, dict[str, str]] = {
         "isolation": "off",
         "network": "open",
         "hosted_backends": "allow",
+        "training_backends": "allow",
         "approvals": "off",
         "redaction": "off",
         "vault": "off",
@@ -104,6 +108,7 @@ PRESETS: dict[str, dict[str, str]] = {
         "isolation": "on",
         "network": "ask",
         "hosted_backends": "ask",
+        "training_backends": "scratch_only",
         "approvals": "high_only",
         "redaction": "warn",
         "vault": "full",
@@ -118,6 +123,7 @@ PRESETS: dict[str, dict[str, str]] = {
         "isolation": "on",
         "network": "allowlist",
         "hosted_backends": "deny",
+        "training_backends": "scratch_only",
         "approvals": "tiered",
         "redaction": "enforce",
         "vault": "full",
@@ -138,6 +144,7 @@ _STRENGTH: dict[str, dict[str, int]] = {
     "isolation": {"off": 0, "on": 1},
     "network": {"open": 0, "ask": 1, "allowlist": 2, "off": 3},
     "hosted_backends": {"allow": 0, "ask": 1, "deny": 2},
+    "training_backends": {"allow": 0, "scratch_only": 1},
     "approvals": {"off": 0, "high_only": 1, "tiered": 2},
     "redaction": {"off": 0, "warn": 1, "enforce": 2},
     "vault": {"off": 0, "digests": 2, "full": 2},
@@ -154,6 +161,7 @@ _TYPES: dict[str, Any] = {
     "isolation": Isolation,
     "network": Network,
     "hosted_backends": HostedBackends,
+    "training_backends": TrainingBackends,
     "approvals": Approvals,
     "redaction": Redaction,
     "vault": Vault,

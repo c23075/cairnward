@@ -220,6 +220,22 @@
           "default": null,
           "title": "Redaction"
         },
+        "training_backends": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "scratch_only"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Training Backends"
+        },
         "vault": {
           "anyOf": [
             {
@@ -386,6 +402,7 @@
         "network_allow_hosts": null,
         "preset": null,
         "redaction": null,
+        "training_backends": null,
         "vault": null
       }
     },
@@ -417,6 +434,12 @@
       "default": 1,
       "title": "Schema Version",
       "type": "integer"
+    },
+    "scratch": {
+      "default": false,
+      "description": "throwaway work: backends that may train on prompts are allowed here (training_backends = scratch_only)",
+      "title": "Scratch",
+      "type": "boolean"
     },
     "skills": {
       "items": {

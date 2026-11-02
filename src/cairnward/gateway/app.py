@@ -219,8 +219,19 @@ def create_app(deps: GatewayDeps) -> FastAPI:
     async def list_models(request: Request) -> dict[str, Any] | JSONResponse:
         if client_of(request) is None:
             return _error(401, "missing or unknown API key (cairnward client add <name>)", "auth")
+
+        def owner(mid: str) -> str:
+            """☁ marks virtual models that go to a hosted backend (FR-BACK-4)."""
+            try:
+                b = cfg.backends.backends[resolve(cfg, mid).backend]
+            except (UnknownModel, KeyError):
+                return "cairnward"
+            if b.location != "hosted":
+                return "cairnward"
+            return "cairnward ☁ hosted" + (" (may train on prompts)" if b.trains_on_prompts else "")
+
         data = [
-            {"id": mid, "object": "model", "created": 0, "owned_by": "cairnward"}
+            {"id": mid, "object": "model", "created": 0, "owned_by": owner(mid)}
             for mid in virtual_model_ids(cfg)
         ]
         return {"object": "list", "data": data}

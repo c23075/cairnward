@@ -183,7 +183,17 @@ uv run cairnward research search "sleep and working memory in older adults"
 uv run cairnward research add thesis doi:10.1111/jsr.13540
 ```
 
-## 7. Back up
+## 7. Hosted models (optional)
+Cairnward runs local models by default; hosted providers are off until you add one. List the ready-made templates and print one to paste into `backends.toml`:
+```bash
+uv run cairnward backend providers
+```
+```bash
+uv run cairnward backend template openrouter-free
+```
+Keys come from environment variables (e.g. `export OPENROUTER_API_KEY=...`), never from config files. Hosted backends are still refused until an environment allows them (`hosted_backends = "ask"` or `"allow"`), never get locked conversations, and free tiers that may train on your prompts only answer in environments marked `scratch = true`.
+
+## 8. Back up
 Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. Add to `cairnward.toml`, with a folder on another disk:
 ```toml
 [backup]
@@ -202,7 +212,7 @@ With `serve` running, `auto` backs up every 24 hours. Purging a conversation als
 uv run cairnward backup restore --at 2026-11-01
 ```
 
-## 8. Check everything on your machine
+## 9. Check everything on your machine
 With `cairnward serve` running and your models pulled, one command runs the doctor, the lit.ask eval (and PaperQA2 next to it when installed), the coding eval with each installed agent, and summarises what your chat clients did:
 ```bash
 uv run cairnward check
