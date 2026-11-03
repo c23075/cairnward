@@ -12,3 +12,6 @@ build/
 # local benchmark output (commit chosen results to docs/bench/ explicitly)
 bench-*.json
 node_modules/
+
+# `cairnward check` reports are kept on the dev branch
+docs/bench/check-*
