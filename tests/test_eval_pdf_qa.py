@@ -3,8 +3,11 @@ fact's passage is on its own page, and answers are scored as intended."""
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 EVAL = Path(__file__).parent.parent / "evals" / "pdf_qa"
 
@@ -29,6 +32,23 @@ def test_facts_land_on_their_pages(tmp_path: Path) -> None:
             probe = " ".join(fact.split()[:8])
             holders = [c for c in chunks if probe in " ".join(c.text.split())]
             assert any(c.page_start == c.page_end == page_no for c in holders), (name, page_no)
+
+
+def test_save_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ev = load()
+    answer = {"text": "It retreated 1.8 km [1].", "seconds": 3,
+              "sources": [{"file": "glacier.pdf", "pages": "p. 2"}]}  # fmt: skip
+
+    def fake_cw(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, json.dumps(answer), "")
+
+    monkeypatch.setattr(ev, "cw", fake_cw)
+    saved = tmp_path / "answers.jsonl"
+    for _ in range(2):  # appends, so repeated runs keep every answer
+        ev.run(only=["q1"], emit=lambda _line: None, save_answers=saved)
+    rows = [json.loads(line) for line in saved.read_text().splitlines()]
+    assert len(rows) == 2 and rows[0]["id"] == "q1" and rows[0]["pass"]
+    assert rows[0]["answer"]["text"] == answer["text"]
 
 
 def test_scoring() -> None:

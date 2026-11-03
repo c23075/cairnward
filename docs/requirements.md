@@ -16,23 +16,23 @@ All security requirements below describe what each protection does **when it is 
 ### Privacy settings and presets
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-PRIV-1 | `[privacy]` settings (spec §5.0 table) with presets Open / Balanced / Strict; individual overrides mark *Custom* | M | M0 | `test_privacy_settings.py` |
-| FR-PRIV-2 | Resolution environment → global; virtual models carry the environment's privacy level; `cairnward run --env` applies it | M | M0 | `test_privacy_resolution.py` |
+| FR-PRIV-1 | `[privacy]` settings (spec §5.0 table) with presets Open / Balanced / Strict; individual overrides mark *Custom* | M | M0 | `test_privacy.py` |
+| FR-PRIV-2 | Resolution environment → global; virtual models carry the environment's privacy level; `cairnward run --env` applies it | M | M0 | `test_privacy.py` |
 | FR-PRIV-3 | `cairnward setup` first-run preset choice + prerequisite check; unmet prerequisites shown as *requested but inactive* | M | M0 | integration |
 | FR-PRIV-4 | `cairnward privacy show [--env]`, status badge in CLI and dashboard; warnings for ineffective combinations (e.g. allowlist without isolation = advisory) | M | M0 (CLI), M2 (dashboard) | unit + e2e |
-| FR-PRIV-5 | Every settings change audited; `audit.disabled` written before audit is switched off, `audit.enabled` with gap duration when back on | M | M0 | `test_settings_audit.py` |
+| FR-PRIV-5 | Every settings change audited; `audit.disabled` written before audit is switched off, `audit.enabled` with gap duration when back on | M | M0 | `test_audit.py`, `test_settings_edit.py` |
 | FR-PRIV-6 | Each protection can be switched off independently and Cairnward keeps working; full test suite passes under Open, Balanced, Strict and all-off | M | M0 onward | CI matrix over presets |
 
 ### Gateway: model endpoint and backends
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
 | FR-GW-1 | OpenAI-compatible `/v1/chat/completions` (streaming, tool calls), `/v1/models`, `/v1/embeddings` | M | M0 | integration tests with fake backends; conformance against the OpenAI SDK |
-| FR-GW-2 | Per-client API keys (`cairnward client add`); requests attributed to a client in audit/vault | M | M0 | `test_client_keys.py` |
-| FR-GW-3 | Virtual models `cw/<environment>:<effort>` resolve environment + effort settings | M | M1 | `test_virtual_models.py` |
-| FR-GW-4 | Per-client, per-run and per-environment budgets (tokens, requests, time) | M | M2 | `test_budgets.py` — ✅ runs (requests, tokens, minutes); per-client limits open |
+| FR-GW-2 | Per-client API keys (`cairnward client add`); requests attributed to a client in audit/vault | M | M0 | `test_gateway.py` |
+| FR-GW-3 | Virtual models `cw/<environment>:<effort>` resolve environment + effort settings | M | M1 | `test_gateway.py` |
+| FR-GW-4 | Per-client, per-run and per-environment budgets (tokens, requests, time) | M | M2 | `test_scheduling.py::test_run_budget_enforced` — ✅ runs (requests, tokens, minutes); per-client limits open |
 | FR-GW-5 | Context warning: request expected to need > 60 s prompt processing is flagged (dashboard + optional rejection) | S | M2 | unit with benchmark profile — ✅ |
 | FR-GW-6 | Ollama-compatible endpoint | W | L | — |
-| FR-GW-7 | Gateway never modifies a conversation's prompt prefix (additions go at the end) | M | M0 | `test_prefix_stability.py` (byte-identical prefixes across turns) |
+| FR-GW-7 | Gateway never modifies a conversation's prompt prefix (additions go at the end) | M | M0 | `test_gateway.py`, `test_vault_reconstruction.py` (byte-identical prefixes across turns) |
 | FR-GW-8 | Conversation affinity, keep-alive while active, unload after idle | M | M1 | integration with fake backend tracking cache hits — ✅ affinity queue + keep-alive |
 | FR-GW-9 | KV-cache save/restore per conversation with llama.cpp slots | S | M2 | integration with llama-server |
 | FR-GW-10 | Memory check before loading a model (size + context vs available RAM); warn or queue | M | M1 | unit with mocked meminfo |
@@ -40,19 +40,19 @@ All security requirements below describe what each protection does **when it is 
 | FR-BACK-1 | Ollama and OpenAI-compatible backend drivers (streaming, tools, embeddings, health) | M | M0 | integration with fake servers; manual against real Ollama + llama-server |
 | FR-BACK-2 | Backends in `backends.toml`; model per role; override order run → client → environment → global | M | M1 | `test_backend_resolution.py` |
 | FR-BACK-3 | Fallback only to local backends, logged | M | M1 | `test_backend_fallback.py` |
-| FR-BACK-4 | Hosted backends denied by default; never for locked conversations unless overridden; ☁ marking | M | M3 | `tests/security/test_hosted_policy.py` |
+| FR-BACK-4 | Hosted backends denied by default; never for locked conversations unless overridden; ☁ marking | M | M3 | `test_hosted.py` |
 | FR-BACK-5 | Tested hosted providers: Alibaba Model Studio, DeepSeek API, OpenRouter | S | M3 | manual, release notes |
 | FR-BACK-6 | Anthropic driver (Claude API key) | W | L | — |
 
 ### Isolation and egress (OS-enforced)
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-ISO-1 | `cairnward run -- <cmd>` runs a command under bubblewrap with a loopback-only network namespace; gateway, MCP and proxy reachable via bridged sockets | M | M0 | `tests/isolation/test_run_sandbox.py` (direct TCP/UDP/DNS fail; gateway works) |
-| FR-ISO-2 | Filesystem policy for runs: workspace rw, agent config rw, secrets dirs hidden, rest read-only | M | M0 | `tests/isolation/test_run_fs.py` |
-| FR-ISO-3 | Cairnward core runs in its own loopback-only namespace; only `cairnward-egress` has network | M | M0 | `tests/isolation/test_core_isolated.py` |
+| FR-ISO-1 | `cairnward run -- <cmd>` runs a command under bubblewrap with a loopback-only network namespace; gateway, MCP and proxy reachable via bridged sockets | M | M0 | `tests/isolation/` (direct TCP/UDP/DNS fail; gateway works) |
+| FR-ISO-2 | Filesystem policy for runs: workspace rw, agent config rw, secrets dirs hidden, rest read-only | M | M0 | `tests/isolation/`, `test_run.py` |
+| FR-ISO-3 | Cairnward core runs in its own loopback-only namespace; only `cairnward-egress` has network | M | M0 | `tests/isolation/test_isolated_serve.py` |
 | FR-ISO-4 | Container templates for server clients on an internal-only network | M | M2 | integration (Podman) |
 | FR-ISO-5 | `cairnward doctor` checks prerequisites and runs isolation self-tests | M | M0 | unit + isolation suite |
-| FR-NET-1 | Network off by default; host allowlist / ask per host; every connection logged (host, bytes, timing, client/run) | M | M0 | `tests/security/test_no_egress_default.py` |
+| FR-NET-1 | Network off by default; host allowlist / ask per host; every connection logged (host, bytes, timing, client/run) | M | M0 | `test_egress.py`, `tests/isolation/test_tool_egress.py` |
 | FR-NET-2 | Optional TLS interception with local CA, off by default, per environment | C | L | — |
 | FR-EGR-1 | Egress report per conversation, run and client; export | M | M2 | e2e |
 
@@ -60,7 +60,7 @@ All security requirements below describe what each protection does **when it is 
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
 | FR-POL-1 | `allow/ask/deny` decided outside the model for every effect | M | M0 | unit + coverage test |
-| FR-POL-2 | Risk tiers (low → allow+log, medium → ask once per scope, high → always ask) | M | M2 | `test_risk_tiers.py` |
+| FR-POL-2 | Risk tiers (low → allow+log, medium → ask once per scope, high → always ask) | M | M2 | `test_policy.py`, `test_approvals.py` |
 | FR-POL-3 | Approvals inbox (dashboard, desktop notification, `cairnward approvals`); batching of similar requests | M | M2 | e2e |
 | FR-POL-4 | User-only actions open a confirmation dialog in Cairnward's UI showing action + provenance; passphrases entered only there | M | M2 | `tests/security/test_user_only_actions.py` + injection corpus |
 | FR-POL-5 | Approvals survive client retries after timeouts | S | M2 | integration |
@@ -77,7 +77,7 @@ All security requirements below describe what each protection does **when it is 
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
 | FR-AGT-1 | Profiles for Aider (first, M0), Qwen Code, opencode, Goose + a generic OpenAI-compatible profile; each profile records its typical prompt size and is flagged when it exceeds the virtual model's context or the 60 s threshold | M | M2 (Aider in M0) | compatibility tests with fake model server — ✅ Aider, Qwen Code, opencode tested; Goose untested |
-| FR-AGT-2 | Workspace snapshots before/after each run on hidden refs; `runs diff`, `runs revert` | M | M1 | `test_run_snapshots.py` — ✅ |
+| FR-AGT-2 | Workspace snapshots before/after each run on hidden refs; `runs diff`, `runs revert` | M | M1 | `test_snapshots.py` — ✅ |
 | FR-AGT-3 | All model/tool calls of a run linked to the run in audit and vault | M | M0 | integration |
 
 ### Chat clients
@@ -94,8 +94,8 @@ All security requirements below describe what each protection does **when it is 
 | FR-VLT-3 | Vault browser: search, folders, pin, export, delete with confirm/undo; shortcuts (`d`, `f`, `/`, `j/k`, `L`, `x`, `l`, `?`); single-key shortcuts can be turned off | M | M2 | Playwright e2e |
 | FR-VLT-4 | Per-environment retention and `vault = "off"` (digests only) | M | M2 | unit |
 | FR-ENC-1 | Lock conversation / artifacts with passphrase (age, key wrapping, recovery key optional) | M | M2 | `test_lock.py`, `test_recovery_key.py` |
-| FR-ENC-2 | Passphrase never in model context, tool args, logs or audit | M | M2 | `tests/security/test_passphrase_leak.py` |
-| FR-ENC-5 | Crypto-shredding on purge | M | M1 | `test_crypto_shred.py` |
+| FR-ENC-2 | Passphrase never in model context, tool args, logs or audit | M | M2 | `tests/security/test_lock.py`, `tests/security/test_recovery_key.py` |
+| FR-ENC-5 | Crypto-shredding on purge | M | M1 | `test_store.py` |
 
 ### Research workflows
 | ID | Requirement | Pri | MS | Verification |
@@ -104,13 +104,13 @@ All security requirements below describe what each protection does **when it is 
 | FR-RES-2 | `lit.ask`: answers with page citations | M | M1 | eval `evals/pdf_qa` |
 | FR-RES-3 | Research jobs: queue, progress, resumable after restart, schedulable | M | M1 | `test_jobs_resume.py` |
 | FR-RES-4 | Review pipeline: screen (fast model, abstracts) → extract (main model, full text) → synthesise → comparison table + `.bib`; work grouped by model; estimated finish time | M | M3 | eval `evals/litreview_table` |
-| FR-RES-5 | Citation check: every reference resolves; every quotation matches PDF text | M | M1 | eval `evals/citation_existence` (zero invented) |
+| FR-RES-5 | Citation check: every reference resolves; every quotation matches PDF text | M | M1 | `test_citation_check.py`; real runs: `evals/pdf_qa` (zero invented), which also serves as the citation-existence eval |
 | FR-RES-6 | CSL formatting; APA and IEEE shipped; `.csl` adds styles | M | M1 | golden tests |
 | FR-RES-7 | Zotero via local API | S | M3 | fake Zotero API |
 | FR-RES-8 | arXiv search (opt-in, cached, audited) | M | M3 | recorded responses |
 | FR-RES-9 | Semantic Scholar, OpenAlex, PubMed, Crossref | S | M3 | recorded responses |
 | FR-RES-10 | Research tools exposed via MCP (`lit.search`, `lit.ask`, `lit.review.start`) | M | M2 | integration |
-| FR-RES-11 | Sub-agent fan-out in workflows with budgets, `max_parallel`, nested audit; YAML workflows | S | M3 | `test_workflow_budgets.py` |
+| FR-RES-11 | Sub-agent fan-out in workflows with budgets, `max_parallel`, nested audit; YAML workflows | S | M3 | — (deferred, D71) |
 | FR-RES-12 | PaperQA2 spike with written recommendation | M | M1 | ADR-0014 ✅ |
 | FR-RES-13 | Optional PaperQA2 "deep" engine as a sandboxed worker (all calls through the gateway, hosted defaults off), compared with the lean pipeline on the same evals | S | M3 | `tests/test_paperqa_guard.py`, `tests/isolation/test_paperqa_engine.py` ✅; `evals/pdf_qa --compare` (owner-side, real models) |
 
@@ -123,7 +123,7 @@ All security requirements below describe what each protection does **when it is 
 ### Audit
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-AUD-1 | Pre- and post-records for every effect with actor (client/agent/run/user), decision, digests | M | M0 | `test_audit_coverage.py` |
+| FR-AUD-1 | Pre- and post-records for every effect with actor (client/agent/run/user), decision, digests | M | M0 | `test_audit.py` |
 | FR-AUD-2 | Hash chain; `audit verify` detects edits/removals | M | M0 | Hypothesis tamper tests |
 | FR-AUD-3 | Audit browser (per client/run/conversation), export | M | M2 | e2e |
 | FR-AUD-4 | Signed checkpoints anchored hourly + on demand to a private git repo (deploy key scoped to it); `audit verify --anchors` | M | M2 | `test_anchoring.py` with local bare repo |
@@ -138,11 +138,11 @@ All security requirements below describe what each protection does **when it is 
 ### Sync and backup
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
-| FR-SYNC-1 | Modes none/on_demand/auto for every job | M | M3 | `test_sync_modes.py` |
+| FR-SYNC-1 | Modes none/on_demand/auto for every job | M | M3 | `test_backup.py` |
 | FR-SYNC-3 | restic backups of vault, artifacts, research library; retention; restore to date | M | M3 | local restic repo |
 | FR-SYNC-4 | Replication via per-device event logs + git; deterministic merge; fork on concurrent turns | S | M3 | Hypothesis convergence |
-| FR-SYNC-6 | Locked items only written encrypted; cloud warning; "encrypt this sync target" | M | M3 | `tests/security/test_sync_encryption.py` |
-| FR-SYNC-8 | Purge rewrites restic snapshots and prunes; pending state shown; retries | M | M3 | `test_backup_purge.py` (content absent from all snapshots) |
+| FR-SYNC-6 | Locked items only written encrypted; cloud warning; "encrypt this sync target" | M | M3 | `test_backup.py` (backups encrypted, cloud warning) |
+| FR-SYNC-8 | Purge rewrites restic snapshots and prunes; pending state shown; retries | M | M3 | `test_backup.py` (content absent from all snapshots) |
 | FR-SYNC-2 | Drive mirror (read-only) via rclone with preview | S | M3 | rclone local backend |
 
 ### Dashboard

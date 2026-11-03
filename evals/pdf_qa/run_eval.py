@@ -69,6 +69,7 @@ def score(q: dict[str, Any], a: dict[str, Any]) -> dict[str, Any]:
         # invented citations and quotations not found in the papers (FR-RES-5)
         "invented": len(a.get("invalid_citations", [])) + len(a.get("quote_problems", [])),
         "seconds": round(a.get("seconds", 0), 1),
+        "cut_off": bool(a.get("cut_off")),  # the model reached its token limit
     }
     if exp.get("unanswerable"):
         res["honest"] = bool(a.get("cannot_answer"))
@@ -101,9 +102,11 @@ def brief(output: str, limit: int = 600) -> str:
 
 
 def run(env: str = "litreview-offline", engines: list[str] | None = None, *, keep: bool = False,
-        emit: Any = print, only: list[str] | None = None) -> dict[str, Any]:  # fmt: skip
+        emit: Any = print, only: list[str] | None = None,
+        save_answers: Path | None = None) -> dict[str, Any]:  # fmt: skip
     """Build the library, ask every question with each engine, score; returns
-    {"summaries": {engine: {...}}, "results": [...]}. Needs `cairnward serve`."""
+    {"summaries": {engine: {...}}, "results": [...]}. Needs `cairnward serve`.
+    With save_answers, also appends each full answer and its score to that file (JSON lines)."""
     engines = engines or ["lean"]
     spec = json.loads((HERE / "questions.json").read_text())
     name = f"eval-pdf-qa-{int(time.time())}"
@@ -136,6 +139,9 @@ def run(env: str = "litreview-offline", engines: list[str] | None = None, *, kee
                     res = score(q, answer) | {"engine": engine}
                     mine.append(res)
                     emit(json.dumps(res))
+                    if save_answers:
+                        with save_answers.open("a", encoding="utf-8") as f:
+                            f.write(json.dumps(res | {"answer": answer}) + "\n")
                     if res["invented"]:  # to the terminal only, not into reports
                         emit("    why: " + json.dumps({
                             "citations_without_a_passage": answer.get("invalid_citations"),
@@ -163,11 +169,13 @@ def main() -> int:
     ap.add_argument("--compare", action="store_true",
                     help="run both engines on the same questions (FR-RES-13)")  # fmt: skip
     ap.add_argument("--only", help="comma-separated question ids, e.g. q5,u2")
+    ap.add_argument("--save-answers", type=Path, metavar="FILE",
+                    help="append full answers and scores to FILE (JSON lines)")  # fmt: skip
     args = ap.parse_args()
     engines = ["lean", "paperqa"] if args.compare else [args.engine]
     only = [x.strip() for x in args.only.split(",")] if args.only else None
     try:
-        out = run(args.env, engines, keep=args.keep, only=only)
+        out = run(args.env, engines, keep=args.keep, only=only, save_answers=args.save_answers)
     except EvalError as exc:
         print(exc)
         return 2

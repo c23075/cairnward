@@ -46,7 +46,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update -q && sudo apt-get install -y -q pandoc restic
       - run: uv sync
-      - run: uv run pytest --cov --cov-report=term-missing
+      # A floor against regressions, on Linux only (Windows skips more tests, ~71%). Measured
+      # 77% over all of src/; NFR-MAINT-1's target is 80% on core packages.
+      - run: uv run pytest --cov --cov-report=term-missing ${{ runner.os == 'Linux' && '--cov-fail-under=75' || '' }}
 
   test-debian:
     runs-on: ubuntu-24.04
@@ -70,6 +72,12 @@ jobs:
         run: |
           uv export --format requirements-txt --all-groups --no-emit-project -o requirements-audit.txt
           uvx pip-audit -r requirements-audit.txt --disable-pip --require-hashes --strict
+      # Runtime dependencies only. A new licence string fails here until someone reads it and
+      # adds it. pyrage is left out because its metadata names no licence; its LICENSE file is MIT.
+      - name: Check licences of runtime dependencies
+        run: |
+          uv sync --no-dev --frozen
+          uvx pip-licenses@5.5.5 --python .venv/bin/python --ignore-packages pyrage --allow-only="Apache-2.0;Apache-2.0 OR BSD-3-Clause;BSD License;BSD-3-Clause;BSD-3-Clause, Apache-2.0, dependency licenses;MIT;MIT License;MIT License, Apache License, Version 2.0;MIT-0;Mozilla Public License 2.0 (MPL 2.0);PSF-2.0"
 
   dashboard-e2e:
     # T2.7: the dashboard in Chromium against a running `cairnward serve`.
