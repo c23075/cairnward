@@ -176,7 +176,7 @@ All security requirements below describe what each protection does **when it is 
 | NFR-PORT-1 | Linux (Debian 12+, Ubuntu 22.04+); Python 3.12+; unit tests also pass on Windows | M | CI |
 | NFR-PORT-2 | Windows via WSL2 | W | L |
 | NFR-SUP-1 | Hash-locked deps; pip-audit; license check; pinned CI actions | M | CI |
-| NFR-SUP-2 | SBOM + Sigstore-signed releases | S | release workflow |
+| NFR-SUP-2 | SBOM + Sigstore-signed releases | S | `.github/workflows/release.yml`, `test_release.py`; never run on GitHub yet |
 | NFR-MAINT-1 | ruff + mypy strict; ≥ 80% coverage on core packages | M | CI |
 
 ---
