@@ -264,6 +264,9 @@ def build_parser() -> argparse.ArgumentParser:
         ("log", "versions (of a file)"),
         ("show", "print a file"),
         ("restore", "bring back an old version"),
+        ("lock", "lock a finished job's or a run's files with a passphrase"),
+        ("unlock", "remove that lock and restore the files"),
+        ("recover", "forgotten passphrase: set a new one with the recovery key"),
     )
     for name, text in art_actions:
         a = art_sub.add_parser(name, help=text)
@@ -1350,6 +1353,9 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
             return fail(resp)
         job = resp.json()
         if action == "result":
+            if job.get("locked"):
+                print(f"locked: cairnward artifacts unlock job {job['id']}", file=sys.stderr)
+                return 1
             if not job.get("result"):
                 print(f"not finished yet: {line(job)}", file=sys.stderr)
                 return 1
@@ -1494,31 +1500,72 @@ def _backup_action(cfg: Config, args: argparse.Namespace, action: str) -> int:
 
 
 def _cmd_artifacts(args: argparse.Namespace) -> int:
-    from cairnward.artifacts import ArtifactError, ArtifactStore
+    from cairnward.artifacts import LOCKED_FILES, ArtifactError, ArtifactStore
+    from cairnward.store import Vault
 
-    store = ArtifactStore(_load(args).paths.data_dir)
+    paths = _load(args).paths
     action = args.artifacts_command or "list"
+    with Vault.open(paths) as vault:  # unlocking is per process: locked stays locked here
+        store = ArtifactStore(paths.data_dir, keys=vault)
+        try:
+            if action in ("lock", "unlock", "recover"):
+                return _artifacts_lock(args, vault, action)
+            if action == "list":
+                repos = store.repos()
+                if not repos:
+                    print("no artifacts yet")
+                for scope, owner, n in repos:
+                    print(f"{scope:12} {owner}  "
+                          + ("locked" if n == LOCKED_FILES else f"{n} file(s)"))  # fmt: skip
+            elif action == "files":
+                print("\n".join(store.files(args.scope, args.owner)) or "(empty)")
+            elif action == "log":
+                for v in store.log(args.scope, args.owner, args.path):
+                    print(f"{v.rev[:12]}  {v.date[:19]}  {v.message}")
+            elif action == "show":
+                sys.stdout.write(store.read(args.scope, args.owner, args.path, args.rev)
+                                 .decode("utf-8", "replace"))  # fmt: skip
+            else:
+                rev = store.restore(args.scope, args.owner, args.path, args.rev)
+                print(f"restored {args.path} as new version {rev[:12]}")
+        except ArtifactError as exc:
+            print(f"cairnward: {exc}", file=sys.stderr)
+            return 1
+    return 0
+
+
+def _artifacts_lock(args: argparse.Namespace, vault: Any, action: str) -> int:
+    from cairnward.artifacts import lock_item, unlock_item
+    from cairnward.audit import AuditLog
+    from cairnward.store.crypto import DecryptionError
+    from cairnward.store.vault import LockedError, VaultError
+    from cairnward.vault_cli import ask_passphrase
+
+    cfg = _load(args)
+    data, item = cfg.paths.data_dir, f"{args.scope}:{args.owner}"
     try:
-        if action == "list":
-            repos = store.repos()
-            if not repos:
-                print("no artifacts yet")
-            for scope, owner, n in repos:
-                print(f"{scope:12} {owner}  {n} file(s)")
-        elif action == "files":
-            print("\n".join(store.files(args.scope, args.owner)) or "(empty)")
-        elif action == "log":
-            for v in store.log(args.scope, args.owner, args.path):
-                print(f"{v.rev[:12]}  {v.date[:19]}  {v.message}")
-        elif action == "show":
-            sys.stdout.write(store.read(args.scope, args.owner, args.path, args.rev)
-                             .decode("utf-8", "replace"))  # fmt: skip
+        if action == "unlock":
+            unlock_item(vault, data, args.scope, args.owner, ask_passphrase("Passphrase: "))
+            print(f"removed the lock from {args.scope} {args.owner}")
         else:
-            rev = store.restore(args.scope, args.owner, args.path, args.rev)
-            print(f"restored {args.path} as new version {rev[:12]}")
-    except ArtifactError as exc:
+            identity = ask_passphrase("Recovery key (AGE-SECRET-KEY-1...): ") if (
+                action == "recover") else None  # fmt: skip
+            first = ask_passphrase("New passphrase: ")
+            if ask_passphrase("Again: ") != first:
+                print("the passphrases differ: nothing changed", file=sys.stderr)
+                return 1
+            if identity is not None:
+                vault.recover(item, identity, first)
+                print(f"{args.scope} {args.owner} has a new passphrase (still locked)")
+            else:
+                lock_item(vault, data, args.scope, args.owner, first)
+                print(f"locked {args.scope} {args.owner}: only the passphrase opens it, and "
+                      "`cairnward artifacts unlock` restores it")  # fmt: skip
+    except (VaultError, LockedError, DecryptionError) as exc:
         print(f"cairnward: {exc}", file=sys.stderr)
         return 1
+    with AuditLog.open(cfg.paths) as log:
+        log.append(f"artifacts.{action}", actor="user", target=item)
     return 0
 
 

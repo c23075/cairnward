@@ -657,7 +657,7 @@ class McpHub:
         if not decision.allowed:
             await asyncio.to_thread(self.engine.audit_deny, decision)
             return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
-        store = ArtifactStore(self.cfg.paths.data_dir)
+        store = ArtifactStore(self.cfg.paths.data_dir, keys=self.vault)
         content = str(arguments.get("content", ""))
         pre = await asyncio.to_thread(self.engine.audit_pre, decision,
                                       content if tool == "artifact_write" else None)  # fmt: skip
@@ -671,7 +671,8 @@ class McpHub:
                                                str(arguments.get("path", "")))  # fmt: skip
                 text = data.decode("utf-8", "replace")
             else:
-                text = "\n".join(store.files("conversation", conversation)) or "(no artifacts yet)"
+                files = await asyncio.to_thread(store.files, "conversation", conversation)
+                text = "\n".join(files) or "(no artifacts yet)"
         except ArtifactError as exc:
             await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
                                     details={"error": str(exc)[:200]})  # fmt: skip

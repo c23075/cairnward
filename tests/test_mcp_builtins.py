@@ -225,3 +225,43 @@ async def test_artifact_tools(paths: Paths) -> None:
         for x in audit.records()
     )
     audit.close()
+
+
+async def test_artifact_tools_follow_the_conversations_lock(paths: Paths) -> None:
+    """A model can't read or write a locked conversation's artifacts (FR-ENC-1), through the
+    real tool route, and the failure is audited without any content."""
+    from cairnward.store import Vault
+
+    (paths.config_dir / "environments" / "lit.toml").write_text(
+        'tools = ["artifacts"]\n[privacy]\nisolation = "off"\n'
+    )
+    secret = "correct horse battery staple 42"
+    c, hub, audit, tracker = await setup(paths)
+    vault = Vault.open(paths)
+    hub.vault = vault
+
+    async def call(tool: str, **arguments: str) -> dict[str, Any]:
+        reply = await rpc(c, "tools/call", {"name": f"cairnward__{tool}", "arguments": arguments})
+        return dict(reply["result"])
+
+    try:
+        cid = vault.create_conversation(title="t")
+        tracker.note_conversation("jan", None, cid)
+        assert "saved" in (await call("artifact_write", path="plan.md", content="private"))[
+            "content"][0]["text"]  # fmt: skip
+        vault.lock(cid, secret)
+        for tool, args in (("artifact_read", {"path": "plan.md"}), ("artifact_list", {}),
+                           ("artifact_write", {"path": "new.md", "content": "x"})):  # fmt: skip
+            out = await call(tool, **args)
+            assert out["isError"] and "locked" in out["content"][0]["text"]
+            assert "private" not in str(out)
+        vault.unlock(cid, secret, minutes=5)
+        assert (await call("artifact_read", path="plan.md"))["content"][0]["text"] == "private"
+        await call("artifact_write", path="new.md", content="x")
+        assert (await call("artifact_list"))["content"][0]["text"] == "new.md\nplan.md"
+    finally:
+        await c.aclose()
+        await hub.aclose()
+        vault.close()
+    assert not any("private" in r.to_json_line() for r in audit.records())
+    audit.close()
