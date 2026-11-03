@@ -16,6 +16,7 @@ class FakeOllama:
     reply: str = "Hello from fake Ollama"
     tool_call: dict[str, Any] | None = None
     thinking: str | None = None
+    done_reason: str = "stop"
     fail_status: int | None = None
     requests: list[dict[str, Any]] = field(default_factory=list)
 
@@ -38,7 +39,7 @@ class FakeOllama:
             msg["tool_calls"] = [{"function": self.tool_call}]
         if self.thinking:
             msg["thinking"] = self.thinking
-        final = {"model": body["model"], "done": True, "done_reason": "stop",
+        final = {"model": body["model"], "done": True, "done_reason": self.done_reason,
                  "prompt_eval_count": 12, "eval_count": 5}  # fmt: skip
         if not body.get("stream"):
             return httpx.Response(200, json={**final, "message": msg})

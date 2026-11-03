@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -16,7 +17,14 @@ from cairnward.gateway.clients import RunKeys
 from cairnward.gateway.scheduling import Scheduler
 from cairnward.policy import PolicyEngine
 from cairnward.research import InProcessEmbedder, Research
-from cairnward.research.ask import cited_numbers, fit, run_ask
+from cairnward.research.ask import (
+    ANSWER_TOKENS,
+    REASONING_TOKENS,
+    cited_numbers,
+    fit,
+    mark_invalid,
+    run_ask,
+)
 from cairnward.research.library import Hit
 from tests.fakes.backends import FakeOllama
 from tests.fakes.pdf import make_pdf
@@ -65,6 +73,60 @@ async def env(tmp_path: Path) -> Any:
     yield cfg, engine, backends, fake, audit
     audit.close()
     await backends.aclose()
+
+
+def test_mark_invalid() -> None:
+    assert mark_invalid("a [1] b [1, 2] c [1-2].", 2) == "a [1] b [1, 2] c [1-2]."
+    text = "a [9] b [1, 9] c [1-3] d [8, 9]."
+    assert mark_invalid(text, 2) == "a [?] b [1, ?] c [1, 2, ?] d [?]."
+
+
+async def test_reasoning_that_uses_the_whole_limit_is_reported(env: Any) -> None:
+    """The shape of a real reply (q1 in evals/pdf_qa): Ollama returns reasoning, empty
+    content and done_reason "length"."""
+    cfg, engine, backends, fake, audit = env
+    fake.reply, fake.thinking, fake.done_reason = "", "Let me check the passages...", "length"
+    answer = await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4)
+    assert answer.cut_off and answer.text == "" and answer.sources == []
+    rendered = answer.render()
+    assert "reached its token limit before answering" in rendered
+    assert "cites no passage" not in rendered
+    (rec,) = [r for r in audit.records() if r.action == "research.ask"]
+    assert rec.details["cut_off"] is True
+
+
+async def test_answer_cut_off_after_it_started(env: Any) -> None:
+    cfg, engine, backends, fake, _ = env
+    fake.reply, fake.done_reason = "Longer sleep went with better memory [1] and", "length"
+    answer = await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4)
+    assert answer.cut_off and [s.n for s in answer.sources] == [1]
+    assert "this answer is cut off" in answer.render()
+
+
+async def test_unfinished_think_tag_is_not_taken_as_the_answer(env: Any) -> None:
+    """Servers that keep reasoning in the content: a cut-off reply has no closing tag, and
+    numbers in the reasoning must not count as citations."""
+    cfg, engine, backends, fake, _ = env
+    fake.reply, fake.done_reason = "<think>Passage [1] says...", "length"
+    answer = await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4)
+    assert answer.cut_off and answer.text == "" and answer.sources == []
+
+
+async def test_limit_leaves_room_for_reasoning_only_when_it_is_on(env: Any) -> None:
+    cfg, engine, backends, fake, _ = env
+    await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4, effort="high")
+    assert fake.requests[-1]["think"] is True
+    assert fake.requests[-1]["options"]["num_predict"] == ANSWER_TOKENS + REASONING_TOKENS
+    await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4, effort="medium")
+    assert fake.requests[-1]["think"] is False
+    assert fake.requests[-1]["options"]["num_predict"] == ANSWER_TOKENS
+
+
+def test_reply_room_comes_out_of_the_passages() -> None:
+    hits = [SimpleNamespace(text="word " * 1000, chunk_id=i) for i in range(4)]
+    roomy = fit(hits, 8192, "q")  # type: ignore[arg-type]
+    tight = fit(hits, 8192, "q", reply_tokens=5000)  # type: ignore[arg-type]
+    assert len(tight) < len(roomy)
 
 
 async def test_answer_with_sources(env: Any) -> None:

@@ -17,7 +17,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-_QUOTE = re.compile(r"[\"“”„]([^\"“”„\n]{12,600})[\"“”„]")
+# An opening mark follows no word and precedes text; a closing mark is the reverse. So a
+# stray mark doesn't pair with the next quotation and turn the text between into a "quote".
+_QUOTE = re.compile(r"(?<!\w)[\"“„](?=\S)([^\"“”„\n]{12,600})(?<=\S)[\"”“](?!\w)")
 _CITES_AFTER = re.compile(r"^\W{0,4}((?:\[\d+(?:\s*[,–\-]\s*\d+)*\]\s*)+)")
 _DOI = re.compile(r"\b10\.\d{4,9}/[^\s\"<>]+", re.IGNORECASE)
 _REF_HEADING = re.compile(r"^\s*(?:#+\s*)?(references|bibliography|works cited|sources)\s*:?\s*$",
@@ -76,11 +78,14 @@ class DraftReport:
 
 
 def quotations(text: str) -> list[tuple[str, list[int]]]:
-    """Quoted passages and the [n] citations right after each."""
-    from cairnward.research.ask import cited_numbers
+    """Quoted passages and the [n] citations right after each. The refusal sentence lit.ask
+    asks for is shown in quotes in its prompt; a model repeating them quotes no paper."""
+    from cairnward.research.ask import CANT, cited_numbers
 
     out = []
     for m in _QUOTE.finditer(text):
+        if normalise(m.group(1)).strip(" .,;:") == CANT:
+            continue
         after = _CITES_AFTER.match(text[m.end() : m.end() + 60])
         out.append((m.group(1), cited_numbers(after.group(1)) if after else []))
     return out
@@ -122,11 +127,12 @@ def check_answer_quotes(text: str, hits: list[Any], library_rows: list[Any]) -> 
         if hit is not None:
             out.append(QuoteCheck(quote, "in_cited", _label(hit), cited))
             continue
-        docs = {h.document_id for h in cited_hits} or {h.document_id for h in hits}
-        row = _find(quote, [r for r in library_rows if r.document_id in docs])
-        if row is not None:
-            out.append(QuoteCheck(quote, "same_paper", _label(row), cited))
-            continue
+        if cited:  # with no citation there's no "passage cited" for it to be missing from
+            docs = {h.document_id for h in cited_hits} or {h.document_id for h in hits}
+            row = _find(quote, [r for r in library_rows if r.document_id in docs])
+            if row is not None:
+                out.append(QuoteCheck(quote, "same_paper", _label(row), cited))
+                continue
         row = _find(quote, library_rows)
         status = "elsewhere" if row is not None and not cited else "not_found"
         out.append(QuoteCheck(quote, status, _label(row) if row is not None else None, cited))

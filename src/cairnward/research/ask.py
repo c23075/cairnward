@@ -34,6 +34,10 @@ SYSTEM = (
 CANT = "i can't answer this from these sources"
 _CITE = re.compile(r"\[(\d+(?:\s*(?:,|\u2013|-|\u2014)\s*\d+)*)\]")
 ANSWER_TOKENS = 1024
+# A model's limit covers its reasoning too. Measured: 240-460 tokens usually, but over 1,024
+# (and no answer at all) on some runs. Not the full thinking budget: that would crowd out
+# passages in an 8K context, and a runaway would cost ~20 minutes at 4 tokens/s on a CPU.
+REASONING_TOKENS = 2048
 OVERHEAD_TOKENS = 400
 
 
@@ -58,6 +62,7 @@ class Answer:
     quote_problems: list[str] = field(default_factory=list)  # FR-RES-5
     cannot_answer: bool = False
     uncited: bool = False
+    cut_off: bool = False  # the model reached its token limit
     model: str = ""
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
@@ -76,7 +81,12 @@ class Answer:
                          + ", ".join(f"[{n}]" for n in self.invalid_citations))  # fmt: skip
         for problem in self.quote_problems:
             lines.append(f"Check: {problem}")
-        if self.uncited and not self.cannot_answer:
+        if self.cut_off and not self.text.strip():
+            lines.append("Warning: the model reached its token limit before answering, so "
+                         "there is no answer. Asking again may work.")  # fmt: skip
+        elif self.cut_off:
+            lines.append("Warning: the model reached its token limit, so this answer is cut off.")
+        if self.uncited and not self.cannot_answer and self.text.strip():
             lines.append("Warning: the answer cites no passage; don't rely on it.")
         return "\n".join(lines).rstrip() + "\n"
 
@@ -98,11 +108,23 @@ def cited_numbers(text: str) -> list[int]:
     return seen
 
 
-def fit(hits: list[Hit], context: int | None, question: str) -> list[Hit]:
-    """Keep the best-ranked passages that fit in the context with room for the answer."""
+def mark_invalid(text: str, passages: int) -> str:
+    """Show citations to passages that weren't given as "?": [9] -> [?], [1, 9] -> [1, ?]."""
+
+    def fix(m: re.Match[str]) -> str:
+        nums = cited_numbers(m.group(0))
+        kept = [str(n) for n in nums if 1 <= n <= passages]
+        return m.group(0) if len(kept) == len(nums) else "[" + ", ".join([*kept, "?"]) + "]"
+
+    return _CITE.sub(fix, text)
+
+
+def fit(hits: list[Hit], context: int | None, question: str, *,
+        reply_tokens: int = ANSWER_TOKENS) -> list[Hit]:  # fmt: skip
+    """Keep the best-ranked passages that fit in the context with room for the reply."""
     if not context:
         return hits
-    budget = context - ANSWER_TOKENS - OVERHEAD_TOKENS - estimate_tokens(SYSTEM + question)
+    budget = context - reply_tokens - OVERHEAD_TOKENS - estimate_tokens(SYSTEM + question)
     kept, used = [], 0
     for h in hits:
         cost = estimate_tokens(h.text) + 20
@@ -132,14 +154,16 @@ async def ask(
     k: int = 8,
 ) -> Answer:
     question = question.strip()
+    reply_tokens = ANSWER_TOKENS + (REASONING_TOKENS if chat.thinking else 0)
     hits = fit(await research.search(library, question, embedder, k=k), chat.context_tokens,
-               question)  # fmt: skip
+               question, reply_tokens=reply_tokens)  # fmt: skip
     answer = Answer(question=question, library=library, text="", passages=len(hits))
     if not hits:
         answer.text = "I can't answer this from these sources: nothing relevant was found."
         answer.cannot_answer = True
         return answer
-    reply = await chat.ask(build_messages(question, hits), max_tokens=ANSWER_TOKENS)
+    reply = await chat.ask(build_messages(question, hits), max_tokens=reply_tokens)
+    answer.cut_off = reply.finish_reason == "length"
     answer.model, answer.seconds = reply.model, reply.seconds
     answer.prompt_tokens, answer.completion_tokens = reply.prompt_tokens, reply.completion_tokens
     text = reply.text
@@ -151,9 +175,7 @@ async def ask(
                                          h.pages, h.document_id, h.chunk_id))  # fmt: skip
         else:
             answer.invalid_citations.append(n)
-    for n in answer.invalid_citations:  # don't leave dangling numbers in the text
-        text = re.sub(rf"\[{n}\]", "[?]", text)
-    answer.text = text
+    answer.text = mark_invalid(text, len(hits))  # don't leave dangling numbers in the text
     answer.uncited = not answer.sources
     answer.quote_problems = quote_problems(research, library, text, hits)
     return answer
@@ -208,5 +230,6 @@ async def run_ask(
                                 "sources": len(answer.sources),
                                 "invalid_citations": len(answer.invalid_citations),
                                 "cannot_answer": answer.cannot_answer, "uncited": answer.uncited,
+                                "cut_off": answer.cut_off,
                                 "seconds": round(answer.seconds, 1)})  # fmt: skip
     return answer

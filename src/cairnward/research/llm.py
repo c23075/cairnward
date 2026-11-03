@@ -22,7 +22,7 @@ from cairnward.gateway.models import Resolved, resolve
 from cairnward.policy.engine import Action, PolicyEngine
 from cairnward.redaction import check_outbound, message_texts
 
-_THINK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+_THINK = re.compile(r"<think>.*?(?:</think>\s*|\Z)", re.DOTALL)  # cut off: no closing tag
 
 
 class ModelDenied(Exception):
@@ -36,6 +36,7 @@ class Reply:
     prompt_tokens: int | None
     completion_tokens: int | None
     seconds: float
+    finish_reason: str = "stop"  # "length": stopped at max_tokens, reasoning included
 
 
 class InProcessChat:
@@ -60,6 +61,10 @@ class InProcessChat:
     @property
     def context_tokens(self) -> int | None:
         return self.resolved.options.context_tokens
+
+    @property
+    def thinking(self) -> bool:
+        return bool(self.resolved.options.thinking)
 
     async def ask(self, messages: list[dict[str, Any]], *, max_tokens: int = 1024) -> Reply:
         r = self.resolved
@@ -98,7 +103,8 @@ class InProcessChat:
             await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
                                     details={"error": error})  # fmt: skip
             raise
-        msg = (result.get("choices") or [{}])[0].get("message") or {}
+        choice = (result.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
         text = _THINK.sub("", str(msg.get("content") or "")).strip()
         usage = result.get("usage") or {}
         seconds = time.monotonic() - started
@@ -108,4 +114,4 @@ class InProcessChat:
                                          "completion_tokens": usage.get("completion_tokens"),
                                          "duration_s": round(seconds, 3)})  # fmt: skip
         return Reply(text, r.model, usage.get("prompt_tokens"), usage.get("completion_tokens"),
-                     seconds)  # fmt: skip
+                     seconds, str(choice.get("finish_reason") or "stop"))  # fmt: skip

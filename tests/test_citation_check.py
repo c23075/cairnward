@@ -1,6 +1,7 @@
 """Citation and quotation checks (FR-RES-5)."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -14,7 +15,7 @@ from cairnward.config.paths import Paths
 from cairnward.policy import PolicyEngine
 from cairnward.research import InProcessEmbedder, Research
 from cairnward.research.ask import run_ask
-from cairnward.research.check import check_draft, normalise, quotations
+from cairnward.research.check import check_answer_quotes, check_draft, normalise, quotations
 from tests.fakes.backends import FakeOllama
 from tests.fakes.pdf import make_pdf
 
@@ -28,6 +29,61 @@ def test_normalise_and_find_quotes() -> None:
     text = f'They found {LDQ}longer sleep improved memory{RDQ} [2] and "a second claim here" .'
     assert quotations(text) == [("longer sleep improved memory", [2]),
                                 ("a second claim here", [])]  # fmt: skip
+
+
+def test_stray_quote_mark_does_not_pair_with_the_next_quotation() -> None:
+    real = "participants who slept longer"
+    assert quotations(f'14 adults" did so [1], and "{real}" [2].') == [(real, [2])]
+    assert quotations(f'"14 adults did so [1], and "{real}" [2].') == [(real, [2])]
+
+
+@pytest.mark.parametrize("refusal", [
+    '"I can\'t answer this from these sources." The passages give no ranking.',
+    f"{LDQ}I can{RSQ}t answer this from these sources{RDQ}: no ranking is given.",
+])  # fmt: skip
+async def test_quoted_refusal_is_not_an_invented_quotation(env: Any, refusal: str) -> None:
+    cfg, engine, backends, fake, _ = env
+    fake.reply = refusal
+    a = await run_ask(cfg, engine, backends, "thesis", "Which adult slept the longest?", k=3)
+    assert a.cannot_answer and a.quote_problems == []
+
+
+async def test_exact_quote_without_a_citation_is_not_invented(env: Any) -> None:
+    """The shape of a real answer (u2 in evals/pdf_qa): a refusal that quotes a passage
+    exactly, in passing, without citing it."""
+    cfg, engine, backends, fake, _ = env
+    fake.reply = (
+        "I can't answer this from these sources. The passages mention memory (e.g., "
+        '"participants who slept longer had better working memory") and age, but do not '
+        "identify which adult slept the longest."
+    )
+    a = await run_ask(cfg, engine, backends, "thesis", "Which adult slept the longest?", k=3)
+    assert a.cannot_answer and a.quote_problems == []
+
+
+async def test_invented_quote_without_a_citation_is_still_reported(env: Any) -> None:
+    cfg, engine, backends, fake, _ = env
+    fake.reply = 'They say "sleep doubles intelligence in all adults".'
+    a = await run_ask(cfg, engine, backends, "thesis", "Does sleep help working memory?", k=3)
+    assert len(a.quote_problems) == 1 and "was not found in the papers" in a.quote_problems[0]
+
+
+def test_quote_in_the_wrong_passage_is_still_reported() -> None:
+    def passage(page: int, text: str) -> SimpleNamespace:
+        return SimpleNamespace(text=text, document_id=1, title="Sleep", path="sleep.pdf",
+                               page_start=page, page_end=page)  # fmt: skip
+
+    hits = [passage(1, "participants who slept longer"), passage(2, "the effect held after age")]
+    (check,) = check_answer_quotes('"participants who slept longer" [2].', hits, hits)
+    assert check.status == "same_paper" and check.where == "Sleep, p. 1" and not check.ok
+
+
+async def test_quote_keeps_its_citation_next_to_an_invalid_one(env: Any) -> None:
+    cfg, engine, backends, fake, _ = env
+    fake.reply = '"participants who slept longer had better working memory" [1, 9].'
+    a = await run_ask(cfg, engine, backends, "thesis", "Does sleep help working memory?", k=3)
+    assert a.invalid_citations == [9] and a.text.endswith("[1, ?].")
+    assert a.quote_problems == []
 
 
 @pytest.fixture
