@@ -10,9 +10,10 @@ import pytest
 from cairnward.audit import AuditLog
 from cairnward.backends import Backends
 from cairnward.config import load_config
+from cairnward.config.models import Client, ClientBudget
 from cairnward.config.paths import Paths
 from cairnward.gateway import ClientKeys, GatewayDeps, create_app
-from cairnward.gateway.scheduling import BenchProfile, Budget, RunUsage, Scheduler
+from cairnward.gateway.scheduling import BenchProfile, Budget, ClientUsage, RunUsage, Scheduler
 from cairnward.policy import PolicyEngine
 from tests.fakes.backends import FakeOllama
 
@@ -200,6 +201,97 @@ async def test_run_budget_enforced(tmp_path: Path) -> None:
     assert deps.run_keys.usage["run-1"].tokens == 34  # 2 x (12 + 5)
     await client.aclose()
     audit.close()
+
+
+CHAT = {"model": "cw/e:low", "messages": [{"role": "user", "content": "hi"}]}
+
+
+def limited(deps: GatewayDeps, name: str, **limits: int) -> None:
+    deps.config.clients.clients[name] = Client(kind="agent", profile="aider",
+                                               budget=ClientBudget(**limits))  # fmt: skip
+
+
+async def test_client_daily_request_budget(tmp_path: Path) -> None:
+    client, deps, audit, fake = await make(tmp_path)
+    limited(deps, "w", max_requests_per_day=2)
+    h = {"Authorization": f"Bearer {ClientKeys.at(deps.config.paths.state_dir).add('w')}"}
+    for _ in range(2):
+        assert (await client.post("/v1/chat/completions", headers=h, json=CHAT)).status_code == 200
+    resp = await client.post("/v1/chat/completions", headers=h, json=CHAT)
+    assert resp.status_code == 429 and resp.json()["error"]["type"] == "budget_exceeded"
+    assert "clients.toml" in resp.json()["error"]["message"]
+    assert len(fake.requests) == 2  # the third never reached the model
+    last = audit.records()[-1]
+    assert last.action == "budget.exceeded" and last.client == "w"
+    await client.aclose()
+    audit.close()
+
+
+async def test_client_token_budget_counts_its_runs_and_streams(tmp_path: Path) -> None:
+    client, deps, audit, fake = await make(tmp_path)
+    limited(deps, "aider", max_tokens_per_day=30)
+    key = deps.run_keys.issue("aider", "run-1")
+    h = {"Authorization": f"Bearer {key}"}
+    assert (await client.post("/v1/chat/completions", headers=h, json=CHAT)).status_code == 200
+    stream = await client.post("/v1/chat/completions", headers=h, json={**CHAT, "stream": True})
+    assert stream.status_code == 200
+    assert ClientUsage.at(deps.config.paths.state_dir).get("aider") == (2, 34)
+    # a new run of the same client doesn't start again from zero
+    other = {"Authorization": f"Bearer {deps.run_keys.issue('aider', 'run-2')}"}
+    resp = await client.post("/v1/chat/completions", headers=other, json=CHAT)
+    assert resp.status_code == 429 and "30 tokens used today" in resp.json()["error"]["message"]
+    assert len(fake.requests) == 2
+    await client.aclose()
+    audit.close()
+
+
+async def test_client_budget_covers_embeddings(tmp_path: Path) -> None:
+    client, deps, audit, _ = await make(tmp_path)
+    limited(deps, "w", max_requests_per_day=1)
+    h = {"Authorization": f"Bearer {ClientKeys.at(deps.config.paths.state_dir).add('w')}"}
+    body = {"model": "cw/e:embed", "input": "hi"}
+    assert (await client.post("/v1/embeddings", headers=h, json=body)).status_code == 200
+    assert (await client.post("/v1/embeddings", headers=h, json=body)).status_code == 429
+    await client.aclose()
+    audit.close()
+
+
+async def test_client_without_a_limit_is_not_tracked(tmp_path: Path) -> None:
+    client, deps, audit, _ = await make(tmp_path)
+    limited(deps, "w")
+    h = {"Authorization": f"Bearer {ClientKeys.at(deps.config.paths.state_dir).add('w')}"}
+    assert (await client.post("/v1/chat/completions", headers=h, json=CHAT)).status_code == 200
+    assert not (deps.config.paths.state_dir / "client_usage.json").exists()
+    await client.aclose()
+    audit.close()
+
+
+def test_client_usage_survives_restart_and_resets_next_day(tmp_path: Path) -> None:
+    day = ["2026-11-03"]
+    path = tmp_path / "client_usage.json"
+    usage = ClientUsage(path, today=lambda: day[0])
+    limits = ClientBudget(max_requests_per_day=2)
+    usage.add("w", 10)
+    assert usage.exceeded("w", limits) is None
+    usage.add("w", 5)
+    again = ClientUsage(path, today=lambda: day[0])  # the server restarted
+    assert again.get("w") == (2, 15) and "2 requests used today" in str(again.exceeded("w", limits))
+    assert "w" in json.loads(path.read_text()) and "hi" not in path.read_text()
+    day[0] = "2026-11-04"
+    assert again.get("w") == (0, 0) and again.exceeded("w", limits) is None
+    again.add("w", 1)
+    assert again.get("w") == (1, 1)
+
+
+def test_client_budget_in_clients_toml(tmp_path: Path) -> None:
+    paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
+    paths.config_dir.mkdir(parents=True)
+    (paths.config_dir / "clients.toml").write_text(
+        'schema_version = 1\n[clients.w]\nkind = "chat"\n'
+        "[clients.w.budget]\nmax_requests_per_day = 100\nmax_tokens_per_day = 50000\n"
+    )
+    budget = load_config(paths).clients.clients["w"].budget
+    assert (budget.max_requests_per_day, budget.max_tokens_per_day) == (100, 50000)
 
 
 async def test_context_overflow_warns_or_rejects(tmp_path: Path) -> None:

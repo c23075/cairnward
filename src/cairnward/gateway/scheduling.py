@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from cairnward.config.models import ClientBudget
 from cairnward.gateway.recorder import normalise, prefix_hashes
 
 
@@ -263,6 +265,54 @@ class RunUsage:
         if b.max_minutes is not None and (time.monotonic() - self.started) / 60 >= b.max_minutes:
             return f"run budget: {b.max_minutes:g} minutes elapsed"
         return None
+
+
+class ClientUsage:
+    """Each client's requests and tokens today, for its daily budget (FR-GW-4). Kept in
+    <state_dir>/client_usage.json so a restart doesn't reset the count; holds counts only."""
+
+    def __init__(self, path: Path, today: Callable[[], str] = lambda: time.strftime("%Y-%m-%d")):
+        self.path, self.today = path, today
+        self._lock = threading.Lock()
+
+    @classmethod
+    def at(cls, state_dir: Path) -> ClientUsage:
+        return cls(state_dir / "client_usage.json")
+
+    def _load(self) -> dict[str, dict[str, Any]]:
+        try:
+            data: dict[str, dict[str, Any]] = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data
+
+    def get(self, client: str) -> tuple[int, int]:
+        """(requests, tokens) so far today."""
+        entry = self._load().get(client)
+        if not entry or entry.get("day") != self.today():
+            return 0, 0
+        return int(entry["requests"]), int(entry["tokens"])
+
+    def exceeded(self, client: str, limits: ClientBudget) -> str | None:
+        if limits.max_requests_per_day is None and limits.max_tokens_per_day is None:
+            return None
+        requests, tokens = self.get(client)
+        if limits.max_requests_per_day is not None and requests >= limits.max_requests_per_day:
+            return f"client budget: {limits.max_requests_per_day} requests used today"
+        if limits.max_tokens_per_day is not None and tokens >= limits.max_tokens_per_day:
+            return f"client budget: {limits.max_tokens_per_day} tokens used today"
+        return None
+
+    def add(self, client: str, tokens: int = 0) -> None:
+        """Count one request."""
+        with self._lock:
+            requests, used = self.get(client)
+            data = self._load()
+            data[client] = {"day": self.today(), "requests": requests + 1, "tokens": used + tokens}
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+            tmp.replace(self.path)  # atomic
 
 
 def memory_warning(
