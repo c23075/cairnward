@@ -163,7 +163,7 @@ All security requirements below describe what each protection does **when it is 
 
 | ID | Requirement | Pri | Verification |
 |---|---|---|---|
-| NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | benchmark test with fake backend |
+| NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | `scripts/bench_gateway.py`, `test_bench_gateway.py`; measured ~59 ms Strict (misses), 6–7 ms off |
 | NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | benchmark `--cache-test` through the gateway |
 | NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | benchmark through the gateway |
 | NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | CI measurement |
