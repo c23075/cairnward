@@ -29,7 +29,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-GW-1 | OpenAI-compatible `/v1/chat/completions` (streaming, tool calls), `/v1/models`, `/v1/embeddings` | M | M0 | integration tests with fake backends; conformance against the OpenAI SDK |
 | FR-GW-2 | Per-client API keys (`cairnward client add`); requests attributed to a client in audit/vault | M | M0 | `test_gateway.py` |
 | FR-GW-3 | Virtual models `cw/<environment>:<effort>` resolve environment + effort settings | M | M1 | `test_gateway.py` |
-| FR-GW-4 | Per-client, per-run and per-environment budgets (tokens, requests, time) | M | M2 | `test_scheduling.py::test_run_budget_enforced` — ✅ runs (requests, tokens, minutes); per-client limits open |
+| FR-GW-4 | Per-client, per-run and per-environment budgets (tokens, requests, time) | M | M2 | `test_scheduling.py` — ✅ runs (requests, tokens, minutes); clients (requests and tokens per day) |
 | FR-GW-5 | Context warning: request expected to need > 60 s prompt processing is flagged (dashboard + optional rejection) | S | M2 | unit with benchmark profile — ✅ |
 | FR-GW-6 | Ollama-compatible endpoint | W | L | — |
 | FR-GW-7 | Gateway never modifies a conversation's prompt prefix (additions go at the end) | M | M0 | `test_gateway.py`, `test_vault_reconstruction.py` (byte-identical prefixes across turns) |

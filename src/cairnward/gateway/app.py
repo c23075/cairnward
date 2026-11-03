@@ -35,6 +35,7 @@ from cairnward.gateway.recorder import matching_conversation, record_exchange
 from cairnward.gateway.scheduling import (
     SLOW_SECONDS,
     BenchProfile,
+    ClientUsage,
     Scheduler,
     conversation_key,
     estimate_tokens,
@@ -120,6 +121,7 @@ class GatewayDeps:
     profile: BenchProfile | None = None
     mcp: Any = None  # McpHub: the MCP proxy (spec §4.2), when configured
     provenance: ProvenanceTracker = field(default_factory=ProvenanceTracker)
+    client_usage: ClientUsage | None = None
 
 
 def _options(resolved: Resolved, req: ChatCompletionRequest) -> GenerationOptions:
@@ -188,6 +190,36 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         ident = identity(request)
         return ident[0] if ident else None
 
+    client_usage = deps.client_usage or ClientUsage.at(deps.config.paths.state_dir)
+
+    async def client_over_budget(
+        client: str, run_id: str | None, environment: str | None
+    ) -> JSONResponse | None:
+        """A 429 if this client has used its daily budget (FR-GW-4), audited."""
+        client_cfg = deps.config.clients.clients.get(client)
+        if client_cfg is None:
+            return None
+        why = await asyncio.to_thread(client_usage.exceeded, client, client_cfg.budget)
+        if why is None:
+            return None
+        if deps.engine.audit:
+            await asyncio.to_thread(
+                deps.engine.audit.append,
+                "budget.exceeded",
+                actor=f"agent:{client}" if run_id else f"client:{client}",
+                run_id=run_id,
+                client=client,
+                environment=environment,
+                details={"reason": why},
+            )
+        return _error(429, f"{why}; change the limit in clients.toml", "budget_exceeded")
+
+    async def count_for_client(client: str, tokens: int = 0) -> None:
+        client_cfg = deps.config.clients.clients.get(client)
+        limits = client_cfg.budget if client_cfg else None
+        if limits and (limits.max_requests_per_day or limits.max_tokens_per_day):
+            await asyncio.to_thread(client_usage.add, client, tokens)
+
     async def redact(
         backend: str,
         environment: str,
@@ -252,6 +284,9 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             resolved = resolve_embedding(cfg, body.model, default_environment=default_env)
         except UnknownModel as exc:
             return _error(404, str(exc), "invalid_request_error", "model_not_found")
+        if over := await client_over_budget(client, run_id, resolved.environment):
+            return over
+        await count_for_client(client)
         inputs = [body.input] if isinstance(body.input, str) else list(body.input)
         action = Action(
             kind="model.call",
@@ -336,6 +371,8 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             return _error(
                 429, f"{why}; raise the limit with cairnward run --max-...", "budget_exceeded"
             )
+        if over := await client_over_budget(client, run_id, resolved.environment):
+            return over
 
         tool_tokens = estimate_tokens(json.dumps(body.tools)) if body.tools else 0
         est = scheduler.estimate(resolved.backend, body.messages, tool_tokens)
@@ -525,6 +562,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                 if usage_of_run is not None:
                     usage_of_run.requests += 1
                     usage_of_run.tokens += int(usage.get("total_tokens") or 0)
+                await count_for_client(client, int(usage.get("total_tokens") or 0))
             details: dict[str, Any] = {
                 **slot_info,
                 "queued_s": round(queued["s"], 3),

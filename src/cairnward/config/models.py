@@ -351,6 +351,13 @@ AgentProfile = Literal["aider", "qwen-code", "opencode", "goose", "generic"]
 ChatProfile = Literal["open-webui", "jan", "librechat", "anythingllm", "generic"]
 
 
+class ClientBudget(_Strict):
+    """Limits for one client per calendar day, its runs included (FR-GW-4); unset = unlimited."""
+
+    max_requests_per_day: int | None = Field(default=None, ge=1)
+    max_tokens_per_day: int | None = Field(default=None, ge=1)
+
+
 class Client(_Strict):
     kind: Literal["chat", "agent"]
     profile: str = "generic"
@@ -358,6 +365,7 @@ class Client(_Strict):
     enabled: bool = True
     backend: str | None = Field(default=None, description="this client's backend (all roles)")
     models: dict[Role, str] = Field(default_factory=dict, description="this client's models")
+    budget: ClientBudget = ClientBudget()
 
     @model_validator(mode="after")
     def _profile_matches_kind(self) -> Client:
