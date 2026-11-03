@@ -129,6 +129,15 @@ def test_reply_room_comes_out_of_the_passages() -> None:
     assert len(tight) < len(roomy)
 
 
+async def test_reasoning_with_thinking_off_is_not_taken_as_the_answer(env: Any) -> None:
+    """The shape of a real reply (qwen3:30b with think=false): reasoning in the content,
+    no opening tag, then a closing one. Numbers in it must not count as citations."""
+    cfg, engine, backends, fake, _ = env
+    fake.reply = "We are given passages. Passage [3] looks useful.\n</think>\n\nYes, it helps [1]."
+    answer = await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4)
+    assert answer.text == "Yes, it helps [1]." and [s.n for s in answer.sources] == [1]
+
+
 async def test_answer_with_sources(env: Any) -> None:
     cfg, engine, backends, fake, audit = env
     fake.reply = (

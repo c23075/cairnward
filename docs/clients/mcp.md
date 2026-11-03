@@ -50,3 +50,28 @@ Tools appear as `<server>__<tool>`, e.g. `notes__delete_note`. Server logs: `log
 - `tools = ["research"]` in an environment adds `cairnward__lit_search`: passages from that environment's literature libraries (`cairnward library ...`), with titles and page numbers.
 - `tools = ["vault"]` adds `cairnward__lock_conversation`, which you confirm (and give the passphrase) in Cairnward, never in the chat.
 - Skills: put a folder with a `SKILL.md` under `~/.config/cairnward/skills/<name>/` and list it in the environment's `skills = [...]`. Clients that support MCP prompts show it as a prompt; its other files are MCP resources.
+
+## Remote servers that need a sign-in
+
+For a remote server that uses OAuth, set this in `mcp.toml`:
+
+```toml
+[servers.notes]
+url = "https://mcp.example.org/mcp"
+auth = "oauth"
+oauth_scope = "notes"  # optional
+```
+
+Add it to an environment's `mcp_servers`, allow its host and the sign-in server's host in that environment's network rules, then sign in once with the server running:
+
+```bash
+uv run cairnward mcp login notes
+```
+
+Your browser opens the sign-in page (`--no-browser` only prints the address). Tokens are stored in the state folder, owner-only on Linux and macOS (Windows has no such file modes, so there they rely on the folder's own permissions), and Cairnward refreshes them by itself. If a refresh is refused, the server's tools report that you need to sign in again. To forget them:
+
+```bash
+uv run cairnward mcp logout notes
+```
+
+Tested against a fake authorization server only, with the real MCP SDK; no real provider has been tried.

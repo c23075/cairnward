@@ -592,6 +592,11 @@ class McpServer(_Strict):
         default_factory=dict,
         description="HTTP headers for a remote server; secrets as ${env:NAME}, never literal",
     )
+    auth: Literal["none", "oauth"] = Field(
+        default="none",
+        description="oauth: sign in once with `cairnward mcp login <server>` (remote only)",
+    )
+    oauth_scope: str | None = Field(default=None, description="scopes to ask for at sign-in")
     env: dict[str, str] = Field(default_factory=dict, description="fixed environment variables")
     cwd: str = Field(default="{data}", description="working folder: {data} or {workspace}")
     version: str = Field(default="", description="the version you reviewed (shown, audited)")
@@ -629,8 +634,13 @@ class McpServer(_Strict):
                         f"header '{name}' looks like a secret: write it as "
                         '"Bearer ${env:NAME}" and set NAME in your environment'
                     )
+            if self.auth == "oauth" and any(k.lower() == "authorization" for k in self.headers):
+                raise ValueError("with auth = \"oauth\" Cairnward sends the Authorization "
+                                 "header itself: remove it from headers")  # fmt: skip
         elif self.headers:
             raise ValueError("headers are for remote servers (url)")
+        elif self.auth != "none":
+            raise ValueError('auth = "oauth" is for remote servers (url)')
         if (self.pin_file is None) != (self.sha256 is None):
             raise ValueError("pin_file and sha256 go together")
         if self.cwd not in ("{data}", "{workspace}"):
