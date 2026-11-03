@@ -26,6 +26,9 @@ from pathlib import Path
 from typing import Any
 
 PREFIX = "openai/cw/"
+# Per model call. The library's default is 60 s with retries, but a single answer takes
+# minutes on a CPU and may first wait in the gateway's queue.
+CALL_TIMEOUT_S = 3600.0
 
 
 def _walk(value: Any, path: str = "") -> Any:
@@ -75,30 +78,26 @@ def guard(settings: dict[str, Any], gateway: str) -> list[str]:
     return problems
 
 
+def llm_config(model: str, gateway: str, key: str) -> dict[str, Any]:
+    params = {"model": model, "api_base": gateway, "api_key": key, "timeout": CALL_TIMEOUT_S}
+    return {"model_list": [{"model_name": model, "litellm_params": params}]}
+
+
 def build_settings(spec: dict[str, Any], key: str) -> Any:
     from paperqa import Settings
     from paperqa.settings import AgentSettings, AnswerSettings, ParsingSettings
 
     gw = spec["gateway"]
     main, fast, embed = (PREFIX + spec["models"][k] for k in ("main", "fast", "embed"))
-
-    def llm_config(model: str) -> dict[str, Any]:
-        return {
-            "model_list": [
-                {
-                    "model_name": model,
-                    "litellm_params": {"model": model, "api_base": gw, "api_key": key},
-                }
-            ]
-        }
+    main_cfg, fast_cfg = llm_config(main, gw, key), llm_config(fast, gw, key)
 
     return Settings(
-        llm=main, llm_config=llm_config(main),
-        summary_llm=fast, summary_llm_config=llm_config(fast),
+        llm=main, llm_config=main_cfg,
+        summary_llm=fast, summary_llm_config=fast_cfg,
         embedding=embed, embedding_config={"kwargs": {"api_base": gw, "api_key": key}},
         parsing=ParsingSettings(use_doc_details=False, multimodal=0, enrichment_llm=fast,
-                                enrichment_llm_config=llm_config(fast)),
-        agent=AgentSettings(agent_llm=main, agent_llm_config=llm_config(main)),
+                                enrichment_llm_config=fast_cfg),
+        agent=AgentSettings(agent_llm=main, agent_llm_config=main_cfg),
         answer=AnswerSettings(evidence_k=int(spec.get("evidence_k", 10)),
                               evidence_skip_summary=bool(spec.get("skip_summary", False)),
                               max_concurrent_requests=1),

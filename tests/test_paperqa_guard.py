@@ -35,6 +35,15 @@ def good() -> dict[str, Any]:
     }  # fmt: skip
 
 
+def test_model_calls_allow_for_a_slow_machine() -> None:
+    """The library's 60 s default failed on the reference machine (an answer takes minutes)."""
+    w = worker()
+    (entry,) = w.llm_config("openai/cw/e", GW, "key")["model_list"]
+    assert entry["litellm_params"]["timeout"] >= 1800
+    assert entry["litellm_params"]["api_base"] == GW
+    assert w.guard({**good(), "llm_config": w.llm_config("openai/cw/e", GW, "key")}, GW) == []
+
+
 def test_guard_accepts_cairnward_only() -> None:
     w = worker()
     assert w.guard(good(), GW) == []
