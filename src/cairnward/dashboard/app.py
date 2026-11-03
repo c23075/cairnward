@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import secrets
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -121,6 +122,12 @@ class MoveIn(BaseModel):
     folder_id: str | None = None
 
 
+class BackupSettingsIn(BaseModel):
+    mode: str = Field(max_length=20)
+    repository: str | None = Field(default=None, max_length=1000)
+    interval_hours: int | None = None
+
+
 class PrivacyChangeIn(BaseModel):
     scope: str = Field(min_length=1, max_length=64)
     setting: str = Field(min_length=1, max_length=40)
@@ -155,6 +162,7 @@ def dashboard_app(
     mcp: Any = None,
     isolated: bool = False,
     jobs: Any = None,
+    backup_now: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward dashboard", docs_url=None, redoc_url=None, openapi_url=None)
     port = cfg.main.server.dashboard_port
@@ -420,6 +428,51 @@ def dashboard_app(
         convs = v.list_conversations(environment=env, only_deleted=trash, folder_id=folder)
         return [conv_dict(c) for c in convs]
 
+    backup_job: dict[str, Any] = {"running": False, "error": None, "saved": False}
+
+    @app.post("/api/backup/run", status_code=202)
+    def backup_run() -> dict[str, bool]:
+        """Start a backup; `/api/backup` shows when it's done (it can take minutes)."""
+        from cairnward import backup
+
+        b = cfg.main.backup
+        if b.mode == "none" or not b.repository:
+            raise HTTPException(400, "backups are off: set a mode and a folder first")
+        if backup_job["running"]:
+            raise HTTPException(409, "a backup is already running")
+        backup_job.update(running=True, error=None)
+        if audit is not None:
+            audit.append("backup.requested", actor="user (dashboard)")
+
+        def work() -> None:
+            try:
+                (backup_now or (lambda: backup.run_now(cfg)))()
+            except Exception as exc:  # shown in the view; a failed backup can't stop the server
+                backup_job["error"] = str(exc)[:500]
+            finally:
+                backup_job["running"] = False
+
+        threading.Thread(target=work, daemon=True).start()
+        return {"started": True}
+
+    @app.post("/api/backup/settings")
+    def backup_settings(body: BackupSettingsIn) -> dict[str, Any]:
+        """Write the backup mode and folder (takes effect on restart), audited."""
+        from cairnward.config.edit import EditError, change_backup
+        from cairnward.config.loader import load_config
+
+        try:
+            _new, changed = change_backup(load_config(cfg.paths), body.mode, body.repository,
+                                          body.interval_hours)  # fmt: skip
+        except EditError as exc:
+            raise HTTPException(400, str(exc)) from None
+        if changed:
+            backup_job["saved"] = True
+            if audit is not None:  # which fields, not the path
+                audit.append("backup.settings", actor="user (dashboard)",
+                             details={"changed": changed, "mode": body.mode})  # fmt: skip
+        return {"changed": changed, "restart_needed": bool(changed)}
+
     @app.get("/api/backup")
     def backup_state() -> dict[str, Any]:
         """Mode and purged conversations still to remove from old backups (FR-SYNC-8)."""
@@ -458,6 +511,9 @@ def dashboard_app(
                 for p in pending[:50]
             ],
             "last": backup.last_run(cfg),
+            "running": backup_job["running"],
+            "run_error": backup_job["error"],
+            "settings_saved": backup_job["saved"],
             "cloud_warning": backup.cloud_warning(Path(repo).expanduser())
             if repo and kind is None
             else None,

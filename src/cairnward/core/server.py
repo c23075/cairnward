@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 import uvicorn
 
 from cairnward.audit import AuditLog, enabled_for, record_settings
@@ -231,6 +232,7 @@ def _core_parts(
     log: Log = lambda m: None,
     deep_executor: Any = None,
     docling_runner: Any = None,
+    backup_now: Any = None,
 ) -> tuple[Any, Any, McpHub, Any]:
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     run_keys = RunKeys()
@@ -302,7 +304,7 @@ def _core_parts(
     )
     auth = DashboardAuth()
     dashboard = dashboard_app(cfg, auth=auth, audit=audit, vault=vault, inbox=inbox, mcp=hub,
-                              isolated=isolated, jobs=jobs)  # fmt: skip
+                              isolated=isolated, jobs=jobs, backup_now=backup_now)  # fmt: skip
     management = management_app(
         cfg,
         audit=audit,
@@ -562,8 +564,13 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
 
             return await asyncio.to_thread(dl.run_worker, cfg, environment, files, log=log)
 
-        ctl = _uds_server(control_app(sessions, mcp=bridge, deep=deep, docling=docling),
-                          socks["egress"])  # fmt: skip
+        def backup_now() -> dict[str, Any]:
+            from cairnward import backup
+
+            return backup.run_now(cfg, log)
+
+        ctl = _uds_server(control_app(sessions, mcp=bridge, deep=deep, docling=docling,
+                                      backup_now=backup_now), socks["egress"])  # fmt: skip
 
         with tempfile.TemporaryDirectory(prefix="cairnward-core-") as tmp:
             settings = core_sandbox(cfg).write(Path(tmp) / "srt.json")
@@ -645,6 +652,24 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
 # ------------------------------------------------------------------ isolated: process B
 
 
+def remote_backup(control_socket: str) -> Any:
+    """The isolated core can't reach the backup folder: the outer process runs the backup."""
+
+    def run() -> dict[str, Any]:
+        from cairnward.backup import BackupError
+
+        transport = httpx.HTTPTransport(uds=control_socket)
+        with httpx.Client(transport=transport, base_url="http://egress",
+                          timeout=httpx.Timeout(None, connect=10)) as c:  # fmt: skip
+            resp = c.post("/v1/backup/run")
+        if resp.status_code != 200:
+            raise BackupError(resp.json().get("detail", resp.text))
+        result: dict[str, Any] = resp.json()
+        return result
+
+    return run
+
+
 def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     """Inside the sandbox: gateway and management on Unix sockets."""
     socks = sockets(cfg)
@@ -667,6 +692,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             log=log,
             deep_executor=RemoteExecutor(str(egress_control)),
             docling_runner=RemoteDocling(str(egress_control)),
+            backup_now=remote_backup(str(egress_control)),
         )
         gw = _uds_server(gateway, socks["gateway"])
         mgmt = _uds_server(management, socks["management"])

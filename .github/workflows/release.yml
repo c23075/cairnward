@@ -1,0 +1,63 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds, checks and signs the release, and leaves a draft for a
+# person to read and publish. Nothing is published to a package index.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # create the draft release
+      id-token: write  # Sigstore's keyless signing identity
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+      - name: Check that the tag matches the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python3 scripts/release_check.py version "$TAG"
+      - name: Build
+        run: uv build --out-dir dist
+      - name: Check the wheel
+        run: python3 scripts/release_check.py wheel dist/*.whl
+      - name: Install the wheel in a clean environment and run it
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/smoke"
+          uv pip install --python "$RUNNER_TEMP/smoke/bin/python" dist/*.whl
+          "$RUNNER_TEMP/smoke/bin/cairnward" --version
+      - name: Write the SBOM (runtime dependencies)
+        run: |
+          uv export --no-dev --format cyclonedx1.5 -o dist/cairnward.cdx.json
+          python3 scripts/release_check.py sbom dist/cairnward.cdx.json
+      - name: Refuse to sign a private repository by accident
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+          ALLOWED: ${{ vars.ALLOW_PUBLIC_SIGNING_LOG }}
+        run: |
+          if [ "$PRIVATE" = "true" ] && [ "$ALLOWED" != "true" ]; then
+            echo "::error::Sigstore writes this repository's name and the signer's identity to a public log. Make the repository public, or set the repository variable ALLOW_PUBLIC_SIGNING_LOG to true."
+            exit 1
+          fi
+      - name: Sign with Sigstore
+        run: |
+          for f in dist/*; do
+            uvx sigstore@4.5.1 sign --bundle "$f.sigstore.json" "$f"
+          done
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --draft --generate-notes --title "$TAG" --verify-tag dist/*

@@ -101,6 +101,60 @@ for (const scheme of ["light", "dark"]) {
     if (found.length) out.axe[`${scheme}:${view}`] = found;
   }
 }
+// axe-core with each kind of dialog open, light and dark: the modal is what's on screen then
+out.axeDialogs = {};
+const axeHere = () => page.evaluate(async () => {
+  const r = await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] } });
+  return r.violations.map(v => `${v.id} (${v.impact}): ${v.nodes.slice(0, 3).map(n => n.target.join(" ")).join(" | ")}`);
+});
+const everyField = () => import("/static/lib.js").then(({ ask }) => { window.dialogDone = ask("Every kind of field", {
+  text: ["A paragraph of explanation.", "Another paragraph."], warn: "A warning shown in the dialog.", danger: true, confirm: "Go ahead",
+  fields: [{ name: "a", label: "A passphrase", type: "password", required: true },
+           { name: "b", label: "A choice", options: [{ value: "1", label: "One" }, { value: "2", label: "Two" }] },
+           { name: "c", label: "Some text", value: "written" }] }); });
+for (const scheme of ["light", "dark"]) {
+  await page.emulateMedia({ colorScheme: scheme });
+  await go("vault");
+  await page.keyboard.press("?");
+  await page.waitForSelector("dialog[open] >> text=Keyboard shortcuts");
+  const help = await axeHere();
+  if (help.length) out.axeDialogs[`${scheme}:shortcuts`] = help;
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await page.evaluate(everyField);
+  await page.waitForSelector("dialog[open] >> text=Every kind of field");
+  const fields = await axeHere();
+  if (fields.length) out.axeDialogs[`${scheme}:every field`] = fields;
+  await page.click("dialog[open] button:has-text('Cancel')");
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+  await go("settings");
+  await page.selectOption("select[aria-label='mcp_pinning (all environments)']", "off");
+  await page.waitForSelector("dialog[open] >> text=Weaken a protection?");
+  const weaken = await axeHere();
+  if (weaken.length) out.axeDialogs[`${scheme}:weaken`] = weaken;
+  await page.click("dialog[open] button:has-text('Cancel')");
+  await page.waitForSelector("dialog[open]", { state: "detached" });
+}
+await page.emulateMedia({ colorScheme: "light" });
+
+// keyboard behaviour axe can't judge: focus goes in, stays in, comes back
+await go("settings");
+await page.focus("a[data-view=settings]");
+out.focusBefore = await page.evaluate(() => { const e = document.activeElement; e.dataset.opener = "1"; return e.textContent; });
+await page.evaluate(everyField);
+await page.waitForSelector("dialog[open]");
+out.dialogName = await page.evaluate(() => {
+  const d = document.querySelector("dialog[open]");
+  const by = d.getAttribute("aria-labelledby");
+  return d.getAttribute("aria-label") || (by && document.getElementById(by)?.textContent) || null;
+});
+out.focusInDialog = await page.evaluate(() => !!document.activeElement.closest("dialog[open]"));
+for (let i = 0; i < 12; i++) await page.keyboard.press("Tab");
+out.focusStaysIn = await page.evaluate(() => !!document.activeElement.closest("dialog[open]") || document.activeElement === document.body);
+await page.keyboard.press("Escape");
+await page.waitForSelector("dialog[open]", { state: "detached" });
+out.focusReturned = await page.evaluate(() => document.activeElement.dataset.opener === "1");
+
 // accessibility basics on the settings page and the vault page
 for (const view of ["vault", "audit", "settings"]) {
   await go(view);

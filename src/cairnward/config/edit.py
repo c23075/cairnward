@@ -46,7 +46,7 @@ def _toml(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)  # strings, lists, numbers, booleans
 
 
-def set_key(path: Path, table: str, key: str, value: str | None) -> None:
+def set_key(path: Path, table: str, key: str, value: str | int | None) -> None:
     """Set (or with None remove) `key` in `[table]` of a TOML file, keeping everything else."""
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     start = next((i for i, x in enumerate(lines) if x.strip() == f"[{table}]"), None)
@@ -65,6 +65,51 @@ def set_key(path: Path, table: str, key: str, value: str | None) -> None:
         elif value is not None:
             lines.insert(start + 1, f"{key} = {_toml(value)}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def change_backup(cfg: Config, mode: str, repository: str | None,
+                  interval_hours: int | None = None) -> tuple[Config, list[str]]:  # fmt: skip
+    """Set the backup mode and folder; returns the new configuration and what changed.
+    Only a folder can be set here: a remote repository names a bucket and may need
+    credentials, so it stays a change made in the file, and an existing one is left alone."""
+    from cairnward import backup
+
+    b = cfg.main.backup
+    if mode not in ("none", "on_demand", "auto"):
+        raise EditError("mode must be none, on_demand or auto")
+    repository = (repository or "").strip() or None
+    remote = backup.remote_kind(cfg) is not None
+    if repository not in (None, b.repository) and not repository.startswith(("/", "~")):
+        raise EditError("use a full path to a folder, like /mnt/backup/cairnward (a remote "
+                        "repository is set in cairnward.toml)")  # fmt: skip
+    if remote and repository is None:
+        repository = b.repository
+    if mode != "none" and not repository:
+        raise EditError(f"{mode} needs a folder to back up to")
+    path = cfg.paths.main_config
+    before = path.read_text(encoding="utf-8") if path.exists() else None
+    wanted: dict[str, str | int | None] = {"mode": mode, "repository": repository}
+    if interval_hours is not None:
+        wanted["interval_hours"] = interval_hours
+
+    def undo() -> None:
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(before, encoding="utf-8")
+
+    try:
+        for key, value in wanted.items():
+            set_key(path, "backup", key, value)
+        new = load_config(cfg.paths)
+    except ConfigError as exc:
+        undo()
+        raise EditError(f"not saved, the configuration wouldn't load: {exc}") from None
+    except OSError as exc:
+        undo()
+        raise EditError(f"can't write {path.name}: {exc.strerror or exc} (edit the file by "
+                        "hand, or use the CLI outside the sandbox)") from None  # fmt: skip
+    return new, [k for k, v in wanted.items() if getattr(b, k) != v]
 
 
 def _environment_file(cfg: Config, name: str) -> Path:
