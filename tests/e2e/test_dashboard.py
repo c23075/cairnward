@@ -190,3 +190,7 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
     toml = (paths.config_dir / "cairnward.toml").read_text()
     assert 'network = "off"' in toml and 'approvals = "off"' in toml
     assert out["axe"] == {}, json.dumps(out["axe"], indent=1)
+    assert out["axeDialogs"] == {}, json.dumps(out["axeDialogs"], indent=1)
+    assert out["dialogName"] == "Every kind of field"
+    assert out["focusInDialog"] is True and out["focusStaysIn"] is True
+    assert out["focusReturned"] is True
