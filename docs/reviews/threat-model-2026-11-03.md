@@ -29,10 +29,10 @@ Added to the model as T-22 to T-27.
 | T-23 | A steered model puts private text into an academic search query | Opt-in per environment, allow-listed hosts, audited. The query text still leaves the machine, and egress can't read it | Medium |
 | T-24 | Research library stored in plain text and can't be locked | Owner-only folder, included in encrypted backups. Locking a conversation doesn't cover a library it used | Medium |
 | T-25 | Third-party engines parse untrusted PDFs | PaperQA2 and Docling sandboxed with isolation on; Presidio runs inside the core's sandbox. PaperQA2's cache is a `pickle` file | Low |
-| T-26 | Model reasoning delivered to clients as if it were the answer | **No control at the gateway.** See below | **High** |
+| T-26 | Model reasoning delivered to clients as if it were the answer | `medium` now asks for reasoning, so it stays separate. See below | Was high; now low |
 | T-27 | Losing the only copy of the backup password | By default it's only in the state folder, so losing that disk makes backups useless. Stated in `backup.py` but not at setup | Medium |
 
-### T-26: the finding to act on
+### T-26: the most serious finding
 
 With reasoning "off", `qwen3:30b` still reasons, in the visible reply, ending with a stray
 `</think>` (seen calling Ollama directly, so it isn't caused by the gateway). The gateway passes
@@ -66,7 +66,7 @@ kept in the vault. It's also the main cost of the slow coding run (see
 
 ## Still open after this review
 
-1. T-26: decide how the gateway handles reasoning (needs a measurement on a quiet CPU).
+1. T-26: a custom effort level with thinking off, on a model that ignores it, still leaks.
 2. T-27: say at setup that the backup password must be kept somewhere else too.
 3. Tighten the file modes above.
 4. Write an injection test corpus, or drop the idea on purpose.

@@ -144,6 +144,20 @@ async def test_virtual_model_sets_model_and_options(gw: Callable[..., Any]) -> N
     assert g.ollama.requests[1]["model"] == "qwen3:30b" and g.ollama.requests[1]["think"] is True
 
 
+async def test_main_model_reasoning_stays_out_of_the_answer(gw: Callable[..., Any]) -> None:
+    """Asked not to reason, the main model writes its reasoning into the answer, where a client
+    takes it for the answer. Asked to, it comes back separately (real replies from qwen3:30b)."""
+    g = await gw()
+    g.ollama.reply, g.ollama.thinking = "The answer.", "We are given a question. Maybe [1]..."
+    for effort in ("medium", "high"):
+        resp = await g.chat(f"cw/coding:{effort}", USER)
+        assert g.ollama.requests[-1]["model"] == "qwen3:30b"
+        assert g.ollama.requests[-1]["think"] is True
+        message = resp.json()["choices"][0]["message"]
+        assert message["content"] == "The answer."
+        assert "Maybe" in message["reasoning_content"]
+
+
 async def test_messages_forwarded_unchanged(gw: Callable[..., Any]) -> None:
     """Prefix stability (FR-GW-7): the backend sees exactly the client's messages."""
     g = await gw({"fastenv": 'backend = "llama"\n'})

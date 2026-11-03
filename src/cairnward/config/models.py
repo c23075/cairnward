@@ -443,7 +443,9 @@ def default_effort_levels() -> dict[str, EffortLevel]:
         "low": EffortLevel(model_role="fast", thinking=False, max_tool_steps=3, order=10),
         "medium": EffortLevel(
             model_role="main",
-            thinking=False,
+            # The main model reasons either way: asked not to, it writes the reasoning into its
+            # answer, at the same cost (docs/bench/results-2026-11-03-measurements.md).
+            thinking=True,
             max_tool_steps=10,
             subagents=SubagentLimits(max=2),
             order=20,

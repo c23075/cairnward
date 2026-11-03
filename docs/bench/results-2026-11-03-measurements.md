@@ -1,21 +1,44 @@
-# Measurements from the running system, 2026-11-03
+# Measurements on the reference machine, 2026-11-03
 
-Taken without running anything new, while other work was using the CPU: read from `/proc`, the
-audit log, the vault (lengths only) and CI's coverage report. Timed measurements wait for a quiet
-CPU, because their numbers would mean nothing under load.
+AMD Ryzen 3 3200G (4 threads, 29 GB RAM, no GPU), ext4, nothing else running: real `cairnward serve`
+processes on their own ports and folders, created fresh for each measurement. Requests come from a
+real client over TCP. Overhead uses a stand-in model server that answers at once; the rest uses real
+Ollama. Figures are medians.
 
-## Core memory (NFR-P5): meets the target
+## Against the targets
 
-Target: core ≤ 500 MB without optional workers.
+| Requirement | Target | Isolated (the normal setup) | Not isolated | Result |
+|---|---|---|---|---|
+| NFR-P5 core memory | ≤ 500 MB | 122 MB | not measured | **meets** |
+| NFR-P5 start time | ≤ 3 s | **5.3 s** | 2.7 s | **misses** when isolated |
+| NFR-P2 overhead, Strict | ≤ 50 ms | **105 ms** | 59 ms | **misses** |
+| NFR-P2 overhead, all off | ≤ 10 ms | not applicable (isolation is a protection) | 7 ms | **meets** |
+| NFR-P6 first token, fast model | ≤ 15 s | 11 to 14 s | 10 s direct, no gateway | **meets** |
+| NFR-P6 first token, main model | ≤ 30 s | 22 s | 21 s direct, no gateway | **meets** |
+| NFR-P3 cache reuse | ≥ 10× | **19.6×** (95 s to 4.8 s, 2,048 tokens) | not measured | **meets** |
 
-| Process | Current | Peak since start |
-|---|---|---|
-| Core, in the sandbox | 122 MB | 122 MB |
-| Outer process (runs egress) | 114 MB | 114 MB |
+First-token times use a 512-token prompt with the model already loaded; loading the main model first
+adds about 70 s. One of three fast-model runs through the gateway generated far more slowly than the
+others (19 tokens in 30 s); its first token still met the target, and the cause wasn't looked into.
 
-Measured after a restart and one review job, with no Presidio. The outer process and core together
-are 236 MB. The sandbox's own helper processes aren't counted. **Start time (≤ 3 s) isn't measured
-yet.**
+## Where Strict's overhead goes
+
+Time for a chat request, with a stand-in that answers in under 1 ms:
+
+| | No audit or vault | Audit only | Vault only | Strict |
+|---|---|---|---|---|
+| Not isolated | 8 ms | 48 ms | 22 ms | 59 ms |
+| Isolated | 60 ms | 95 ms | 71 ms | 107 ms |
+
+- **Audit writes:** about 35 to 40 ms, waiting for the disk so the record exists before the effect.
+- **The sandbox's route to the model server:** about 50 ms. Each chat makes two calls out (the memory
+  check and the chat), through the sandbox's proxy and egress. `/health`, which makes neither, takes
+  1 ms in both modes, so the relay in front of the core isn't the cost.
+- **Vault writes:** about 10 to 15 ms.
+
+Each of the first two is itself about the size of the whole target. Meeting 50 ms would mean
+weakening the audit guarantee or changing how the core reaches models. A model call here takes
+minutes, so 100 ms can't be noticed. **Proposed: change the target, not the code.**
 
 ## Why one Aider call took 81 minutes: mostly reasoning
 
@@ -28,15 +51,39 @@ reasoning is off:
 | Fast model (`cw/coding:low`) | 2,481 | 69 | 62 | n/a | none |
 | Second main call | 5,252 | 5,689 | 4,834 | ~1.2 | **99.7%** (25,583 of 25,663 characters) |
 
-**Known:** nearly all of the reply was reasoning, with only 72 characters after `</think>`. The
-model reasons in the visible reply even with `think: false`.
+**Known:** nearly all of the reply was reasoning, with only 72 characters after `</think>`.
+
+**Tested directly on Ollama, `qwen3:30b`, two prompts, three tries each:**
+
+| Setting | Reasoning in the answer | Tokens |
+|---|---|---|
+| `think: false` | yes, 6 of 6 | 182 to 823 |
+| `think: false` and `/no_think` in the message | yes, 6 of 6 | 90 to 485 |
+| `think: true` | no, 0 of 6; comes back separately | 149 to 295 |
+| not set | no, 0 of 6; comes back separately | 218 to 602 |
+
+So this model can't stop reasoning. "Off" only moves it into the answer. **Fix:** `medium` effort
+now asks for reasoning, so clients get only the answer. `low` stays off, because the fast model's
+replies were short with it off. A model without thinking support may refuse `medium` as it already
+does `high`.
+
+**The fix on the real thing:** the same coding task, Aider, Balanced preset, isolated server.
+
+| | Before | After (3 runs) |
+|---|---|---|
+| Result | passed | passed, 3 of 3 |
+| Time | 5,926 s | **174, 221 and 405 s** |
+| Main-model calls | 2 | 1 each |
+| Reply tokens in the last main call | 5,689 | 651 to 792 |
+| Stray reasoning in the answer | 25,583 characters | none |
+
+The answers were 94 characters with one edit block, and reasoning came back separately (about 2,500
+to 3,100 characters). "Before" is one run, and how long this model reasons varies a lot, so the size
+of the difference is rough. It's also one small task: long tasks may still overrun the context.
 
 **Very likely, not proven:** prompt plus reply came to 10,941 tokens in an 8,192-token context, so
 the model overran its context. That fits generation running at half the speed of the first call,
 because overrunning makes a model server drop text and read again. No separate run confirmed it.
-
-**Not known:** whether turning reasoning off is possible on this model at all, whether a token limit
-per request would help or would just cut replies off, and how much of it comes from Aider's prompt.
 
 ## Coverage (NFR-MAINT-1): every counted package at 80% or more
 

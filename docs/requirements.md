@@ -163,10 +163,10 @@ All security requirements below describe what each protection does **when it is 
 
 | ID | Requirement | Pri | Verification |
 |---|---|---|---|
-| NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | `scripts/bench_gateway.py`, `test_bench_gateway.py`; measured ~59 ms Strict (misses), 6–7 ms off |
-| NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | benchmark `--cache-test` through the gateway |
-| NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | benchmark through the gateway |
-| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | measured 122 MB, `docs/bench/results-2026-11-03-measurements.md`; start time not measured |
+| NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | `scripts/bench_gateway.py`, `test_bench_gateway.py`; Strict 105 ms isolated, 59 ms not (misses), all off 7 ms (meets) |
+| NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | `bench_backend.py --cache-test` through the gateway: 19.6× |
+| NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | `bench_backend.py` through the gateway: 11 to 14 s fast, 22 s main |
+| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | `docs/bench/results-2026-11-03-measurements.md`: 122 MB meets; start 5.3 s isolated misses, 2.7 s not isolated |
 | NFR-R1 | No data loss on crash; research jobs resumable | M | kill tests |
 | NFR-R2 | Audit record before every effect | M | FR-AUD-1 |
 | NFR-S1 | Strict: zero outbound connections unless allowlisted; Balanced: none without approval | M | isolation suite per preset |
