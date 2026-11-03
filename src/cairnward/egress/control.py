@@ -7,6 +7,7 @@ API on a Unix socket (owner-only permissions).
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -75,7 +76,11 @@ class DeepRunIn(BaseModel):
 
 
 def control_app(
-    sessions: Sessions, mcp: Any = None, deep: Any = None, docling: Any = None
+    sessions: Sessions,
+    mcp: Any = None,
+    deep: Any = None,
+    docling: Any = None,
+    backup_now: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="cairnward-egress control", docs_url=None, redoc_url=None)
 
@@ -122,6 +127,19 @@ def control_app(
         try:
             result: dict[str, Any] = await deep(**body.model_dump())
         except (EngineError, LibraryError) as exc:
+            raise HTTPException(400, str(exc)) from None
+        return result
+
+    @app.post("/v1/backup/run")
+    async def backup_run() -> dict[str, Any]:
+        """A backup asked for through the isolated core, which can't reach the folder."""
+        from cairnward.backup import BackupError
+
+        if backup_now is None:
+            raise HTTPException(404, "backups aren't available here")
+        try:
+            result: dict[str, Any] = await asyncio.to_thread(backup_now)
+        except BackupError as exc:
             raise HTTPException(400, str(exc)) from None
         return result
 

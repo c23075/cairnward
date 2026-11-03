@@ -51,6 +51,16 @@
     "McpServer": {
       "additionalProperties": false,
       "properties": {
+        "auth": {
+          "default": "none",
+          "description": "oauth: sign in once with `cairnward mcp login <server>` (remote only)",
+          "enum": [
+            "none",
+            "oauth"
+          ],
+          "title": "Auth",
+          "type": "string"
+        },
         "call_timeout_s": {
           "default": 120,
           "maximum": 3600,
@@ -118,6 +128,19 @@
           "minimum": 0,
           "title": "Idle Stop Minutes",
           "type": "integer"
+        },
+        "oauth_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "scopes to ask for at sign-in",
+          "title": "Oauth Scope"
         },
         "permissions": {
           "$ref": "#/$defs/McpPermissions",

@@ -397,6 +397,17 @@ def run(cfg: Config, log: Log = print) -> dict[str, Any]:
         return result
 
 
+def run_now(cfg: Config, log: Log = lambda _m: None) -> dict[str, Any]:
+    """A backup asked for by hand (the dashboard): sets up the repository the first time."""
+    b = cfg.main.backup
+    if b.mode == "none" or not b.repository:
+        raise BackupError("backups are off: set a mode and a repository first")
+    with remote_access(cfg):
+        if not initialised(cfg):
+            init(cfg, log)
+        return run(cfg, log)
+
+
 def due(cfg: Config, now: float | None = None) -> bool:
     last = last_run(cfg)
     if last is None:
