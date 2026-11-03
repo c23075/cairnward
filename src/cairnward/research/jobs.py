@@ -523,13 +523,27 @@ class JobRunner:
         text = await asyncio.to_thread(self._abstract, library, step)
         criteria = job.params.get("criteria") or "(none beyond the question)"
         chat = self.chat_for(library)  # the main model, not the fast one (D63)
-        reply = await chat.ask([
-            {"role": "system", "content": SCREEN_SYSTEM},
-            {"role": "user", "content": f"Review question: {job.params['question']}\n\n"
-                                        f"Criteria: {criteria}\n\nTitle: {step.params['title']}"
-                                        f"\n\n{text}"},
-        ], max_tokens=_reply_tokens(chat, 150))  # fmt: skip
-        return {"title": step.params["title"], **parse_screen(reply.text)}
+
+        async def decide() -> dict[str, str]:
+            reply = await chat.ask([
+                {"role": "system", "content": SCREEN_SYSTEM},
+                {"role": "user", "content": f"Review question: {job.params['question']}\n\n"
+                                            f"Criteria: {criteria}\n\n"
+                                            f"Title: {step.params['title']}\n\n{text}"},
+            ], max_tokens=_reply_tokens(chat, 150))  # fmt: skip
+            return parse_screen(reply.text)
+
+        first = await decide()
+        result = first
+        if first["decision"] == "exclude":
+            # A dropped paper is never seen again, and the model's answer on a borderline
+            # paper varies between tries: excluding takes two tries that agree.
+            second = await decide()
+            if second["decision"] != "exclude":
+                result = {"decision": "unsure", "reason": (
+                    f"Two tries disagreed, so it's read. Excluded because: {first['reason']} "
+                    f"Then {second['decision']}: {second['reason']}")[:400]}  # fmt: skip
+        return {"title": step.params["title"], **result}
 
     def _select(self, job: Job) -> dict[str, Any]:
         kept, excluded, failed = [], 0, 0

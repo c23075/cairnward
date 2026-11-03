@@ -38,6 +38,10 @@ through the isolated server (with the older prompt) showed that path working.
 
 **A second full run, through the isolated server, scored 9 of 12.** Notes, synthesis and references all worked, but screening excluded the napping paper ("focuses on napping rather than sleep duration"), which also fails its two notes checks. So 20 of 20 on repeated tries doesn't mean it never happens: the prompt still sometimes excludes a borderline paper. The exclusion and its reason are shown in the job's result. That run's screening took 4 to 7 minutes per paper, slower than the about 2 minutes above; other work may have been using the CPU.
 
+**So excluding now takes two tries that agree.** A disagreement is read as "unsure", with both reasons shown. It costs one more call only for papers the first try excludes. A paper excluded on both tries is still dropped, so this lowers the chance of losing a borderline paper without removing it.
+
+**Through the isolated server with the second opinion: 12 of 12, in 23 minutes.** The napping paper was included on its first try, so no paper reached the disagreement path here: the off-topic paper was excluded on both tries, which shows the second try running on a real model, not that it rescues a borderline paper. That path is covered by a test with scripted answers. Screening took 1 to 3 minutes per paper.
+
 **Cost:** about 2 minutes per paper on average (25 to 37 s off topic, up to 5 minutes for a
 borderline paper), so about 3.5 hours per 100 papers, against about 7 s per paper before.
 

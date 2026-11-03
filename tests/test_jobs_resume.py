@@ -253,6 +253,43 @@ async def test_review_that_excludes_everything_says_so(lib: Paths, tmp_path: Pat
     assert "**Check:** screening excluded every paper" in result and "--no-screen" in result
 
 
+async def test_excluding_takes_two_tries_that_agree(lib: Paths, tmp_path: Path) -> None:
+    """The model's answer on a borderline paper varies, and a dropped paper is never seen
+    again. Every paper here says exclude first; only the agreed ones stay excluded."""
+    answers = iter([
+        ("exclude", "off topic one"), ("exclude", "off topic two"),
+        ("exclude", "about naps"), ("include", "naps are sleep"),
+        ("exclude", "not clear"), ("unsure", "can't tell"),
+    ])  # fmt: skip
+
+    class Borderline(FakeChat):
+        async def ask(self, messages: list[dict[str, Any]], *, max_tokens: int = 700) -> Reply:
+            if messages[0]["content"].startswith("You screen papers"):
+                self.kinds.append("screen")
+                decision, reason = next(answers)
+                return Reply(json.dumps({"decision": decision, "reason": reason}), "m", 5, 5, 0.01)
+            return await super().ask(messages, max_tokens=max_tokens)
+
+    chat = Borderline()
+
+    async def no_ask(*a: Any, **k: Any) -> None:
+        raise AssertionError("not used")
+
+    r = JobRunner(JobStore(lib.data_dir), research=lambda: Research.open(lib), ask=no_ask,
+                  chat_for=lambda library, effort=None: chat)  # fmt: skip
+    job = r.submit(review_job("thesis", "Does sleep help working memory?"))
+    done = await r.run(r.store.load(job.id))
+    screens = [s.output for s in done.steps if s.name == "screen"]
+    assert chat.kinds.count("screen") == 6  # two tries for each exclusion
+    assert [s["decision"] for s in screens] == ["exclude", "unsure", "unsure"]
+    assert screens[0]["reason"] == "off topic one"
+    assert "Two tries disagreed" in screens[1]["reason"] and "about naps" in screens[1]["reason"]
+    assert "naps are sleep" in screens[1]["reason"]
+    select = next(s for s in done.steps if s.name == "select")
+    assert select.output == {"included": 2, "excluded": 1, "unscreened": 0}
+    assert chat.kinds.count("notes") == 2  # both disagreements were read
+
+
 def test_reply_room_includes_reasoning_only_when_it_is_on() -> None:
     from types import SimpleNamespace
 
@@ -303,7 +340,8 @@ async def test_full_review_pipeline(lib: Paths, tmp_path: Path) -> None:
     assert kinds == ["prepare", "screen", "screen", "screen", "select", "notes", "notes",
                      "synthesis", "table"]  # fmt: skip
     # all screening before any reading; both use the environment's default effort (D63)
-    assert chat.kinds == ["screen"] * 3 + ["notes"] * 2 + ["synthesis"]
+    # three papers, and a second try before the one exclusion
+    assert chat.kinds == ["screen"] * 4 + ["notes"] * 2 + ["synthesis"]
     assert set(efforts) == {None}
     assert abstract in prompts[0] and "Criteria: adults; sleep measured" in prompts[0]
     select = next(s for s in done.steps if s.name == "select")

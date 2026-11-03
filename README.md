@@ -164,7 +164,7 @@ isolated server, on [synthetic test papers](docs/bench/):
 |---|---|
 | Page-cited answers (`lit.ask`) | 8/8, nothing invented, on both engines, about 4 to 6 minutes per question |
 | Fixing a failing test with Aider | Passed, but took 99 minutes |
-| Literature review pipeline | Two full runs with the main model screening: 12/12 (not isolated) and 9/12 (isolated), where screening excluded a borderline paper |
+| Literature review pipeline | 12/12 through the isolated server, about 23 minutes for 4 papers. An earlier isolated run scored 9/12 when screening excluded a borderline paper; excluding now takes two tries that agree, which lowers that risk without removing it |
 | Gateway overhead | 6 to 7 ms with protections off (meets target); about 59 ms under Strict, without the sandbox hop (misses the 50 ms target) |
 
 **Not yet tried against the real thing,** only against stand-ins: academic APIs, Zotero, Drive
