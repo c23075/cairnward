@@ -6,6 +6,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import os
 import secrets
 import socket
 import stat
@@ -216,7 +217,8 @@ async def test_sign_in_then_the_core_uses_the_tokens(tmp_path: Path, servers: Au
     assert client["token_endpoint_auth_method"] == "none"
     assert client["redirect_uris"][0].startswith("http://127.0.0.1:")
     token_path = oauth.token_file(paths, "notes")
-    assert stat.S_IMODE(token_path.stat().st_mode) == 0o600
+    if os.name != "nt":  # Windows has no such file modes
+        assert stat.S_IMODE(token_path.stat().st_mode) == 0o600
     stored = oauth.FileTokenStorage(token_path).status()
     assert stored == {"signed_in": True, "can_refresh": True, "scope": "notes"}
     with AuditLog.open(paths) as audit:

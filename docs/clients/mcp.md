@@ -68,7 +68,7 @@ Add it to an environment's `mcp_servers`, allow its host and the sign-in server'
 uv run cairnward mcp login notes
 ```
 
-Your browser opens the sign-in page (`--no-browser` only prints the address). Tokens are stored owner-only in the state folder, and Cairnward refreshes them by itself. If a refresh is refused, the server's tools report that you need to sign in again. To forget them:
+Your browser opens the sign-in page (`--no-browser` only prints the address). Tokens are stored in the state folder, owner-only on Linux and macOS (Windows has no such file modes, so there they rely on the folder's own permissions), and Cairnward refreshes them by itself. If a refresh is refused, the server's tools report that you need to sign in again. To forget them:
 
 ```bash
 uv run cairnward mcp logout notes
