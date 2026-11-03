@@ -7,7 +7,10 @@ through an egress session in the environment, like any helper program's. Tokens 
 kept owner-only in `<state>/mcp-oauth/<server>.json` (never in config, never audited).
 
 The running core only uses and refreshes those tokens; it never starts a sign-in. When
-a token can't be refreshed, the server's tools fail with a message to log in again.
+a token can't be refreshed, the server's tools fail with a message to log in again. The
+SDK starts a full sign-in on any 401, even with a refresh token in hand, and its expiry
+restarts when tokens are loaded, so `_CoreProvider` and the storage correct both (the
+`mcp` package is pinned exactly, and tests/test_mcp_oauth.py runs against the real one).
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import contextlib
 import json
 import os
 import secrets
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -62,15 +66,22 @@ class FileTokenStorage:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f)
-        os.replace(tmp, self.path)
+        tmp.replace(self.path)
 
     async def get_tokens(self) -> OAuthToken | None:
-        raw = self._read().get("tokens")
-        return OAuthToken.model_validate(raw) if raw else None
+        data = self._read()
+        raw = data.get("tokens")
+        if not raw:
+            return None
+        token = OAuthToken.model_validate(raw)
+        if isinstance(data.get("expires_at"), int | float):  # what's left, not the original
+            token.expires_in = max(0, int(data["expires_at"] - time.time()))
+        return token
 
     async def set_tokens(self, tokens: OAuthToken) -> None:
         data = self._read()
         data["tokens"] = tokens.model_dump(mode="json", exclude_none=True)
+        data["expires_at"] = time.time() + tokens.expires_in if tokens.expires_in else None
         self._write(data)
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
@@ -105,7 +116,7 @@ def metadata(redirect_uri: str, scope: str | None) -> OAuthClientMetadata:
     return OAuthClientMetadata(
         client_name="Cairnward", redirect_uris=[redirect_uri],  # type: ignore[list-item]
         grant_types=["authorization_code", "refresh_token"], response_types=["code"],
-        token_endpoint_auth_method="none", scope=scope,
+        token_endpoint_auth_method="none", scope=scope,  # noqa: S106 (public client, PKCE)
     )  # fmt: skip
 
 
@@ -117,8 +128,36 @@ def provider_for_core(paths: Paths, server: str, url: str, scope: str | None) ->
         raise LoginNeeded(f"{server} needs you to sign in: cairnward mcp login {server}")
 
     redirect = storage.redirect_uri() or "http://127.0.0.1/callback"
-    return OAuthClientProvider(url, metadata(redirect, scope), storage,
-                               redirect_handler=no_browser)  # fmt: skip
+    return _CoreProvider(server, url, metadata(redirect, scope), storage,
+                         redirect_handler=no_browser)  # fmt: skip
+
+
+class _CoreProvider(OAuthClientProvider):
+    """Tries the refresh token where the SDK would start a sign-in, and otherwise asks the
+    person to log in, whatever went wrong."""
+
+    def __init__(self, server: str, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._login_needed = LoginNeeded(f"{server} needs you to sign in: "
+                                         f"cairnward mcp login {server}")  # fmt: skip
+        self._refresh_tried = False
+        self.problem: str | None = None  # the SDK's transport swallows the exception
+
+    async def _perform_authorization(self) -> Any:
+        tokens = self.context.current_tokens
+        if tokens is not None and tokens.refresh_token and not self._refresh_tried:
+            self._refresh_tried = True
+            return await self._refresh_token()
+        self.problem = str(self._login_needed)
+        raise self._login_needed
+
+    async def _handle_token_response(self, response: Any) -> None:
+        try:
+            await super()._handle_token_response(response)
+        except Exception:
+            self.problem = str(self._login_needed)
+            raise self._login_needed from None
+        self._refresh_tried = False
 
 
 class _Callback:
@@ -143,8 +182,9 @@ class _Callback:
             parts = urlsplit(target)
             q = {k: v[0] for k, v in parse_qs(parts.query).items()}
             ok = parts.path == self.path and "code" in q
+            why = q.get("error_description") or q.get("error") or "no code"
             body = ("Signed in. You can close this tab and go back to the terminal." if ok
-                    else f"Sign-in failed: {q.get('error_description') or q.get('error') or 'no code'}")  # fmt: skip
+                    else f"Sign-in failed: {why}")  # fmt: skip
             writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
                          f"Content-Length: {len(body.encode())}\r\nConnection: close\r\n\r\n"
                          f"{body}".encode())  # fmt: skip

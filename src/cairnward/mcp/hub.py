@@ -185,6 +185,9 @@ class McpHub:
             await conn.initialize(timeout=min(spec.call_timeout_s, 60))
         except McpError as exc:
             await conn.close()
+            problem = getattr(auth, "problem", None)
+            if problem:
+                raise fail(problem.removeprefix(f"{server} ")) from None
             raise fail(f"couldn't connect to {parts.hostname}: {exc}") from None
         self._audit("mcp.start", actor="cairnward", target=server, outcome="ok",
                     environment=environment, details={
