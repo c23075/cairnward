@@ -1,5 +1,6 @@
 """Locking a conversation locks its artifacts (FR-ENC-1): real git, real age encryption."""
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ from cairnward.artifacts import SEALED, ArtifactError, ArtifactLockedError, Arti
 from cairnward.cli import main
 from cairnward.config.paths import Paths
 from cairnward.store import Vault
+
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 
 SECRET = "correct horse battery staple 42"
 MARKER = b"the-secret-plan"

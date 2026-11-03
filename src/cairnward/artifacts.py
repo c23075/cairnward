@@ -352,11 +352,12 @@ def _unpack(data: bytes, dest: Path) -> None:
 
 def _write_atomic(path: Path, data: bytes) -> None:
     tmp = path.with_suffix(".tmp")
-    tmp.write_bytes(data)
+    with tmp.open("wb") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())  # needs a writable file on Windows
     if os.name != "nt":
         tmp.chmod(0o600)
-    with tmp.open("rb") as fh:
-        os.fsync(fh.fileno())
     tmp.replace(path)
 
 

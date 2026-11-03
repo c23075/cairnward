@@ -1,6 +1,7 @@
 """Locking a finished job or a run's artifacts with a passphrase (FR-ENC-1)."""
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ from cairnward.config.paths import Paths
 from cairnward.research.jobs import JobStore
 from cairnward.store import Vault
 from cairnward.store.vault import LockedError, VaultError
+
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 
 SECRET = "correct horse battery staple 42"
 JOB = "abc123abc123"

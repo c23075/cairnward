@@ -227,6 +227,7 @@ async def test_artifact_tools(paths: Paths) -> None:
     audit.close()
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 async def test_artifact_tools_follow_the_conversations_lock(paths: Paths) -> None:
     """A model can't read or write a locked conversation's artifacts (FR-ENC-1), through the
     real tool route, and the failure is audited without any content."""
