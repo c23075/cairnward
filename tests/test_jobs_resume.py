@@ -32,6 +32,7 @@ class FakeChat:
     whose title contains a word in `exclude` are excluded at screening."""
 
     context_tokens = 8192
+    thinking = False
 
     def __init__(self, crash_on: int | None = None, exclude: tuple[str, ...] = ()):
         self.calls, self.crash_on, self.exclude = 0, crash_on, exclude
@@ -234,8 +235,73 @@ def test_library_files(tmp_path: Path) -> None:
             library_files(folder, bad)
 
 
+async def test_review_that_excludes_everything_says_so(lib: Paths, tmp_path: Path) -> None:
+    """Otherwise a job that read nothing looks like a finished review."""
+    chat = FakeChat(exclude=("Paper",))
+
+    async def no_ask(*a: Any, **k: Any) -> None:
+        raise AssertionError("not used")
+
+    r = JobRunner(JobStore(lib.data_dir), research=lambda: Research.open(lib), ask=no_ask,
+                  chat_for=lambda library, effort=None: chat)  # fmt: skip
+    job = r.submit(review_job("thesis", "Does sleep help working memory?"))
+    done = await r.run(r.store.load(job.id))
+    assert done.status == "done" and "notes" not in chat.kinds
+    select = next(s for s in done.steps if s.name == "select")
+    assert select.output["included"] == 0 and "excluded every paper" in select.output["warning"]
+    result = r.store.result_path(job.id).read_text()
+    assert "**Check:** screening excluded every paper" in result and "--no-screen" in result
+
+
+async def test_excluding_takes_two_tries_that_agree(lib: Paths, tmp_path: Path) -> None:
+    """The model's answer on a borderline paper varies, and a dropped paper is never seen
+    again. Every paper here says exclude first; only the agreed ones stay excluded."""
+    answers = iter([
+        ("exclude", "off topic one"), ("exclude", "off topic two"),
+        ("exclude", "about naps"), ("include", "naps are sleep"),
+        ("exclude", "not clear"), ("unsure", "can't tell"),
+    ])  # fmt: skip
+
+    class Borderline(FakeChat):
+        async def ask(self, messages: list[dict[str, Any]], *, max_tokens: int = 700) -> Reply:
+            if messages[0]["content"].startswith("You screen papers"):
+                self.kinds.append("screen")
+                decision, reason = next(answers)
+                return Reply(json.dumps({"decision": decision, "reason": reason}), "m", 5, 5, 0.01)
+            return await super().ask(messages, max_tokens=max_tokens)
+
+    chat = Borderline()
+
+    async def no_ask(*a: Any, **k: Any) -> None:
+        raise AssertionError("not used")
+
+    r = JobRunner(JobStore(lib.data_dir), research=lambda: Research.open(lib), ask=no_ask,
+                  chat_for=lambda library, effort=None: chat)  # fmt: skip
+    job = r.submit(review_job("thesis", "Does sleep help working memory?"))
+    done = await r.run(r.store.load(job.id))
+    screens = [s.output for s in done.steps if s.name == "screen"]
+    assert chat.kinds.count("screen") == 6  # two tries for each exclusion
+    assert [s["decision"] for s in screens] == ["exclude", "unsure", "unsure"]
+    assert screens[0]["reason"] == "off topic one"
+    assert "Two tries disagreed" in screens[1]["reason"] and "about naps" in screens[1]["reason"]
+    assert "naps are sleep" in screens[1]["reason"]
+    select = next(s for s in done.steps if s.name == "select")
+    assert select.output == {"included": 2, "excluded": 1, "unscreened": 0}
+    assert chat.kinds.count("notes") == 2  # both disagreements were read
+
+
+def test_reply_room_includes_reasoning_only_when_it_is_on() -> None:
+    from types import SimpleNamespace
+
+    from cairnward.research.ask import REASONING_TOKENS
+    from cairnward.research.jobs import _reply_tokens
+
+    assert _reply_tokens(SimpleNamespace(thinking=False), 150) == 150
+    assert _reply_tokens(SimpleNamespace(thinking=True), 150) == 150 + REASONING_TOKENS
+
+
 async def test_full_review_pipeline(lib: Paths, tmp_path: Path) -> None:
-    """screen (fast model) → select → notes (main model) on included papers only →
+    """screen → select → notes on included papers only, all with the main model →
     synthesis with checked citations → table, references and .bib (FR-RES-4, D63)."""
     folder = tmp_path / "papers"
     abstract = ("This paper reports a cohort of 40 older adults whose sleep was tracked for a "
@@ -273,9 +339,10 @@ async def test_full_review_pipeline(lib: Paths, tmp_path: Path) -> None:
     kinds = [s.name for s in done.steps]
     assert kinds == ["prepare", "screen", "screen", "screen", "select", "notes", "notes",
                      "synthesis", "table"]  # fmt: skip
-    # all fast-model screening before any main-model reading; screening uses effort "low"
-    assert chat.kinds == ["screen"] * 3 + ["notes"] * 2 + ["synthesis"]
-    assert efforts[:3] == ["low"] * 3 and set(efforts[3:]) == {None}
+    # all screening before any reading; both use the environment's default effort (D63)
+    # three papers, and a second try before the one exclusion
+    assert chat.kinds == ["screen"] * 4 + ["notes"] * 2 + ["synthesis"]
+    assert set(efforts) == {None}
     assert abstract in prompts[0] and "Criteria: adults; sleep measured" in prompts[0]
     select = next(s for s in done.steps if s.name == "select")
     assert select.output == {"included": 2, "excluded": 1, "unscreened": 0}
@@ -297,7 +364,7 @@ def test_eta_uses_step_kinds() -> None:
              Step("screen", {}), Step("select", {})]  # fmt: skip
     job = Job("abc123abc123", "review", {}, steps)
     # one more screen (10 s), select (1 s), and 3 papers to read at the 420 s prior + synthesis
-    assert job.eta() == 10 + 1 + 3 * 420 + 300
+    assert job.eta() == 10 + 1 + 3 * 420 + 300  # the finished screens' average, not the prior
 
 
 def test_parsers() -> None:

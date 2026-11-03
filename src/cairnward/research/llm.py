@@ -23,6 +23,7 @@ from cairnward.policy.engine import Action, PolicyEngine
 from cairnward.redaction import check_outbound, message_texts
 
 _THINK = re.compile(r"<think>.*?(?:</think>\s*|\Z)", re.DOTALL)  # cut off: no closing tag
+_THINK_END = "</think>"  # with thinking off, some models still reason, with no opening tag
 
 
 class ModelDenied(Exception):
@@ -105,7 +106,7 @@ class InProcessChat:
             raise
         choice = (result.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
-        text = _THINK.sub("", str(msg.get("content") or "")).strip()
+        text = _THINK.sub("", str(msg.get("content") or "")).rsplit(_THINK_END, 1)[-1].strip()
         usage = result.get("usage") or {}
         seconds = time.monotonic() - started
         await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok",
