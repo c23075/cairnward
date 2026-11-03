@@ -152,6 +152,16 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_appr.add_argument("server")
     mcp_appr.add_argument("--yes", action="store_true", help="approve without asking")
     mcp_sub.add_parser("connect", help="stdio bridge to the MCP endpoint (same as no ACTION)")
+    mcp_login = mcp_sub.add_parser("login", help='sign in to a remote server (auth = "oauth")')
+    mcp_login.add_argument("server")
+    mcp_login.add_argument(
+        "--env",
+        help="whose network rules the sign-in follows "
+        "(default: the first environment using the server)",
+    )
+    mcp_login.add_argument("--no-browser", action="store_true", help="only print the address")
+    mcp_logout = mcp_sub.add_parser("logout", help="forget a remote server's stored sign-in")
+    mcp_logout.add_argument("server")
 
     vlt = sub.add_parser("vault", help="Cairnward's copy of conversations: list, search, export")
     vlt_sub = vlt.add_subparsers(dest="vault_command", metavar="ACTION")
@@ -948,6 +958,51 @@ def _cmd_approvals(args: argparse.Namespace) -> int:
             return 0
 
 
+def _mcp_sign_in(cfg: Config, args: argparse.Namespace, action: str) -> int:
+    import asyncio
+    import webbrowser
+
+    from cairnward.mcp import oauth
+    from cairnward.mcp.hub import resolve_headers
+    from cairnward.run.runner import RunError, egress_session
+
+    spec = cfg.mcp.servers.get(args.server)
+    if spec is None or spec.auth != "oauth" or not spec.url:
+        print(f'cairnward: {args.server} isn\'t a remote server with auth = "oauth" in mcp.toml',
+              file=sys.stderr)  # fmt: skip
+        return 1
+    storage = oauth.FileTokenStorage(oauth.token_file(cfg.paths, args.server))
+    if action == "logout":
+        print("forgotten" if storage.forget() else "not signed in")
+        return 0
+    env = args.env or next((n for n, e in cfg.environments.items()
+                            if args.server in e.mcp_servers), None)  # fmt: skip
+    if env is None:
+        print(f"cairnward: no environment uses {args.server} (mcp_servers)", file=sys.stderr)
+        return 1
+
+    def show(url: str) -> None:
+        print(f"Sign in here (waiting for up to 5 minutes):\n{url}", flush=True)
+        if not args.no_browser:
+            webbrowser.open(url)
+
+    try:
+        with egress_session(cfg, env, "mcp-login") as proxy:
+            tools = asyncio.run(oauth.login(cfg.paths, args.server, spec.url, spec.oauth_scope,
+                                            headers=resolve_headers(spec.headers), proxy=proxy,
+                                            open_url=show))  # fmt: skip
+    except (RunError, oauth.LoginNeeded) as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # the SDK raises many kinds, in exception groups too
+        storage.forget()
+        print(f"cairnward: sign-in failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"signed in to {args.server}: {len(tools)} tool(s). Review them with "
+          f"`cairnward mcp approve {args.server}`.")  # fmt: skip
+    return 0
+
+
 def _cmd_mcp(args: argparse.Namespace) -> int:
     import os
 
@@ -965,6 +1020,8 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
             f"http://127.0.0.1:{cfg.main.server.gateway_port}/mcp"
             + (f"/{args.env}" if args.env else ""))  # fmt: skip
         return run_shim(url, key, sys.stdin, sys.stdout)
+    if action in ("login", "logout"):
+        return _mcp_sign_in(cfg, args, action)
 
     from cairnward.run.runner import RunError, management
 
@@ -987,6 +1044,12 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
                           "rules apply)")  # fmt: skip
                     if s.get("headers"):
                         print(f"  headers : {', '.join(s['headers'])}")
+                    if s.get("auth") == "oauth":
+                        from cairnward.mcp.oauth import FileTokenStorage, token_file
+
+                        state = FileTokenStorage(token_file(cfg.paths, s["name"])).status()
+                        needed = f"needed: cairnward mcp login {s['name']}"
+                        print(f"  sign-in : {'signed in' if state['signed_in'] else needed}")
                     print(f"  enabled : {', '.join(s['environments']) or 'nowhere (mcp_servers)'}")
                     continue
                 print(f"  command : {' '.join(s['command'])}")

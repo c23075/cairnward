@@ -146,7 +146,7 @@ def check_references(text: str, documents: list[Any]) -> list[RefCheck]:
     section = text[m.end() :]
     stop = re.search(r"^\s*#+\s", section, re.MULTILINE)  # the next heading ends it
     section = section[: stop.start()] if stop else section
-    entries = [e.strip(" -*\t") for e in re.split(r"\n\s*\n|\n(?=\s*(?:[-*]|\[\d+\]|\d+\.)\s)",
+    entries = [e.strip(" -*\t\n") for e in re.split(r"\n\s*\n|\n(?=\s*(?:[-*]|\[\d+\]|\d+\.)\s)",
                                                   section) if e.strip()]  # fmt: skip
     titles = [(d, set(_words(d.title or ""))) for d in documents if d.title]
     out = []

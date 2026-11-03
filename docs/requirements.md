@@ -104,7 +104,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-RES-2 | `lit.ask`: answers with page citations | M | M1 | eval `evals/pdf_qa` |
 | FR-RES-3 | Research jobs: queue, progress, resumable after restart, schedulable | M | M1 | `test_jobs_resume.py` |
 | FR-RES-4 | Review pipeline: screen (fast model, abstracts) → extract (main model, full text) → synthesise → comparison table + `.bib`; work grouped by model; estimated finish time | M | M3 | eval `evals/litreview_table` |
-| FR-RES-5 | Citation check: every reference resolves; every quotation matches PDF text | M | M1 | `test_citation_check.py`; real runs: `evals/pdf_qa` (zero invented), which also serves as the citation-existence eval |
+| FR-RES-5 | Citation check: every reference resolves; every quotation matches PDF text | M | M1 | `test_citation_check.py`, eval `evals/citation_existence` (the checker), `evals/pdf_qa` (real answers, zero invented) |
 | FR-RES-6 | CSL formatting; APA and IEEE shipped; `.csl` adds styles | M | M1 | golden tests |
 | FR-RES-7 | Zotero via local API | S | M3 | fake Zotero API |
 | FR-RES-8 | arXiv search (opt-in, cached, audited) | M | M3 | recorded responses |
@@ -176,7 +176,7 @@ All security requirements below describe what each protection does **when it is 
 | NFR-PORT-1 | Linux (Debian 12+, Ubuntu 22.04+); Python 3.12+; unit tests also pass on Windows | M | CI |
 | NFR-PORT-2 | Windows via WSL2 | W | L |
 | NFR-SUP-1 | Hash-locked deps; pip-audit; license check; pinned CI actions | M | CI |
-| NFR-SUP-2 | SBOM + Sigstore-signed releases | S | release workflow |
+| NFR-SUP-2 | SBOM + Sigstore-signed releases | S | `.github/workflows/release.yml`, `test_release.py`; never run on GitHub yet |
 | NFR-MAINT-1 | ruff + mypy strict; ≥ 80% coverage in every package (a short list is left out by name, each with a reason, in `scripts/check_coverage.py`) | M | CI (Linux) |
 
 ---
