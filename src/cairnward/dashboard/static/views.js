@@ -449,6 +449,26 @@ export async function settingsView(main) {
 
 export async function backups(main) {
   const b = await api("/api/backup");
+  const stillShown = () => main.isConnected && location.hash.startsWith("#/backups");
+  if (b.running) setTimeout(() => { if (stillShown()) backups(main); }, 3000);
+  const backUpNow = async () => {
+    try { await api("/api/backup/run", { method: "POST" }); toast("Backup started."); backups(main); }
+    catch (e) { toast(e.message); }
+  };
+  const changeSettings = async () => {
+    const modes = [{ value: "none", label: "Off" }, { value: "on_demand", label: "Only when asked" }, { value: "auto", label: "Automatic" }];
+    const v = await ask("Backup settings", {
+      text: "Backups are encrypted. Pick a folder on another disk if you can. Changes take effect when Cairnward restarts.",
+      fields: [{ name: "mode", label: "Backups", options: [...modes.filter(m => m.value === b.mode), ...modes.filter(m => m.value !== b.mode)] },
+               ...(b.remote ? [] : [{ name: "repository", label: "Folder (full path)", value: b.where || "" }])],
+      confirm: "Save" });
+    if (!v) return;
+    try {
+      const r = await api("/api/backup/settings", { method: "POST", body: { mode: v.mode, repository: v.repository ?? null } });
+      toast(r.restart_needed ? "Saved. Restart Cairnward for it to take effect." : "Nothing changed.");
+      backups(main);
+    } catch (e) { toast(e.message); }
+  };
   const dl = (...pairs) => h("dl", {}, pairs.filter(p => p[1] !== null && p[1] !== undefined)
     .flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]));
   const last = b.last;
@@ -464,6 +484,12 @@ export async function backups(main) {
       ["Keeps", `${b.keep.daily} daily, ${b.keep.weekly} weekly, ${b.keep.monthly} monthly`],
       ["Includes", ["conversations", "audit log", ...b.includes].join(", ")],
       ["Last backup", last ? `${when(last.time)}${last.snapshot ? ` (snapshot ${last.snapshot})` : ""}` : "never"]),
+    b.settings_saved ? h("div", { class: "warnbox", role: "status" }, "Settings saved. Restart Cairnward for them to take effect.") : null,
+    b.run_error ? h("div", { class: "warnbox", role: "alert" }, `The last backup failed: ${b.run_error}`) : null,
+    h("p", { role: "status" }, b.running ? "Backing up. This can take a few minutes." : null),
+    h("div", { class: "actions" },
+      h("button", { type: "button", class: "primary", disabled: b.running || b.mode === "none" || !b.repository, onclick: backUpNow }, "Back up now"),
+      h("button", { type: "button", onclick: changeSettings }, "Change settings")),
     h("h2", {}, "Purged conversations still in older backups"),
     b.pending.length
       ? table([{ label: "Conversation", key: "conversation", mono: true }, { label: "Purged", render: r => when(r.since) },
