@@ -1,6 +1,7 @@
 """Dashboard routes beyond sign-in: what locked, missing or unavailable things answer, that
 sensitive actions are audited, and that downloads can't render in the page."""
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,7 @@ async def test_answering_approvals(env: Any) -> None:  # noqa: F811
         await c.aclose()
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 async def test_artifact_routes(env: Any) -> None:  # noqa: F811
     app, auth, audit, *_, paths = env
     store = ArtifactStore(paths.data_dir)

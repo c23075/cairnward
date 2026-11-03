@@ -209,7 +209,7 @@ def test_run_refuses_before_starting_anything(
 
 def with_backup(paths: Paths, repository: str) -> Any:
     (paths.config_dir / "cairnward.toml").write_text(
-        f'schema_version = 1\n[backup]\nmode = "on_demand"\nrepository = "{repository}"\n'
+        f"schema_version = 1\n[backup]\nmode = 'on_demand'\nrepository = '{repository}'\n"
     )
     return load_config(paths)
 
