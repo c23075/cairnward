@@ -34,9 +34,9 @@ from cairnward.gateway.scheduling import estimate_tokens
 Status = Literal["queued", "running", "done", "failed", "cancelled"]
 StepStatus = Literal["pending", "done", "failed"]
 NOTE_FIELDS = ("aim", "method", "sample", "findings", "limitations")
-# Seconds per step on the reference machine (spec D63): screening an abstract with the fast
-# model ~10 s; reading a paper and writing notes with the main model ~7 min.
-STEP_PRIOR_S = {"prepare": 30, "screen": 10, "select": 1, "notes": 420, "synthesis": 300,
+# Seconds per step on the reference machine (spec D63): screening an abstract ~2 min; reading
+# a paper and writing notes ~7 min; both with the main model.
+STEP_PRIOR_S = {"prepare": 30, "screen": 120, "select": 1, "notes": 420, "synthesis": 300,
                 "table": 5, "ask": 120}  # fmt: skip
 
 
@@ -86,8 +86,7 @@ class Job:
 
     def eta(self) -> int | None:
         """Seconds left: each pending step costs the average of finished steps of its kind,
-        else the reference machine's measured cost (D63); screening is fast-model work,
-        notes and synthesis main-model work."""
+        else the reference machine's measured cost (D63)."""
         pending = [s for s in self.steps if s.status == "pending"]
         if not pending:
             return None
@@ -182,9 +181,9 @@ def review_job(library: str, question: str, style: str = "apa", *,
                screen: bool = True, **kw: Any) -> Job:  # fmt: skip
     """The review pipeline (FR-RES-4, D63). Its papers are picked when it starts: the first
     step indexes the library (or just `files`, paths relative to its folder), then:
-    screen each paper's title and abstract with the fast model (against the question and
-    `criteria`) → select → notes from the full text of included papers with the main
-    model → synthesis → comparison table, references and a .bib file. `screen=False`
+    screen each paper's title and abstract (against the question and `criteria`) → select →
+    notes from the full text of included papers → synthesis, all with the main
+    model → → comparison table, references and a .bib file. `screen=False`
     reads every paper."""
     params = {"library": library, "question": question, "style": style,
               "criteria": criteria, "screen": screen}  # fmt: skip
@@ -227,7 +226,10 @@ SCREEN_SYSTEM = (
     "You screen papers for a literature review from their title and abstract only. Decide "
     "whether the paper is relevant to the review question and meets the criteria. Reply "
     'with a JSON object: {"decision": "include" | "exclude" | "unsure", "reason": "<one '
-    'sentence>"}. Say "unsure" when the abstract doesn\'t tell.'
+    'sentence>"}. Exclude a paper only when it is clearly about a different subject, or its '
+    "title or abstract explicitly rules out a criterion (for example, a study of children "
+    "when the criteria require adults). A related topic, a different measure, or a criterion "
+    'the abstract doesn\'t mention is not a reason to exclude: say "unsure".'
 )
 SYNTHESIS_SYSTEM = (
     "You write the synthesis section of a literature review from notes on the included "
@@ -236,6 +238,19 @@ SYNTHESIS_SYSTEM = (
     "square brackets, like [2] or [1, 3], after every claim; cite only numbers that appear "
     "in the notes. Write plain paragraphs, 200 to 600 words, no headings and no reference list."
 )
+
+
+ALL_EXCLUDED = (
+    "screening excluded every paper, so none were read and there is no synthesis. "
+    "Check the reasons below; `--no-screen` reads every paper."
+)
+
+
+def _reply_tokens(chat: Any, answer: int) -> int:
+    """Room for a reply: a model's token limit covers its reasoning too (see ask.py)."""
+    from cairnward.research.ask import REASONING_TOKENS
+
+    return answer + (REASONING_TOKENS if chat.thinking else 0)
 
 
 def parse_screen(text: str) -> dict[str, str]:
@@ -420,13 +435,14 @@ class JobRunner:
             finally:
                 research.close()
             chat = self.chat_for(library)
-            budget = (chat.context_tokens or 8192) - 1500
+            reply_tokens = _reply_tokens(chat, 700)
+            budget = (chat.context_tokens or 8192) - reply_tokens - 800
             reply = await chat.ask([
                 {"role": "system", "content": NOTES_SYSTEM},
                 {"role": "user", "content": f"Review question: {job.params['question']}\n\n"
                                             f"Paper: {step.params['title']}\n\n"
                                             + _paper_text(rows, budget)},
-            ], max_tokens=700)  # fmt: skip
+            ], max_tokens=reply_tokens)  # fmt: skip
             return {"title": step.params["title"], **parse_notes(reply.text)}
         if step.name == "table":
             from cairnward.research.cite import format_references, from_documents
@@ -473,7 +489,7 @@ class JobRunner:
         papers = [{"document_id": d.id, "title": d.title or Path(d.path).name, "path": d.path}
                   for d in picked]  # fmt: skip
         if job.params.get("screen", False):
-            job.steps += [Step("screen", p) for p in papers]  # all fast-model work first
+            job.steps += [Step("screen", p) for p in papers]  # all screening first
             job.steps.append(Step("select", {"title": "keep the included papers"}))
         else:
             self._plan_reading(job, papers)
@@ -506,14 +522,28 @@ class JobRunner:
         library = job.params["library"]
         text = await asyncio.to_thread(self._abstract, library, step)
         criteria = job.params.get("criteria") or "(none beyond the question)"
-        chat = self.chat_for(library, effort="low")  # the fast model (D63)
-        reply = await chat.ask([
-            {"role": "system", "content": SCREEN_SYSTEM},
-            {"role": "user", "content": f"Review question: {job.params['question']}\n\n"
-                                        f"Criteria: {criteria}\n\nTitle: {step.params['title']}"
-                                        f"\n\n{text}"},
-        ], max_tokens=150)  # fmt: skip
-        return {"title": step.params["title"], **parse_screen(reply.text)}
+        chat = self.chat_for(library)  # the main model, not the fast one (D63)
+
+        async def decide() -> dict[str, str]:
+            reply = await chat.ask([
+                {"role": "system", "content": SCREEN_SYSTEM},
+                {"role": "user", "content": f"Review question: {job.params['question']}\n\n"
+                                            f"Criteria: {criteria}\n\n"
+                                            f"Title: {step.params['title']}\n\n{text}"},
+            ], max_tokens=_reply_tokens(chat, 150))  # fmt: skip
+            return parse_screen(reply.text)
+
+        first = await decide()
+        result = first
+        if first["decision"] == "exclude":
+            # A dropped paper is never seen again, and the model's answer on a borderline
+            # paper varies between tries: excluding takes two tries that agree.
+            second = await decide()
+            if second["decision"] != "exclude":
+                result = {"decision": "unsure", "reason": (
+                    f"Two tries disagreed, so it's read. Excluded because: {first['reason']} "
+                    f"Then {second['decision']}: {second['reason']}")[:400]}  # fmt: skip
+        return {"title": step.params["title"], **result}
 
     def _select(self, job: Job) -> dict[str, Any]:
         kept, excluded, failed = [], 0, 0
@@ -531,14 +561,18 @@ class JobRunner:
             self._plan_reading(job, kept)
         else:
             job.steps.append(Step("table", {}))
-        return {"included": len(kept), "excluded": excluded, "unscreened": failed}
+        out: dict[str, Any] = {"included": len(kept), "excluded": excluded, "unscreened": failed}
+        if not kept:
+            out["warning"] = ALL_EXCLUDED
+        return out
 
     async def _synthesis(self, job: Job) -> dict[str, Any]:
         notes = [s.output for s in job.steps if s.name == "notes" and s.status == "done"]
         if not notes:
             raise RuntimeError("no notes to synthesise")
         chat = self.chat_for(job.params["library"])
-        budget = max(1000, (chat.context_tokens or 8192) - 1800)
+        reply_tokens = _reply_tokens(chat, 1200)
+        budget = max(1000, (chat.context_tokens or 8192) - reply_tokens - 600)
         per_paper = max(60, budget // len(notes))
 
         def brief(n: int, note: dict[str, Any]) -> str:
@@ -552,7 +586,7 @@ class JobRunner:
             {"role": "system", "content": SYNTHESIS_SYSTEM},
             {"role": "user", "content": f"Review question: {job.params['question']}\n\n"
                                         f"Notes on the included papers:\n\n{listing}"},
-        ], max_tokens=1200)  # fmt: skip
+        ], max_tokens=reply_tokens)  # fmt: skip
         cited = citations_in(reply.text)
         invalid = sorted({n for n in cited if not 1 <= n <= len(notes)})
         return {
@@ -591,8 +625,11 @@ def render(job: Job) -> str:
     if screens:
         counts = {d: sum(1 for s in screens if s.status == "done" and s.output["decision"] == d)
                   for d in ("include", "unsure", "exclude")}  # fmt: skip
-        lines += ["## Screening", "",
-                  f"{len(screens)} papers screened on title and abstract by the fast model: "
+        lines += ["## Screening", ""]
+        select = next((s for s in job.steps if s.name == "select"), None)
+        if select is not None and (select.output or {}).get("warning"):
+            lines += [f"**Check:** {select.output['warning']}", ""]
+        lines += [f"{len(screens)} papers screened on title and abstract: "
                   f"{counts['include']} included, {counts['unsure']} unsure (read in full), "
                   f"{counts['exclude']} excluded.", "",
                   "| Paper | Decision | Reason |", "|---|---|---|"]  # fmt: skip

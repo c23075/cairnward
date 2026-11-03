@@ -40,7 +40,7 @@ PAPERS = {
             "memory was measured with a digit span task.",
             "Findings. Each extra hour of sleep went with a higher digit span score.",
         ],
-        "expect": {"method": ["actigraph"], "sample": ["40"]},
+        "expect": {"method": ["actigraph"], "sample": ["40|forty"]},
     },
     "ito.pdf": {
         "title": "Napping and working memory in students",
@@ -110,7 +110,7 @@ def score(job: dict[str, Any], bib: str) -> list[dict[str, Any]]:
         n = notes.get(paper["title"], {})
         for field, words in paper["expect"].items():
             text = str(n.get(field, n.get("raw", ""))).lower()
-            ok = all(w in text for w in words) and "p." in text
+            ok = all(any(alt in text for alt in w.split("|")) for w in words) and "p." in text
             checks.append({"check": f"notes {name} {field}", "pass": ok, "got": text[:160]})
     synth = next((s for s in steps if s["name"] == "synthesis"), None)
     out = (synth or {}).get("output") or {}
