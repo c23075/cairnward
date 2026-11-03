@@ -32,6 +32,7 @@ class FakeChat:
     whose title contains a word in `exclude` are excluded at screening."""
 
     context_tokens = 8192
+    thinking = False
 
     def __init__(self, crash_on: int | None = None, exclude: tuple[str, ...] = ()):
         self.calls, self.crash_on, self.exclude = 0, crash_on, exclude
@@ -234,8 +235,36 @@ def test_library_files(tmp_path: Path) -> None:
             library_files(folder, bad)
 
 
+async def test_review_that_excludes_everything_says_so(lib: Paths, tmp_path: Path) -> None:
+    """Otherwise a job that read nothing looks like a finished review."""
+    chat = FakeChat(exclude=("Paper",))
+
+    async def no_ask(*a: Any, **k: Any) -> None:
+        raise AssertionError("not used")
+
+    r = JobRunner(JobStore(lib.data_dir), research=lambda: Research.open(lib), ask=no_ask,
+                  chat_for=lambda library, effort=None: chat)  # fmt: skip
+    job = r.submit(review_job("thesis", "Does sleep help working memory?"))
+    done = await r.run(r.store.load(job.id))
+    assert done.status == "done" and "notes" not in chat.kinds
+    select = next(s for s in done.steps if s.name == "select")
+    assert select.output["included"] == 0 and "excluded every paper" in select.output["warning"]
+    result = r.store.result_path(job.id).read_text()
+    assert "**Check:** screening excluded every paper" in result and "--no-screen" in result
+
+
+def test_reply_room_includes_reasoning_only_when_it_is_on() -> None:
+    from types import SimpleNamespace
+
+    from cairnward.research.ask import REASONING_TOKENS
+    from cairnward.research.jobs import _reply_tokens
+
+    assert _reply_tokens(SimpleNamespace(thinking=False), 150) == 150
+    assert _reply_tokens(SimpleNamespace(thinking=True), 150) == 150 + REASONING_TOKENS
+
+
 async def test_full_review_pipeline(lib: Paths, tmp_path: Path) -> None:
-    """screen (fast model) → select → notes (main model) on included papers only →
+    """screen → select → notes on included papers only, all with the main model →
     synthesis with checked citations → table, references and .bib (FR-RES-4, D63)."""
     folder = tmp_path / "papers"
     abstract = ("This paper reports a cohort of 40 older adults whose sleep was tracked for a "
@@ -273,9 +302,9 @@ async def test_full_review_pipeline(lib: Paths, tmp_path: Path) -> None:
     kinds = [s.name for s in done.steps]
     assert kinds == ["prepare", "screen", "screen", "screen", "select", "notes", "notes",
                      "synthesis", "table"]  # fmt: skip
-    # all fast-model screening before any main-model reading; screening uses effort "low"
+    # all screening before any reading; both use the environment's default effort (D63)
     assert chat.kinds == ["screen"] * 3 + ["notes"] * 2 + ["synthesis"]
-    assert efforts[:3] == ["low"] * 3 and set(efforts[3:]) == {None}
+    assert set(efforts) == {None}
     assert abstract in prompts[0] and "Criteria: adults; sleep measured" in prompts[0]
     select = next(s for s in done.steps if s.name == "select")
     assert select.output == {"included": 2, "excluded": 1, "unscreened": 0}
@@ -297,7 +326,7 @@ def test_eta_uses_step_kinds() -> None:
              Step("screen", {}), Step("select", {})]  # fmt: skip
     job = Job("abc123abc123", "review", {}, steps)
     # one more screen (10 s), select (1 s), and 3 papers to read at the 420 s prior + synthesis
-    assert job.eta() == 10 + 1 + 3 * 420 + 300
+    assert job.eta() == 10 + 1 + 3 * 420 + 300  # the finished screens' average, not the prior
 
 
 def test_parsers() -> None:

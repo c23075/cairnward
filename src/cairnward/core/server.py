@@ -243,7 +243,7 @@ def _core_parts(
         return await run_ask(cfg, engine, backends, library, question, scheduler=scheduler, **kw)
 
     def chat_for(library: str, effort: str | None = None) -> Any:
-        """The library's environment's model; effort "low" picks its fast model (screening)."""
+        """The library's environment's model, at its default effort unless given."""
         from cairnward.research import Research
         from cairnward.research.llm import InProcessChat
 
