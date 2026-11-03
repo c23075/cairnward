@@ -166,18 +166,18 @@ All security requirements below describe what each protection does **when it is 
 | NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | `scripts/bench_gateway.py`, `test_bench_gateway.py`; measured ~59 ms Strict (misses), 6–7 ms off |
 | NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | benchmark `--cache-test` through the gateway |
 | NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | benchmark through the gateway |
-| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | CI measurement |
+| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | measured 122 MB, `docs/bench/results-2026-11-03-measurements.md`; start time not measured |
 | NFR-R1 | No data loss on crash; research jobs resumable | M | kill tests |
 | NFR-R2 | Audit record before every effect | M | FR-AUD-1 |
 | NFR-S1 | Strict: zero outbound connections unless allowlisted; Balanced: none without approval | M | isolation suite per preset |
-| NFR-S2 | Threat model reviewed each milestone | M | PR checklist |
+| NFR-S2 | Threat model reviewed each milestone | M | PR template; recorded in `docs/reviews/` |
 | NFR-S4 | With isolation on, isolation holds for every sandbox type (direct network attempts fail) | M | isolation suite in CI (Linux) |
 | NFR-A1 | Dashboard WCAG 2.2 AA | S | axe-core |
 | NFR-PORT-1 | Linux (Debian 12+, Ubuntu 22.04+); Python 3.12+; unit tests also pass on Windows | M | CI |
 | NFR-PORT-2 | Windows via WSL2 | W | L |
 | NFR-SUP-1 | Hash-locked deps; pip-audit; license check; pinned CI actions | M | CI |
 | NFR-SUP-2 | SBOM + Sigstore-signed releases | S | release workflow |
-| NFR-MAINT-1 | ruff + mypy strict; ≥ 80% coverage on core packages | M | CI |
+| NFR-MAINT-1 | ruff + mypy strict; ≥ 80% coverage in every package (a short list is left out by name, each with a reason, in `scripts/check_coverage.py`) | M | CI (Linux) |
 
 ---
 
