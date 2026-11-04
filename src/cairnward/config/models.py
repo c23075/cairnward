@@ -283,6 +283,15 @@ class Backend(_Strict):
         default=None, description="model name on the fallback backend (default: the same)"
     )
 
+    def unencrypted_warning(self, name: str) -> str | None:
+        """For a model on another machine over plain HTTP. Hosted backends can't be set up so."""
+        if self.location == "local" or urlparse(self.url).scheme != "http":
+            return None
+        return (
+            f"backend {name} uses plain http across your network: prompts and replies can be "
+            "read on the way. Serve it over https, or through an SSH or WireGuard tunnel"
+        )
+
     @field_validator("api_key")
     @classmethod
     def _secret_ref(cls, value: str | None) -> str | None:

@@ -119,6 +119,9 @@ def check_backends(cfg: Config) -> list[Check]:
     out: list[Check] = []
     sizes: dict[str, int] = {}
     for name, b in cfg.backends.backends.items():
+        if warning := b.unencrypted_warning(name):
+            out.append(Check(f"backend {name}", "warn", "not encrypted, not contacted", warning))
+            continue
         if b.location != "local":
             out.append(Check(f"backend {name}", "skip", f"{b.location} backend: not contacted"))
             continue

@@ -47,7 +47,7 @@ for use, so all their real-world checks below apply.
 |---|---|---|
 | I1 | The core's sandbox can open VM sockets. Under WSL2 these could reach Windows past the network rules (T-28) | Open: what they can reach is unchecked |
 | I2 | Under WSL2, any program running as you on Windows can read your Linux files | Accepted: only locking protects them |
-| I3 | Backends on the local network can use plain `http://`, with no warning, so prompts cross the network unencrypted | Open |
+| I3 | Backends on the local network can use plain `http://`, so prompts cross the network unencrypted | Allowed, with a warning from `doctor`, `config check`, `serve` and the dashboard |
 | I4 | A third-party tool can send plain `http://` to a host you've allowed. Cairnward allows and audits it, but doesn't require encryption | Accepted |
 | I5 | The first streamed reply from a model not yet known to leak reasoning still reaches the client (T-26) | Open |
 | I6 | A research library is plain while unlocked, its source PDFs are never encrypted, and it has no timed unlock (T-24) | Accepted |
@@ -127,7 +127,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Cairnward to a remote MCP server | HTTPS required; `http` only on this machine |
 | Cairnward to the academic APIs | HTTPS |
 | Agents and tools to the internet | Only through the egress proxy, to allowed hosts. HTTPS passes through encrypted, so Cairnward sees the host but not the content. Plain HTTP to an allowed host is also passed on (I4) |
-| Cairnward to a model on your network | HTTP allowed, unencrypted (I3) |
+| Cairnward to a model on your network | HTTP is allowed but warned about (I3). HTTPS or a tunnel keeps it encrypted |
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes

@@ -271,7 +271,9 @@ def dashboard_app(
                 for name, e in cfg.environments.items()
             },
             "backends": {n: {"driver": x.driver, "location": x.location,
-                             "host": urlsplit(x.url).netloc} for n, x in b.backends.items()},
+                             "host": urlsplit(x.url).netloc,
+                             "warning": x.unencrypted_warning(n)}
+                         for n, x in b.backends.items()},
             "roles": {r: f"{m.model} on {m.backend}" for r, m in b.roles.items()},
             "clients": {n: {"kind": c.kind, "profile": c.profile,
                             "default_environment": c.default_environment}

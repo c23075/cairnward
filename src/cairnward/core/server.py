@@ -838,6 +838,9 @@ def serve(cfg: Config, *, with_egress: bool = True, log: Log) -> int:
     if problem := socket_path_problem(cfg) or windows_drive_problem(cfg):
         log(f"cairnward: can't start: {problem}")
         return 2
+    for name, backend in cfg.backends.backends.items():
+        if warning := backend.unencrypted_warning(name):
+            log(f"warning: {warning}")
     if busy := port_problems(cfg, with_egress=with_egress):
         if _already_running(cfg):
             log("cairnward: already running (`cairnward status`); stop that one first")

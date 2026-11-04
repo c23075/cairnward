@@ -438,6 +438,7 @@ export async function settingsView(main) {
       ? `Set up ${rk.created_at.slice(0, 10)}: it can open ${rk.covered} of ${rk.locked} locked conversation(s)${rk.covered < rk.locked ? " (the others were locked before it existed; unlocking each once adds them)" : ""}.`
       : "None: a forgotten passphrase can't be recovered. Create one in a terminal with `cairnward vault recovery-key create` (it's shown once, there)."),
     h("h2", {}, "Backends"),
+    Object.values(s.backends).filter(b => b.warning).map(b => h("div", { class: "warnbox" }, b.warning)),
     table([{ label: "Name", render: r => r[0] }, { label: "Driver", render: r => r[1].driver }, { label: "Location", render: r => r[1].location }, { label: "Host", render: r => r[1].host, mono: true }], Object.entries(s.backends)),
     h("h2", {}, "Roles"), table([{ label: "Role", render: r => r[0] }, { label: "Model", render: r => r[1] }], Object.entries(s.roles)),
     h("h2", {}, "Clients"),

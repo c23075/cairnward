@@ -5,7 +5,8 @@ import pytest
 
 from cairnward.config import load_config
 from cairnward.config.paths import Paths
-from cairnward.doctor import _memory_check, check_isolation, run_checks
+from cairnward.core import server
+from cairnward.doctor import _memory_check, check_backends, check_isolation, run_checks
 from cairnward.setup import choose, set_preset, setup
 
 
@@ -105,3 +106,34 @@ def test_setup_warns_about_the_backup_password(paths: Paths) -> None:
     said: list[str] = []
     setup(paths, preset="balanced", ask=None, say=said.append)
     assert any("Keep a copy somewhere else" in line for line in said)
+
+
+def write_lan_backend(paths: Paths, url: str) -> None:
+    paths.config_dir.mkdir(parents=True)
+    (paths.config_dir / "backends.toml").write_text(
+        f'[backends.desktop]\ndriver = "ollama"\nurl = "{url}"\nlocation = "lan"\n'
+        '[roles.main]\nbackend = "desktop"\nmodel = "m"\n'
+    )
+
+
+def test_plain_http_across_the_network_is_warned_about(
+    paths: Paths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_lan_backend(paths, "http://192.168.1.20:11434")
+    cfg = load_config(paths)
+    check = {c.name: c for c in check_backends(cfg)}["backend desktop"]
+    assert check.status == "warn" and "plain http" in check.fix
+    # serve says so too, before anything else can go wrong
+    logged: list[str] = []
+    monkeypatch.setattr(server, "port_problems", lambda *a, **k: ["busy"])
+    monkeypatch.setattr(server, "_already_running", lambda cfg: False)
+    assert server.serve(cfg, log=logged.append) == 2
+    assert "plain http" in logged[0]
+
+
+def test_encrypted_or_local_backends_are_not_warned_about(paths: Paths) -> None:
+    write_lan_backend(paths, "https://desktop.lan:11434")
+    assert load_config(paths).backends.backends["desktop"].unencrypted_warning("desktop") is None
+    default = Paths(paths.config_dir / "x", paths.data_dir, paths.state_dir)
+    for name, backend in load_config(default).backends.backends.items():
+        assert backend.location == "local" and backend.unencrypted_warning(name) is None
