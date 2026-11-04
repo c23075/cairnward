@@ -64,6 +64,15 @@ class InProcessChat:
         return self.resolved.options.context_tokens
 
     @property
+    def subagent_limit(self) -> int:
+        """0: this effort level doesn't allow fan-out."""
+        return self.cfg.effort[self.resolved.effort].subagents.max
+
+    @property
+    def subagent_parallel(self) -> int:
+        return self.cfg.effort[self.resolved.effort].subagents.max_parallel
+
+    @property
     def thinking(self) -> bool:
         return bool(self.resolved.options.thinking)
 

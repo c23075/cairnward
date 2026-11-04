@@ -14,6 +14,7 @@ dependencies = [
     "pypdfium2>=4.30",
     "pyrage>=1.2",
     "cryptography>=44",
+    "pyyaml>=6",
     "sqlalchemy>=2.0",
     "sqlite-vec>=0.1.6",
     "uvicorn>=0.30",
@@ -33,6 +34,7 @@ dev = [
     "pip-audit>=2.7",
     "pytest-asyncio>=0.24",
     "openai>=1.40",
+    "types-pyyaml>=6.0.12.20261103",
 ]
 
 [build-system]

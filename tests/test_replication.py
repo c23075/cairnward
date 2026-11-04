@@ -5,6 +5,7 @@ out-of-order test copies files one at a time, the way a folder sync delivers the
 
 from __future__ import annotations
 
+import os
 import random
 import shutil
 import tempfile
@@ -25,6 +26,7 @@ from cairnward.store import LockedError, Vault
 from cairnward.store.schema import conversations, messages
 
 PASS = "correct horse battery staple"
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
 
 class Device:
@@ -197,6 +199,7 @@ def test_trash_and_folders_follow(two: tuple[Device, Device, Path]) -> None:
         assert v.conversation(conv).deleted_at is None
 
 
+@needs_git
 def test_purge_reaches_every_device_and_leaves_the_folder(tmp_path: Path) -> None:
     folder = tmp_path / "shared"
     a, b, c = pair(tmp_path, folder, "a", "b", "c")
@@ -247,6 +250,7 @@ def test_a_new_device_does_not_bring_a_purged_conversation_back(tmp_path: Path) 
         assert v.conversation(conv).purged_at is not None
 
 
+@needs_git
 def test_a_lock_on_one_device_locks_it_everywhere(two: tuple[Device, Device, Path]) -> None:
     a, b, folder = two
     with a.vault() as v:
@@ -480,6 +484,7 @@ def test_join_needs_the_right_key(tmp_path: Path) -> None:
     assert replication.load_identity(b.cfg) is None
 
 
+@needs_git
 def test_excluded_environments_stay_on_this_device(two: tuple[Device, Device, Path]) -> None:
     a, b, folder = two
     text = a.paths.main_config.read_text()
@@ -496,6 +501,7 @@ def test_excluded_environments_stay_on_this_device(two: tuple[Device, Device, Pa
         assert [c.id for c in v.list_conversations()] == [shared]
 
 
+@needs_git
 def test_artifacts_merge_the_same_on_both_devices(two: tuple[Device, Device, Path]) -> None:
     a, b, _folder = two
     with a.vault() as v:
@@ -519,6 +525,7 @@ def test_artifacts_merge_the_same_on_both_devices(two: tuple[Device, Device, Pat
     assert sa.log("conversation", conv)[0].message == "merge from another device"
 
 
+@needs_git
 def test_history_with_a_symlink_is_refused(tmp_path: Path) -> None:
     store = ArtifactStore(tmp_path / "data")
     src = tmp_path / "src"
@@ -641,7 +648,8 @@ def test_the_commands(tmp_path: Path, capsys: pytest.CaptureFixture[str],
     assert "replicate approve" in capsys.readouterr().out
     assert run(b, "sync") == 0
     identity = b.paths.state_dir / "replication" / "identity.json"
-    assert identity.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert identity.stat().st_mode & 0o777 == 0o600
 
     monkeypatch.setenv("CAIRNWARD_DATA_DIR", str(a.paths.data_dir))
     monkeypatch.setenv("CAIRNWARD_STATE_DIR", str(a.paths.state_dir))

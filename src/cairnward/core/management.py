@@ -80,8 +80,9 @@ class AskIn(BaseModel):
 
 
 class JobIn(BaseModel):
-    kind: Literal["ask", "review"]
+    kind: Literal["ask", "review", "workflow"]
     library: str
+    workflow: str | None = Field(default=None, max_length=64 * 1024, description="YAML text")
     question: str | None = Field(default=None, max_length=4000)
     questions: list[str] = Field(default_factory=list, max_length=500)
     style: Literal["apa", "ieee"] = "apa"
@@ -475,7 +476,7 @@ def management_app(
     @app.post("/v1/jobs")
     def submit_job(body: JobIn) -> dict[str, Any]:
         from cairnward.research import LibraryError, Research
-        from cairnward.research.jobs import ask_job, library_files, review_job
+        from cairnward.research.jobs import ask_job, library_files, review_job, workflow_job
 
         runner = need_jobs()
         try:
@@ -484,7 +485,20 @@ def management_app(
         except LibraryError as exc:
             raise HTTPException(404, str(exc)) from None
         not_found: list[str] = []
-        if body.kind == "ask":
+        if body.kind == "workflow":
+            from cairnward.research.workflow import WorkflowError, parse_workflow
+
+            try:
+                spec = parse_workflow(body.workflow or "")
+            except WorkflowError as exc:
+                raise HTTPException(400, f"workflow: {exc}") from None
+            for step in spec.steps:
+                if step.effort and step.effort not in cfg.effort:
+                    raise HTTPException(400, f"workflow: step '{step.id}': no effort level "
+                                        f"'{step.effort}'")  # fmt: skip
+            job = workflow_job(body.library, spec.model_dump(), body.question,
+                               not_before=body.not_before)  # fmt: skip
+        elif body.kind == "ask":
             if not body.questions:
                 raise HTTPException(400, "an ask job needs questions")
             if body.engine == "paperqa":

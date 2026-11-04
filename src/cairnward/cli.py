@@ -116,6 +116,13 @@ def build_parser() -> argparse.ArgumentParser:
     doc.add_argument("--json", action="store_true", help="machine-readable output")
     bk = sub.add_parser("backup", help="encrypted backups with restic (vault, library, artifacts)")
     bk_sub = bk.add_subparsers(dest="backup_command", metavar="ACTION", required=True)
+    bk_use = bk_sub.add_parser("use", help="turn backups on: choose the folder and who can read it")
+    bk_use.add_argument("folder", nargs="?",
+                        help="full path (default: current, or ~/cairnward-backups)")  # fmt: skip
+    bk_use.add_argument("--mode", choices=["auto", "on_demand"], default="auto",
+                        help="auto (default): every 24 hours while the server runs")  # fmt: skip
+    bk_use.add_argument("--access", choices=["owner", "group"],
+                        help="who can read the folder (default: only you)")  # fmt: skip
     bk_sub.add_parser("init", help="create the repository set in [backup] repository")
     bk_sub.add_parser("run", help="back up now (and remove purged conversations from old backups)")
     bk_sub.add_parser("list", help="the snapshots")
@@ -247,6 +254,11 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--criteria", help="inclusion/exclusion criteria for screening, or @file")
     rv.add_argument("--no-screen", action="store_true",
                     help="read every paper in full (no title/abstract screening)")  # fmt: skip
+    rw = rs_sub.add_parser("workflow", help="run a YAML workflow over a library")
+    rw.add_argument("library")
+    rw.add_argument("file", type=Path, help="the workflow (see examples/workflows/)")
+    rw.add_argument("--question", help="filled in for {{question}}")
+    rw.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
     eng = rs_sub.add_parser("engine", help="optional engines (PaperQA2, citeproc-js, pandoc)")
     eng.add_argument("action", choices=["install", "status", "export-lock"],
                      help="export-lock: copy the lock recorded on this machine into the "
@@ -1394,7 +1406,10 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
         if args.command == "research":
             start = parse_at(args.at) if args.at else None
             body: dict[str, Any] = {"library": args.library, "not_before": start}
-            if args.research_command == "review":
+            if args.research_command == "workflow":
+                body |= {"kind": "workflow", "question": args.question,
+                         "workflow": args.file.read_text(encoding="utf-8")}  # fmt: skip
+            elif args.research_command == "review":
                 criteria = args.criteria
                 if criteria and criteria.startswith("@"):
                     criteria = Path(criteria[1:]).read_text(encoding="utf-8").strip()
@@ -1607,6 +1622,28 @@ def _backup_action(cfg: Config, args: argparse.Namespace, action: str) -> int:
 
     from cairnward import backup
 
+    if action == "use":
+        from cairnward.config.edit import EditError, change_backup
+
+        wanted = args.folder and str(Path(args.folder).expanduser().absolute())
+        try:
+            cfg, changed = change_backup(cfg, args.mode, wanted or cfg.main.backup.repository,
+                                         access=args.access)  # fmt: skip
+        except EditError as exc:
+            print(f"cairnward: {exc}", file=sys.stderr)
+            return 1
+        backup._audit(cfg, "backup.settings", changed=changed, mode=args.mode)
+        who = "you and your group" if cfg.main.backup.access == "group" else "only you"
+        print(f"Backups: {args.mode}, to {backup.repository(cfg)}, readable by {who}.")
+        if warning := backup.same_disk_warning(cfg):
+            print(f"note: {warning}.")
+        if not backup.restic():
+            print("restic isn't installed (e.g. sudo apt install restic). Then: cairnward backup "
+                  "init")  # fmt: skip
+            return 0
+        action = "init"
+        if changed:
+            print("Restart cairnward serve for automatic backups to start.")
     if action == "init":
         password = backup.init(cfg)
         if password:

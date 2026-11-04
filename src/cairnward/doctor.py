@@ -504,8 +504,7 @@ def check_backup(cfg: Any) -> Check:
     b = cfg.main.backup
     if b.mode == "none":
         return Check("backup", "warn", "off: conversations, library and artifacts aren't backed up",
-                     'set [backup] mode = "auto" and repository = "<folder on another disk>", '
-                     "then cairnward backup init")  # fmt: skip
+                     "cairnward backup use /a/folder/on/another/disk")  # fmt: skip
     try:
         st = backup.status(cfg)
     except backup.BackupError as exc:
@@ -516,6 +515,8 @@ def check_backup(cfg: Any) -> Check:
         return Check("backup", "fail", st.get("problem") or "repository not set up",
                      "cairnward backup init")  # fmt: skip
     notes = []
+    if st.get("same_disk_warning"):
+        notes.append(st["same_disk_warning"])
     if not b.password_command:
         notes.append("the password is only on this disk unless you keep a copy elsewhere "
                      f"({backup.password_file(cfg)})")  # fmt: skip

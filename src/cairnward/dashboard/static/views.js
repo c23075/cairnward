@@ -458,13 +458,14 @@ export async function backups(main) {
   const changeSettings = async () => {
     const modes = [{ value: "none", label: "Off" }, { value: "on_demand", label: "Only when asked" }, { value: "auto", label: "Automatic" }];
     const v = await ask("Backup settings", {
-      text: "Backups are encrypted. Pick a folder on another disk if you can. Changes take effect when Cairnward restarts.",
+      text: "Backups hold your chats, artifacts, research library, audit log and settings, encrypted. Leave the folder empty for ~/cairnward-backups, or pick one on another disk if you can, because a backup on the same disk won't survive that disk failing. Changes take effect when Cairnward restarts.",
       fields: [{ name: "mode", label: "Backups", options: [...modes.filter(m => m.value === b.mode), ...modes.filter(m => m.value !== b.mode)] },
-               ...(b.remote ? [] : [{ name: "repository", label: "Folder (full path)", value: b.where || "" }])],
+               ...(b.remote ? [] : [{ name: "repository", label: "Folder (full path)", value: b.where || "" },
+                 { name: "access", label: "Who can read the folder", options: b.access === "group" ? [{ value: "group", label: "Me and my group" }, { value: "owner", label: "Only me" }] : [{ value: "owner", label: "Only me" }, { value: "group", label: "Me and my group" }] }])],
       confirm: "Save" });
     if (!v) return;
     try {
-      const r = await api("/api/backup/settings", { method: "POST", body: { mode: v.mode, repository: v.repository ?? null } });
+      const r = await api("/api/backup/settings", { method: "POST", body: { mode: v.mode, repository: v.repository ?? null, access: v.access ?? null } });
       toast(r.restart_needed ? "Saved. Restart Cairnward for it to take effect." : "Nothing changed.");
       backups(main);
     } catch (e) { toast(e.message); }
@@ -474,9 +475,10 @@ export async function backups(main) {
   const last = b.last;
   put(main, h("h1", {}, "Backups"),
     h("p", { class: "muted" }, "restic backups of the vault, research library, artifacts and settings, always encrypted. Run or restore them in a terminal: `cairnward backup run`, `cairnward backup restore --at DATE`."),
-    b.mode === "none" || !b.repository
-      ? h("div", { class: "warnbox", role: "status" }, "Backups are off. Set [backup] mode and repository in cairnward.toml, then `cairnward backup init`.")
+    b.mode === "none"
+      ? h("div", { class: "warnbox", role: "status" }, "Backups are off. Use Change settings, or run `cairnward backup use`.")
       : null,
+    b.same_disk_warning ? h("div", { class: "warnbox" }, b.same_disk_warning) : null,
     b.cloud_warning ? h("div", { class: "warnbox" }, b.cloud_warning) : null,
     dl(["Mode", b.mode === "auto" ? `automatic, every ${b.interval_hours} h while Cairnward runs` : b.mode === "on_demand" ? "on demand" : "off"],
       ["Where", b.where || "not set"],
@@ -488,7 +490,7 @@ export async function backups(main) {
     b.run_error ? h("div", { class: "warnbox", role: "alert" }, `The last backup failed: ${b.run_error}`) : null,
     h("p", { role: "status" }, b.running ? "Backing up. This can take a few minutes." : null),
     h("div", { class: "actions" },
-      h("button", { type: "button", class: "primary", disabled: b.running || b.mode === "none" || !b.repository, onclick: backUpNow }, "Back up now"),
+      h("button", { type: "button", class: "primary", disabled: b.running || b.mode === "none", onclick: backUpNow }, "Back up now"),
       h("button", { type: "button", onclick: changeSettings }, "Change settings")),
     h("h2", {}, "Purged conversations still in older backups"),
     b.pending.length
