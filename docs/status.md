@@ -16,9 +16,9 @@ Of the 104 requirements tracked (91 here and 13 in the research repository):
 
 | State | Count |
 |---|---|
-| Done and covered by tests or measurements | 81 |
+| Done and covered by tests or measurements | 82 |
 | Built, but only tested against a stand-in | 13 |
-| Partly done | 7 |
+| Partly done | 6 |
 | Left out by decision (Ollama-compatible endpoint, Anthropic driver, TLS interception) | 3 |
 
 The biggest unknowns are how accurate it is on real papers, because every result so far uses short
@@ -44,7 +44,6 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | A3 | Set up restic to a real remote | The only backup is on the same disk as the data |
 | A4 | Keep the backup password somewhere off this machine | Without it, backups can't be restored after a disk failure |
 | A5 | Try one real restore | The real repository has never been restored |
-| A6 | Decide the Strict overhead target | Strict takes 105 ms with isolation, against a 50 ms target. Recommendation: change the target, not the code |
 | A7 | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
 | A8 | Decide whether the repository goes public | Release signing writes its name to a public log, so the workflow stops before signing while it's private |
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
@@ -79,7 +78,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 ### Performance
 | # | Issue | State |
 |---|---|---|
-| I14 | Strict overhead misses its target (A6) | Waiting on a decision |
+| I14 | Strict overhead missed its 50 ms target | Closed: target raised to 75 ms, or 150 ms with isolation. Measured 59 ms and 105 ms |
 | I15 | Start time is 2.8 s on empty data, against a 3 s target. A large data folder hasn't been tried | Untested |
 
 ### Unexplained or uncovered
@@ -89,7 +88,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I17 | Question q5's failure in the first eval. I22 could be the cause, but those answers weren't kept | Unexplained |
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
-| I24 | The research test `test_cache_key_is_kept_owner_only` failed on Windows in `main`'s last CI run. It moved to the research repository, whose CI only runs on Linux, so CI no longer shows it | Open: not yet known whether the test or the code is wrong |
+| I24 | The research test `test_cache_key_is_kept_owner_only` failed on Windows because it checked POSIX file modes, which Windows doesn't have; the code skips them there on purpose. The test is fixed and the research CI gets a Windows job, on the `windows-ci` branch there. Neither has run on Windows yet | Fix waiting on A11 |
 
 ## Testing still to do
 ### Could reveal real bugs
