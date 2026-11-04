@@ -8,7 +8,8 @@ requirement is in [requirements-status.md](plan/requirements-status.md), and the
 The planned code is built, and most of what remains is testing or needs you. **It isn't production
 ready yet:** the code and its tests are in good order, but the backup has never been restored, it
 has never run on real WSL2 or real papers, and nobody but the assistant that wrote it has reviewed
-it. Those are in the actions below.
+it. CI has also never checked the merged code, because GitHub isn't starting its jobs (A11). Those
+are in the actions below.
 
 Research now lives in its own package, as a plugin ([ADR-0017](adr/0017-research-as-a-plugin.md)).
 Of the 104 requirements tracked (91 here and 13 in the research repository):
@@ -29,10 +30,11 @@ for use, so all their real-world checks below apply.
 ## In progress
 | Item | State |
 |---|---|
-| Research as a plugin | Local only: the `plugin-split` branch here, and the research repository, `literature-review-agent-plugin`, with nothing pushed. Your running server and data haven't moved |
+| Moving your server to the research plugin | Merged in PR 22, and the research code is on GitHub as `literature-review-agent-plugin`. Your running server and data are still on the old setup |
 
-After it's merged: restart `cairnward serve` from `main`, then run `cairnward-research install-plugin`
-and `cairnward-research import`. See [plugins](plugins.md) and [operations](operations.md).
+To move: restart `cairnward serve` from `main`, take a backup, then run `cairnward-research
+install-plugin` and `cairnward-research import`. The import has only run in tests, never on real
+data. See [plugins](plugins.md) and [operations](operations.md).
 
 ## Decisions and actions for the owner
 | # | What | Why it matters |
@@ -46,6 +48,7 @@ and `cairnward-research import`. See [plugins](plugins.md) and [operations](oper
 | A7 | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
 | A8 | Decide whether the repository goes public | Release signing writes its name to a public log, so the workflow stops before signing while it's private |
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
+| A11 | Fix GitHub billing, then re-run CI on both repositories | GitHub won't start any job until a failed payment or the spending limit is fixed. PR 22 was merged without CI, and its code has never run on Windows |
 
 ## Known issues
 ### Security and privacy
@@ -86,6 +89,7 @@ and `cairnward-research import`. See [plugins](plugins.md) and [operations](oper
 | I17 | Question q5's failure in the first eval. I22 could be the cause, but those answers weren't kept | Unexplained |
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
+| I24 | The research test `test_cache_key_is_kept_owner_only` failed on Windows in `main`'s last CI run. It moved to the research repository, whose CI only runs on Linux, so CI no longer shows it | Open: not yet known whether the test or the code is wrong |
 
 ## Testing still to do
 ### Could reveal real bugs
@@ -147,11 +151,12 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
-- **ADR-0017 accepted:** research moved to a plugin, with a plugin contract in the core (not merged)
-- Operations guide, security policy, changelog and a systemd unit added (not merged)
+- **PR 22:** ADR-0017 accepted, and research moved to a plugin, with a plugin contract in the core
+  (merged without CI, A11)
+- Operations guide, security policy, changelog and a systemd unit added (in PR 22)
 - Real-model evals and the injection corpus run through the plugin; a rule against following paper
-  text added to every prompt over papers (not merged)
-- PaperQA2's prompts changed, and its refusal detection and the q5 check fixed (not merged)
+  text added to every prompt over papers
+- PaperQA2's prompts changed, and its refusal detection and the q5 check fixed (in PR 22)
 - **PRs 19 to 21:** WSL2 support and the review fixes (merged)
 - **PR 18:** home folder hidden from agent runs (merged)
 - Full check run on `main` on 2026-11-04
