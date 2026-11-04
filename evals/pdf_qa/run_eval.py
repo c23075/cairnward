@@ -81,7 +81,11 @@ def score(q: dict[str, Any], a: dict[str, Any]) -> dict[str, Any]:
         if s.get("file") == exp["file"] and nums and nums[0] <= exp["page"] <= nums[-1]:
             pages_ok = True
     res["cited"] = pages_ok
-    res["content"] = all(k.lower() in a.get("text", "").lower() for k in exp["keywords"])
+    text = a.get("text", "").lower()
+    res["content"] = all(  # a list is alternatives: the same fact in digits or words
+        any(k.lower() in text for k in ([want] if isinstance(want, str) else want))
+        for want in exp["keywords"]
+    )
     res["pass"] = res["cited"] and res["content"] and not res["invented"]
     return res
 

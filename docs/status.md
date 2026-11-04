@@ -52,7 +52,7 @@ for use, so all their real-world checks below apply.
 | I6 | A research library is plain while unlocked, its source PDFs are never encrypted, and it has no timed unlock (T-24) | Accepted |
 | I7 | Run snapshots can't be locked, and locking doesn't erase earlier plaintext from disks or old backups | Accepted |
 | I8 | Presidio's small spaCy model misses some names, so redaction isn't complete | Accepted |
-| I20 | PaperQA2 can say a source "explicitly states" something it doesn't. The checker only catches this inside quotation marks ([reruns](bench/results-2026-11-04-paperqa-reruns.md)) | Open |
+| I20 | PaperQA2's fast model can write wrong summaries, and the main model repeats them as what a source says. The false "explicitly states" claim stopped in 5 of 5 runs after a prompt fix, but other false claims about sources still pass the check ([results](bench/results-2026-11-04-paperqa-reruns.md)) | Open: partly fixed. Rely on the lean engine until it's tried on real papers |
 
 ### Functionality
 | # | Issue | State |
@@ -62,8 +62,8 @@ for use, so all their real-world checks below apply.
 | I11 | `keyring:` references usually fail under WSL. Use `env:` | Accepted: documented |
 | I12 | Only the built-in APA and IEEE citation styles work until pandoc or citeproc-js is installed | Your choice |
 | I13 | Audit anchoring is off, so there's no outside proof of the audit log | Your choice |
-| I21 | PaperQA2's refusals in other words aren't recognised as refusals, so `cannot_answer` is wrong | Open |
-| I22 | The check fails a correct "Six" on q5 because it looks for "6", so `cairnward check` can report a false failure | Open |
+| I21 | PaperQA2's refusals in other words weren't recognised. Wider detection now finds them, but can also mark a partial answer as a refusal | Fixed on the `paperqa-answers` branch, not merged |
+| I22 | The check failed a correct "Six" on q5 because it looked for "6" | Fixed on the `paperqa-answers` branch, not merged |
 
 ### Performance
 | # | Issue | State |
@@ -141,3 +141,4 @@ Read from the code. Connections to real outside services haven't been tried yet.
 - **PR 15:** research workflows (merged)
 - First backup taken on the desktop
 - Full check run on `main`, and PaperQA2's two failures rerun
+- PaperQA2's false "explicitly states" claims traced to its summaries, and its prompts changed (not merged)

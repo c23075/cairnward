@@ -36,6 +36,19 @@ PREFIX = "openai/cw/"
 # minutes on a CPU and may first wait in the gateway's queue. No retries: after a timeout, the
 # same call would wait in the queue all over again.
 CALL_TIMEOUT_S = 3600.0
+# Measured on a question the papers can't answer: left alone, the fast model ends a summary with
+# "it does not explicitly state ...", and the main model then reports, even quotes, that as what
+# the paper says (2 of 3 runs).
+SUMMARY_RULES = (
+    "\n\nReport only what the excerpt says. Never mention what it leaves out or doesn't state: "
+    "your summary will be read as what the paper itself says."
+)
+ANSWER_RULES = (
+    " The context may be an assistant's summaries, not the papers' own words, so never put it in "
+    "quotation marks, and never say a source states that something is missing. If the context "
+    'doesn\'t answer the question, begin your reply with "I cannot answer." and say briefly what '
+    "is missing."
+)
 
 
 def _walk(value: Any, path: str = "") -> Any:
@@ -93,7 +106,8 @@ def llm_config(model: str, gateway: str, key: str) -> dict[str, Any]:
 
 def build_settings(spec: dict[str, Any], key: str) -> Any:
     from paperqa import Settings
-    from paperqa.settings import AgentSettings, AnswerSettings, ParsingSettings
+    from paperqa.prompts import default_system_prompt, summary_json_system_prompt
+    from paperqa.settings import AgentSettings, AnswerSettings, ParsingSettings, PromptSettings
 
     gw = spec["gateway"]
     main, fast, embed = (PREFIX + spec["models"][k] for k in ("main", "fast", "embed"))
@@ -109,6 +123,8 @@ def build_settings(spec: dict[str, Any], key: str) -> Any:
         answer=AnswerSettings(evidence_k=int(spec.get("evidence_k", 10)),
                               evidence_skip_summary=bool(spec.get("skip_summary", False)),
                               max_concurrent_requests=1),
+        prompts=PromptSettings(system=default_system_prompt + ANSWER_RULES,
+                               summary_json_system=summary_json_system_prompt + SUMMARY_RULES),
     )  # fmt: skip
 
 
