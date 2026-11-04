@@ -46,9 +46,11 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update -q && sudo apt-get install -y -q pandoc restic
       - run: uv sync
-      # A floor against regressions, on Linux only (Windows skips more tests, ~71%). Measured
-      # 77% over all of src/; NFR-MAINT-1's target is 80% on core packages.
+      # A floor against regressions, on Linux only (Windows skips more tests, ~71%).
       - run: uv run pytest --cov --cov-report=term-missing ${{ runner.os == 'Linux' && '--cov-fail-under=75' || '' }}
+      - name: At least 80% in every package (NFR-MAINT-1)
+        if: runner.os == 'Linux'
+        run: uv run coverage json -o coverage.json && uv run python scripts/check_coverage.py coverage.json
 
   test-debian:
     runs-on: ubuntu-24.04

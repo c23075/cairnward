@@ -171,7 +171,7 @@ Linux mechanism: Anthropic's open-source **sandbox-runtime** (`srt`, pinned) wra
 |---|---|
 | `cw/coding:low` | fast model (`qwen3:1.7b`), no thinking, low limits |
 | `cw/coding:high` | main model (`qwen3:30b`), thinking on, larger budgets |
-| `cw/litreview-offline:medium` | main model, research tools allowed, network off |
+| `cw/litreview-offline:medium` | main model, thinking on (it can't be turned off on this model), research tools allowed, network off |
 | `cw/raw/qwen3:30b` | pass-through to a specific model with the environment `default` |
 
 Picking a virtual model in any client selects effort (thinking mode and budget, sampling, context size, per-request token/time limits) and environment (allowed tools, network policy, redaction, backend). Effort levels and environments remain user-definable TOML (`effort.toml`, `environments/*.toml`; schemas as in v0.5).

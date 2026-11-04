@@ -117,7 +117,7 @@ async def test_limit_leaves_room_for_reasoning_only_when_it_is_on(env: Any) -> N
     await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4, effort="high")
     assert fake.requests[-1]["think"] is True
     assert fake.requests[-1]["options"]["num_predict"] == ANSWER_TOKENS + REASONING_TOKENS
-    await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4, effort="medium")
+    await run_ask(cfg, engine, backends, "thesis", QUESTION, k=4, effort="low")
     assert fake.requests[-1]["think"] is False
     assert fake.requests[-1]["options"]["num_predict"] == ANSWER_TOKENS
 
