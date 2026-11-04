@@ -257,3 +257,62 @@ def test_artifacts_stay_in_the_plugins_area(services: Any) -> None:
         got = services.client.post("/v1/cairnward/artifacts", json={
             "path": bad, "content_b64": content})  # fmt: skip
         assert got.status_code == 400
+
+
+def test_wrong_passphrases_are_limited(tmp_path: Path) -> None:
+    from cairnward.store import Vault
+
+    cfg = configured(tmp_path, privacy='approvals = "off"\n')
+    sessions = PluginSessions(RunKeys())
+    key, _ = sessions.issue(cfg, "demo", "coding")
+    app = FastAPI()
+    with Vault.open(cfg.paths) as vault:
+        app.include_router(plugin_router(cfg, PolicyEngine(cfg), None, sessions, vault=vault))
+        c = TestClient(app, headers={"Authorization": f"Bearer {key}"})
+        url = "/v1/cairnward/item-keys"
+        made = c.post(url, json={"op": "lock", "item": "x", "secret": "a long passphrase"})
+        assert made.status_code == 200, made.text
+        again = c.post(url, json={"op": "open", "item": "x", "secret": "a long passphrase"})
+        assert again.json() == made.json()
+        assert vault.is_locked("plugin:demo:x") and not vault.is_locked("x")  # kept apart
+        codes = [c.post(url, json={"op": "open", "item": "x", "secret": "wrong"}).status_code
+                 for _ in range(6)]  # fmt: skip
+        assert codes == [400, 400, 400, 400, 400, 429]
+
+
+def test_a_plugins_key_cant_use_the_mcp_endpoint(tmp_path: Path) -> None:
+    from cairnward.backends import Backends
+    from cairnward.gateway.app import GatewayDeps, create_app
+    from cairnward.gateway.clients import ClientKeys
+    from cairnward.mcp.hub import McpHub
+    from cairnward.mcp.launch import LocalLauncher
+    from cairnward.mcp.pins import PinStore
+
+    cfg = configured(tmp_path, privacy='approvals = "off"\n')
+    engine = PolicyEngine(cfg)
+    run_keys = RunKeys()
+    sessions = PluginSessions(run_keys)
+    key, _ = sessions.issue(cfg, "demo", "coding")
+    hub = McpHub(cfg, engine, LocalLauncher(cfg, srt=None), PinStore.at(cfg.paths.data_dir))
+    app = create_app(GatewayDeps(cfg, engine, Backends(cfg.backends),
+                                 ClientKeys.at(cfg.paths.state_dir), None, run_keys, mcp=hub,
+                                 plugins=sessions))  # fmt: skip
+    with TestClient(app, base_url="http://127.0.0.1") as c:
+        got = c.post("/mcp", headers={"Authorization": f"Bearer {key}"},
+                     json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})  # fmt: skip
+    assert got.status_code == 401
+
+
+def test_a_name_that_resolves_here_is_refused_without_egress(tmp_path: Path) -> None:
+    cfg = configured(tmp_path, privacy='network = "open"\napprovals = "off"\n')
+    (cfg.paths.config_dir / "mcp.toml").write_text(
+        (cfg.paths.config_dir / "mcp.toml").read_text().replace("api.example.org", "localhost")
+    )
+    cfg = load_config(cfg.paths)
+    sessions = PluginSessions(RunKeys())
+    key, _ = sessions.issue(cfg, "demo", "coding")
+    app = FastAPI()
+    app.include_router(plugin_router(cfg, PolicyEngine(cfg), None, sessions))
+    c = TestClient(app, headers={"Authorization": f"Bearer {key}"})
+    got = c.post("/v1/cairnward/fetch", json={"url": "http://localhost:9/"})
+    assert got.status_code == 403

@@ -37,8 +37,10 @@ from cairnward.policy.engine import Action, PolicyEngine, host_matches
 from cairnward.redaction import check_outbound
 
 MAX_REQUEST = 2 * 1024 * 1024
-MAX_RESPONSE = 128 * 1024 * 1024
+MAX_RESPONSE = 64 * 1024 * 1024
+MAX_PARALLEL = 4
 RATE_WINDOW_S = 60.0
+MAX_KEY_FAILURES = 5  # wrong passphrases a minute, per plugin: opening a key is the costly part
 # Set by the core from the URL or by the HTTP client; a plugin choosing them could reach another
 # site on a shared address, or smuggle a second request.
 DROPPED_HEADERS = {"host", "connection", "content-length", "transfer-encoding", "te", "trailer",
@@ -53,6 +55,8 @@ class PluginSession:
     fetch_hosts: list[str]
     rate_per_minute: int
     recent: deque[float] = field(default_factory=deque)
+    key_failures: deque[float] = field(default_factory=deque)
+    in_flight: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(MAX_PARALLEL))
 
 
 class PluginSessions:
@@ -175,6 +179,15 @@ def plugin_router(cfg: Config, engine: PolicyEngine, backends: Any, sessions: Pl
         listed = any(host_matches(target, p) or host_matches(host, p) for p in allowed)
         if ip and special_reason(ip) and not listed:  # names are checked by egress when resolved
             raise refuse(403, f"{host} is this machine or a special address")
+        proxy = backends.web_proxy(s.environment) if backends is not None else None
+        if proxy is None and transport is None and not ip and not listed:
+            # no egress to do the check (`serve --no-egress`): do it here, for the same answer
+            try:
+                infos = await asyncio.get_running_loop().getaddrinfo(host, port)
+            except OSError:
+                raise refuse(502, f"can't resolve {host}") from None
+            if any(special_reason(str(info[4][0])) for info in infos):
+                raise refuse(403, f"{host} resolves to this machine or a special address")
         now = time.monotonic()
         while s.recent and now - s.recent[0] > RATE_WINDOW_S:
             s.recent.popleft()
@@ -202,11 +215,11 @@ def plugin_router(cfg: Config, engine: PolicyEngine, backends: Any, sessions: Pl
 
         sent = {"method": body.method, "url": body.url, "body": content.decode("utf-8", "replace")}
         request_digest = digest(canonical(sent))
-        proxy = backends.web_proxy(s.environment) if backends is not None else None
         kwargs: dict[str, Any] = {"transport": transport} if transport else {"proxy": proxy}
         status, reply_headers, data, error = 0, {}, b"", None
         try:
             async with (
+                s.in_flight,
                 httpx.AsyncClient(timeout=body.timeout_s, follow_redirects=False, trust_env=False,
                                   **kwargs) as client,
                 client.stream(body.method, body.url, headers=headers,
@@ -247,6 +260,11 @@ def plugin_router(cfg: Config, engine: PolicyEngine, backends: Any, sessions: Pl
         s = session_of(request)
         if vault is None:
             raise HTTPException(503, "no vault in this process")
+        now = time.monotonic()
+        while s.key_failures and now - s.key_failures[0] > RATE_WINDOW_S:
+            s.key_failures.popleft()
+        if len(s.key_failures) >= MAX_KEY_FAILURES:
+            raise HTTPException(429, "too many wrong passphrases: wait a minute")
         item = f"plugin:{s.name}:{body.item}"
         if body.item.startswith("library:") and vault.is_locked(body.item):
             item = body.item
@@ -265,6 +283,7 @@ def plugin_router(cfg: Config, engine: PolicyEngine, backends: Any, sessions: Pl
                 key = fn(item, body.secret or "")
                 outcome = {"key_b64": base64.b64encode(key).decode()}
         except (VaultError, LockedError, DecryptionError) as exc:
+            s.key_failures.append(time.monotonic())
             if engine.audit:
                 engine.audit.append("plugin.item_key", actor=f"plugin:{s.name}", target=item,
                                     environment=s.environment, outcome="error",

@@ -725,7 +725,13 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             c = cfg.clients.clients.get(client)
             return (c.default_environment if c else None) or cfg.main.defaults.environment
 
-        add_mcp_routes(app, deps.mcp, identity, default_environment=default_environment,
+        def not_a_plugin(request: Request) -> tuple[str, str | None] | None:
+            """A plugin's key is for its services: other plugins' tools would be capabilities it
+            wasn't given, and its own output would look like a client's."""
+            ident = identity(request)
+            return None if ident and ident[1] and ident[1].startswith("plugin-") else ident
+
+        add_mcp_routes(app, deps.mcp, not_a_plugin, default_environment=default_environment,
                        run_environment=deps.run_keys.environment.get)  # fmt: skip
 
     return app

@@ -273,8 +273,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     for name, text in art_actions:
         a = art_sub.add_parser(name, help=text)
-        a.add_argument("scope", choices=["conversation", "job", "run"])
-        a.add_argument("owner", help="conversation, job or run id")
+        a.add_argument("scope", choices=["conversation", "job", "run", "plugin"])
+        a.add_argument("owner", help="conversation, job or run id, or plugin name")
         if name in ("log",):
             a.add_argument("path", nargs="?")
         if name in ("show", "restore"):
