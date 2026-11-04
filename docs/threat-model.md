@@ -87,7 +87,7 @@ The model is **not** a trusted component: anything it decides passes through the
 
 | OWASP | Risk | Main Cairnward controls | Threats |
 |---|---|---|---|
-| LLM01 | Prompt Injection | Untrusted-content notes in approvals; policy engine outside the model; approvals; `user_initiated_only`. *Planned:* injection test corpus | T-07, T-14 |
+| LLM01 | Prompt Injection | Untrusted-content notes in approvals; policy engine outside the model; approvals; `user_initiated_only`. Injection test corpus in the research repository (`evals/injection`), run on the real model: one case still gets through sometimes | T-07, T-14 |
 | LLM02 | Sensitive Information Disclosure | Redaction; network off by default; hosted backends denied; egress report | T-07, T-08 |
 | LLM03 | Supply Chain | Pinned/hashed deps and MCP servers; licence allow-list; model format restrictions. Signed releases and SBOM: workflow built, never run on GitHub | T-04, T-15, T-16 |
 | LLM04 | Data and Model Poisoning | Models only from verified sources with checksums; RAG sources marked with provenance; synced data validated | T-05, T-15 |
