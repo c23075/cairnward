@@ -5,6 +5,8 @@ import importlib.util
 from types import ModuleType
 from typing import Any
 
+import pytest
+
 from cairnward.research.engines import paperqa
 
 GW = "http://127.0.0.1:8484/v1"
@@ -95,3 +97,31 @@ def test_answer_mapping() -> None:
     assert a.passages == 3 and not a.uncited and a.quote_problems == []
     c = paperqa.to_answer("q", "lib", {"answer": "I cannot answer.", "contexts": []}, papers, [])
     assert c.cannot_answer and c.uncited
+
+
+@pytest.mark.parametrize(
+    ("text", "declines"),
+    [
+        ("I cannot answer. The context discusses diversity patterns.", True),
+        ("I can\u2019t answer this.", True),
+        # real answers from the eval's unanswerable question
+        ("The context does not identify any specific bee species [1].", True),
+        ("The context provides no information on the most common bee species.", True),
+        ("Therefore, it is impossible to determine the most common bee species [1].", True),
+        ("Therefore, the question cannot be answered from the given information.", True),
+        # real answers to questions it could answer
+        ("Six gardeners reported using pesticides [1].", False),
+        ("The study does not recommend lawns; it recommends native plants [1].", False),
+    ],
+)
+def test_refusals_in_other_words(text: str, declines: bool) -> None:
+    assert paperqa.to_answer(
+        "q", "lib", {"answer": text, "contexts": []}, {}, []
+    ).cannot_answer is (declines)
+
+
+def test_prompt_additions_are_safe_to_format() -> None:
+    mod = worker()
+    assert mod.SUMMARY_RULES.format() == mod.SUMMARY_RULES  # PaperQA2 formats its prompts
+    assert mod.ANSWER_RULES.format() == mod.ANSWER_RULES
+    assert "I cannot answer." in mod.ANSWER_RULES  # the phrase PaperQA2 itself looks for

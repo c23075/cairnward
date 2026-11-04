@@ -38,6 +38,13 @@ HERE = Path(__file__).parent
 WORKER = HERE / "paperqa_worker.py"
 REQUIREMENTS = HERE / "paperqa-requirements.txt"
 _NAME = re.compile(r"^(?P<doc>.+?) pages (?P<start>\d+)(?:-(?P<end>\d+))?$")
+# The model doesn't always use PaperQA2's set phrase. An opening "the context does not ..." can
+# also start a partial answer; that only silences the "cites no passage" warning.
+_DECLINES = re.compile(
+    r"can(?:not|'t| not) answer|cannot be answered|impossible to determine"
+    r"|^\s*the context (?:does not|doesn't|provides no)",
+    re.IGNORECASE,
+)
 
 
 class EngineError(Exception):
@@ -127,7 +134,7 @@ def to_answer(question: str, library: str, result: dict[str, Any],
         text,
     )
     answer.text = text
-    answer.cannot_answer = "cannot answer" in text.lower() or "can't answer" in text.lower()
+    answer.cannot_answer = bool(_DECLINES.search(text.replace("\u2019", "'")))
     answer.uncited = not answer.sources
     for quote, _cited in quotations(text):
         if _find(quote, rows) is None:

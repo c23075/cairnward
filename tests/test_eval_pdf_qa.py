@@ -66,3 +66,18 @@ def test_scoring() -> None:
     u = {"id": "u", "expect": {"unanswerable": True}}
     assert ev.score(u, {"cannot_answer": True})["pass"]
     assert not ev.score(u, {"cannot_answer": False})["pass"]
+
+
+def test_a_fact_can_be_written_in_words() -> None:
+    ev = load()
+    q = {"id": "q", "expect": {"file": "a.pdf", "page": 3, "keywords": [["6", "six"]]}}
+    sources = [{"file": "a.pdf", "pages": "p. 3"}]
+    for text, expected in (("Six gardeners [1].", True), ("6 gardeners [1].", True),
+                           ("Five gardeners [1].", False)):  # fmt: skip
+        assert ev.score(q, {"text": text, "sources": sources})["content"] is expected
+
+
+def test_every_question_scores(tmp_path: Path) -> None:
+    ev = load()
+    for q in json.loads((EVAL / "questions.json").read_text())["questions"]:
+        assert "pass" in ev.score(q, {"text": "", "sources": []})

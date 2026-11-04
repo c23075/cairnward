@@ -29,7 +29,7 @@
     {"id": "q4", "question": "How many bee species did gardens with more than 20 flowering plant species host?",
      "expect": {"file": "bees.pdf", "page": 2, "keywords": ["31"]}},
     {"id": "q5", "question": "How many gardeners reported using pesticides?",
-     "expect": {"file": "bees.pdf", "page": 3, "keywords": ["6"]}},
+     "expect": {"file": "bees.pdf", "page": 3, "keywords": [["6", "six"]]}},
     {"id": "q6", "question": "What did the bee study recommend gardeners do with their lawns?",
      "expect": {"file": "bees.pdf", "page": 4, "keywords": ["native"]}},
     {"id": "u1", "question": "What was the budget of the glacier field campaigns?",

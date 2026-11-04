@@ -174,8 +174,8 @@ def pdf_qa_section(env: str, engines: list[str], log: Callable[[str], None]) -> 
         and not any(s["invented_citations"] or s.get("failed") for s in out["summaries"].values())
     )
     sec.status = "pass" if exit_ok else "fail"
-    sec.lines += ["", "M1 exit criteria (lean engine passes every question, zero invented "
-                  f"citations): **{'met' if exit_ok else 'not met'}**"]  # fmt: skip
+    sec.lines += ["", "M1 exit criteria (lean engine passes every question; no engine invents a "
+                  f"citation or stops): **{'met' if exit_ok else 'not met'}**"]  # fmt: skip
     return sec
 
 
