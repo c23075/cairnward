@@ -42,7 +42,7 @@ minutes, so 100 ms can't be noticed. **Proposed: change the target, not the code
 
 ## Why one Aider call took 81 minutes: mostly reasoning
 
-From the coding eval in [check-2026-11-03](check-2026-11-03.md), on `cw/coding:medium`, where
+From the coding eval in `check-2026-11-03.md` (on the `dev` branch), on `cw/coding:medium`, where
 reasoning is off:
 
 | Call | Prompt tokens | Reply tokens | Seconds | Reply tokens/s after ~20 tok/s reading | Reasoning share of reply |

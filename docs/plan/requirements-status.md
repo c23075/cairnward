@@ -1,88 +1,18 @@
-# Handoff, 2026-11-02: from the cloud session to the owner's machine
+# Requirements status
 
-Work so far ran in a cloud container (no access to the real models or most external
-services). From here it continues in a local Claude Code session on the reference
-machine, where `cairnward serve` is running with real Ollama models.
-
-## State
-- `main` is green on CI (lint, tests on Ubuntu 3.12/3.13, Windows, Debian, isolation, browser).
-- Done: M0–M3 and the OpenShell follow-ups (`docs/plan/m3.md`); the "loose ends":
-  online search for the model (`cairnward__lit_find`), remote MCP servers over HTTP,
-  rclone and remote restic backups through egress, dashboard settings editing and
-  Backups view, axe-core audit, vault recovery key; and from "known gaps": idle MCP
-  servers stop, isolated core's local addresses through egress, engine locks shipped
-  in the repository (Presidio's included).
-- Fixed after first runs on this machine: `serve` reports a busy port; CLI
-  `library index/search/ask` no longer fail after success ("Event loop is closed");
-  the lit.ask eval's scoring and the doubled "p. p." in citations; `cairnward check`
-  keeps going when one section crashes.
-
-## First real results (`cairnward check`, qwen3:30b on CPU)
-lit.ask eval, lean engine: **6/8 passed**, ~4 min per question. All answerable questions
-cited the right page with the right content; both unanswerable ones were declined.
-**q5** ("How many gardeners reported using pesticides?") and **u2** ("Which bee species
-was the most common?") each had one *invented* item (a citation number with no passage,
-or a quotation not in the papers). PaperQA2 produced no results (it most likely failed
-on its first question; the eval now records where an engine stops). Coding eval and
-chat clients: skipped (no coding agent installed; no chat app used yet).
-
-## Next, in order
-1. **q5 and u2: done, 8/8 on the new code.** u2 was a checker false alarm; q5 was never
-   reproduced. Empty answers (reasoning used the whole token limit) now have a larger limit
-   and a clear warning. See
-   [results-2026-11-03-lit-ask.md](../bench/results-2026-11-03-lit-ask.md). Restart
-   `cairnward serve` to pick this up; the full run through an isolated server is step 3's
-   `cairnward check`.
-2. **PaperQA2: fixed.** The library's 60 s per-call default was too short; q1 now passes on
-   the real model. See
-   [results-2026-11-03-paperqa.md](../bench/results-2026-11-03-paperqa.md). All eight
-   questions then passed in step 3's check.
-3. **Full check, 2026-11-03: done.** Through the isolated server: lit.ask 8/8 on both engines,
-   nothing invented; coding eval passes with Aider (99 minutes, one model call took 81, cause
-   not investigated). The review pipeline failed because the fast model excluded every
-   relevant paper, so the main model now screens (D63). The review eval then passed 12/12 on
-   a scratch server that wasn't isolated, and 9/12 through the isolated server, where screening
-   excluded a borderline paper (napping). Excluding now takes two tries that agree; the next
-   isolated run passed 12/12, though no paper happened to reach the disagreement path. See
-   [results-2026-11-03-screening.md](../bench/results-2026-11-03-screening.md). The full report
-   is on the `dev` branch (`docs/bench/check-2026-11-03.md`).
-4. **Owner-side checks not yet done** (each was tested only against a stand-in):
-   Docling (`research engine install docling`, then `research engine export-lock docling`
-   and commit the lock), GROBID, the five academic APIs and
-   `lit_find`, Zotero, Drive mirror with real rclone, restic to a real remote, hosted
-   providers, a real remote MCP server, an RFC 3161 timestamp server, the manual
-   chat-client checklist at the end of the check report.
-   Presidio was checked for real in the cloud session (works; the small spaCy model
-   misses some names).
-5. **Remaining known gaps:**
-   - OAuth for remote MCP servers: built (`cairnward mcp login|logout`), tested with the real
-     SDK against a fake authorization server; no real provider tried, nor the core's token
-     refresh in the sandbox.
-   - Locking: conversations, their artifacts, finished jobs and run artifact repositories can
-     be locked. Run snapshots can't (they're per workspace, not per run).
-   - Dashboard: trying settings editing and "back up now" in isolated mode.
-6. Deferred by decision (D71): multi-device replication, multi-agent workflows.
-   Not scheduled: OpenShell as a second sandbox backend; TLS-terminating egress.
-
-## Starting the local session
-In `~/projects/cairnward` (after `git pull`), start Claude Code and say, e.g.:
-
-> Read CLAUDE.md and docs/plan/handoff-2026-11-02.md, then do step 1.
-
-## Requirements checklist (whole project, as of this handoff)
-Every requirement in [requirements.md](../requirements.md), checked against the tests that
-exist and the spec's own notes.
+Every requirement in [requirements.md](../requirements.md), checked against the tests that exist
+and the measurements, as of 2026-11-04. Current work and next steps are in the newest
+`handoff-*.md` here.
 
 **Key:**
-- ✅ done, covered by automated tests (and CI);
+- ✅ done, covered by automated tests (and CI), or measured on the reference machine where the row says so;
 - 🧪 built, but checked only against a stand-in or fake, so a real check is pending (mostly on this machine);
 - ◐ partly done;
 - ☐ not done;
 - ⏸ deferred or "Won't" by decision.
 
-The Verification column of requirements.md now names real test files where it named
-files; other cells there still describe the kind of test ("integration", "e2e"). The real
-tests are named here too.
+Some Verification cells in requirements.md describe the kind of test ("integration", "e2e"); the
+real tests are named here.
 
 ### Privacy settings
 | ID | Status | Notes |
@@ -139,9 +69,8 @@ tests are named here too.
 | FR-MCP-2 manifest ∩ environment, sandboxed | ✅ | `test_mcp.py`, `isolation/test_mcp_sandbox.py` |
 | FR-MCP-3 pinning, rug-pull detection | ✅ | `test_mcp.py` |
 | FR-MCP-4 skills over MCP | ✅ | `test_mcp_builtins.py` |
-| (remote MCP servers over HTTP, added) | ◐ | `test_mcp_remote.py` against a local SDK server; no real hosted server tried; **OAuth unfinished** (`wip/mcp-oauth`) |
-| FR-AGT-1 agent profiles | ◐ | Aider, Qwen Code, opencode tested in the sandbox against a scripted model; **Goose untested**; coding eval passes with real models and Aider only |
-| (remote MCP servers over HTTP, added) | ◐ | `test_mcp_remote.py` against a local SDK server; no real hosted server tried; OAuth in `test_mcp_oauth.py` (fake authorization server) |
+| FR-AGT-1 agent profiles | ◐ | Aider, Qwen Code, opencode tested in the sandbox against a scripted model; **Goose untested**; coding eval with real models passes with Aider only (3 of 3 after the reasoning fix) |
+| (remote MCP servers over HTTP, added) | ◐ | `test_mcp_remote.py` against a local SDK server; OAuth in `test_mcp_oauth.py` against a fake authorization server; no real server or provider tried, nor token refresh inside the sandbox |
 | FR-AGT-2 run snapshots, diff, revert | ✅ | `test_snapshots.py` |
 | FR-AGT-3 run linked in audit and vault | ✅ | `test_run.py` |
 | FR-CLI-1 Open WebUI, Jan | 🧪 | setup guides and compatibility tests done; manual checklist (`docs/clients/checklist.md`) not done |
@@ -162,7 +91,7 @@ tests are named here too.
 | ID | Status | Notes |
 |---|---|---|
 | FR-RES-1 PDF library | ✅ | `test_research_library.py`, `test_parsing.py`; pypdfium2 real; **Docling only stand-in-tested** |
-| FR-RES-2 `lit.ask` with page citations | ✅ | real eval through the isolated server: 8/8, nothing invented (`docs/bench/check-2026-11-03.md`) |
+| FR-RES-2 `lit.ask` with page citations | ✅ | real eval through the isolated server: 8/8, nothing invented (report on the `dev` branch); synthetic papers only |
 | FR-RES-3 jobs: queue, resume, schedule | ✅ | `test_jobs_resume.py` |
 | FR-RES-4 review pipeline | ✅ | `evals/litreview_table` with real models through the isolated server: 12/12, on synthetic papers; an earlier run 9/12 led to the two-try rule for excluding; `test_jobs_resume.py` |
 | FR-RES-5 citation check | ✅ | `test_citation_check.py`; `evals/citation_existence` tests the checker, `evals/pdf_qa` real answers; DOIs are only checked for form |
@@ -210,17 +139,17 @@ tests are named here too.
 ### Non-functional
 | ID | Status | Notes |
 |---|---|---|
-| NFR-P2 gateway overhead ≤ 50 ms | ◐ | `scripts/bench_gateway.py`: **Strict ~59 ms, misses**; all off 6–7 ms, meets; isolated mode not measured |
-| NFR-P3 cache reuse ≥ 10× | ◐ | 18.6× measured on the backend; not yet measured through the gateway |
-| NFR-P5 core ≤ 500 MB, starts ≤ 3 s | ☐ | not measured |
-| NFR-P6 first token within 15 s / 30 s | ☐ | not measured through the gateway |
+| NFR-P2 gateway overhead ≤ 50 ms | ◐ | `scripts/bench_gateway.py`: **Strict 105 ms isolated, 59 ms not: misses**; all off 7 ms, meets. Proposed: change the target (owner decision) |
+| NFR-P3 cache reuse ≥ 10× | ✅ | measured through the gateway: 19.6× |
+| NFR-P5 core ≤ 500 MB, starts ≤ 3 s | ◐ | measured: 122 MB meets; **start 5.3 s isolated, misses** (2.7 s not isolated) |
+| NFR-P6 first token within 15 s / 30 s | ✅ | measured through the gateway, model loaded: 11 to 14 s fast, 22 s main; loading the main model first adds about 70 s |
 | NFR-R1 no data loss, jobs resumable | ✅ | `test_jobs_resume.py`, atomic writes |
 | NFR-R2 audit before every effect | ✅ | as FR-AUD-1 |
 | NFR-S1 Strict: no outbound unless allow-listed | ✅ | isolation suite, `test_egress.py` |
-| NFR-S2 threat model reviewed each milestone | ◐ | `docs/threat-model.md` exists; reviews per milestone not recorded |
+| NFR-S2 threat model reviewed each milestone | ◐ | first review recorded (`docs/reviews/threat-model-2026-11-03.md`), PR template prompts for more; **no review yet by anyone but the assistant that wrote the code** |
 | NFR-S4 isolation holds for every sandbox type | ✅ | isolation suite in CI |
 | NFR-PORT-1 Linux; unit tests on Windows | ✅ | CI (Ubuntu, Debian, Windows) |
 | NFR-PORT-2 WSL2 | ⏸ | Won't (Phase 0) |
 | NFR-SUP-1 hash-locked deps, audits, licence check, pinned actions | ✅ | hash locks, pip-audit, npm audit and pinned actions done; licence allow-list in CI's audit job (runtime Python dependencies; research engines and npm packages not covered) |
 | NFR-SUP-2 SBOM + signed releases | 🧪 | `release.yml`, `test_release.py` (real build and SBOM); signing and the draft release have never run on GitHub |
-| NFR-MAINT-1 ruff, mypy strict, ≥ 80% coverage | ◐ | ruff and mypy strict enforced; coverage 77% over all of `src/`; CI fails below 75% on Linux; **80% not reached**, and "core packages" isn't defined |
+| NFR-MAINT-1 ruff, mypy strict, ≥ 80% coverage | ✅ | every counted package at 80% or more, enforced by `scripts/check_coverage.py` in CI; 78% over all of `src/`; a short list is left out by name, including `core/server.py` |
