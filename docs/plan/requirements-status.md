@@ -149,7 +149,7 @@ real tests are named here.
 | NFR-S2 threat model reviewed each milestone | ◐ | first review recorded (`docs/reviews/threat-model-2026-11-03.md`), PR template prompts for more; **no review yet by anyone but the assistant that wrote the code** |
 | NFR-S4 isolation holds for every sandbox type | ✅ | isolation suite in CI |
 | NFR-PORT-1 Linux; unit tests on Windows | ✅ | CI (Ubuntu, Debian, Windows) |
-| NFR-PORT-2 WSL2 | ⏸ | Won't (Phase 0) |
+| NFR-PORT-2 WSL2 | 🧪 | D74: detection, hiding Windows drives and programs, doctor checks (`test_wsl.py`, `isolation/test_wsl_sandbox.py`: stand-in `/proc` and folders in the real sandbox); **never run on real WSL2**; checklist in `docs/wsl2.md` |
 | NFR-SUP-1 hash-locked deps, audits, licence check, pinned actions | ✅ | hash locks, pip-audit, npm audit and pinned actions done; licence allow-list in CI's audit job (runtime Python dependencies; research engines and npm packages not covered) |
 | NFR-SUP-2 SBOM + signed releases | 🧪 | `release.yml`, `test_release.py` (real build and SBOM); signing and the draft release have never run on GitHub |
 | NFR-MAINT-1 ruff, mypy strict, ≥ 80% coverage | ✅ | every counted package at 80% or more, enforced by `scripts/check_coverage.py` in CI; 78% over all of `src/`; a short list is left out by name, including `core/server.py` |

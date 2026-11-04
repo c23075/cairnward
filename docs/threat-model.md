@@ -66,6 +66,7 @@ The model is **not** a trusted component: anything it decides passes through the
 | T-25 | Elevation of privilege | A crafted PDF exploits a third-party engine, or PaperQA2's `pickle` cache is altered | PaperQA2 and Docling workers run in the sandbox with isolation on and have their own environment; PaperQA2 refuses settings that don't point at the gateway; Presidio runs inside the core's sandbox with no network; cache folder is owner-only and hidden from agent runs, though profiles may write the rest of `~/.cache` | §4.6 | FR-RES-13, FR-RED-2 |
 | T-26 | Tampering (output) | Reasoning that the model writes into its visible reply reaches a client as the answer, so a client can act on a draft the model discarded; it's also stored in the vault, and wastes hours on a CPU | `medium` and `high` efforts ask for reasoning, which then comes back separately; the gateway moves reasoning written into a reply out of the answer, audits it and asks that model for reasoning from then on. Residual: the first streamed reply from a model not yet known to leak, which can't be taken back ([review](reviews/threat-model-2026-11-03.md)) | §4.1 | — |
 | T-27 | Denial of service | The only copy of the backup password is on the disk that failed, so backups can't be restored | Password in the state folder by default; `password_command` for your own store. `cairnward setup`, `backup init` and `doctor` all say to keep a copy elsewhere | §4.8 | FR-SYNC-3 |
+| T-28 | Elevation of privilege, info disclosure | Under WSL2 a sandboxed program reaches Windows: reads a Windows drive, starts a Windows program outside the sandbox, or opens a VM socket; or a Windows program reads Linux files through `\\wsl.localhost` | Every sandbox hides the Windows drives, `/init` and `/run/WSL`, and the doctor's self-test probes all three routes. srt blocks VM sockets, **except in the core's sandbox, which allows Unix sockets**; what they reach there is unchecked. Windows programs reading Linux files is accepted: Linux permissions don't apply, and only locking protects data. **Tested on plain Linux with stand-ins only** | Mitigated in part; unverified on WSL2 |
 
 ## 4. LINDDUN privacy threats
 
@@ -96,7 +97,7 @@ The model is **not** a trusted component: anything it decides passes through the
 
 ## 6. Accepted risks (Phase 0)
 - Protections the user switches off (Open preset, Custom settings) don't apply; this is the user's choice, made visible by badges and audited (spec §5.0).
-- A compromised OS account or root user can read everything that's unlocked and capture passphrases as they're typed.
+- A compromised OS account or root user can read everything that's unlocked and capture passphrases as they're typed. Under WSL2 that includes any program running as the user on Windows (T-28).
 - Prompt injection can't be fully prevented by any known method; Cairnward limits its impact instead (approvals, network off, user-only actions).
 - Unlocked chats' search index is plaintext in SQLite; deleting it is best effort on SSDs.
 - A research library is plain text unless locked, and locking doesn't cover its source PDFs (T-24).

@@ -41,6 +41,7 @@ from cairnward.sandbox import (
     wrap_with_ask,
 )
 from cairnward.sandbox.srt import srt_dirs
+from cairnward.sysinfo import on_windows_drive, wsl_version
 
 INTERPRETERS = ("python", "node", "bun", "deno", "bash", "sh", "zsh", "ruby", "perl")
 BASE_ENV = (
@@ -249,6 +250,11 @@ def plan_run(
             )
         from cairnward.research.engines.paperqa import cache_dir
 
+        if on_windows_drive(workspace):
+            warnings.append(
+                "the workspace is on a Windows drive: Windows programs can change it, file "
+                "permissions don't apply and it's slow; keep projects in the Linux file system"
+            )
         p = cfg.paths
         writable = _ensure_dirs(home_dirs(profile))
         # PaperQA2's index holds library text and a pickle: profiles may write ~/.cache
@@ -284,6 +290,9 @@ def plan_run(
         return Plan(argv, env, True, spec, warnings)
 
     warnings.append("isolation = off: the agent runs unsandboxed and could bypass Cairnward")
+    if wsl_version():
+        warnings.append("isolation = off under WSL: it can also reach your Windows files and "
+                        "start Windows programs")  # fmt: skip
     if egress:
         env.update(
             HTTP_PROXY=egress, HTTPS_PROXY=egress, NO_PROXY="127.0.0.1,localhost,::1"

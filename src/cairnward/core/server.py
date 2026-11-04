@@ -34,6 +34,7 @@ from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, c
 from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
+from cairnward.sysinfo import on_windows_drive
 
 if TYPE_CHECKING:
     from cairnward.backends import Backends
@@ -781,6 +782,18 @@ def socket_path_problem(cfg: Config) -> str | None:
     return None
 
 
+def windows_drive_problem(cfg: Config) -> str | None:
+    """Under WSL: Cairnward's own folders on a Windows drive, where SQLite and sockets fail."""
+    p = cfg.paths
+    found = [str(d) for d in (p.config_dir, p.data_dir, p.state_dir) if on_windows_drive(d)]
+    if found:
+        return (
+            f"{', '.join(found)} on a Windows drive, where SQLite's locks, Unix sockets and file "
+            "permissions don't work reliably; keep them in the Linux file system"
+        )
+    return None
+
+
 def _already_running(cfg: Config) -> bool:
     import socket as _socket
 
@@ -822,7 +835,7 @@ def port_problems(cfg: Config, *, with_egress: bool) -> list[str]:
 
 def serve(cfg: Config, *, with_egress: bool = True, log: Log) -> int:
     """Isolated mode when the privacy settings ask for it and it's available."""
-    if problem := socket_path_problem(cfg):
+    if problem := socket_path_problem(cfg) or windows_drive_problem(cfg):
         log(f"cairnward: can't start: {problem}")
         return 2
     if busy := port_problems(cfg, with_egress=with_egress):

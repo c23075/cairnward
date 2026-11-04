@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from cairnward.config.paths import Paths
+from cairnward.sysinfo import windows_mounts, wsl_version
 
 SRT_VERSION = "0.0.81"
 MIN_NODE = (22, 12)
@@ -132,8 +133,21 @@ SECRET_DIRS = (
 )
 
 
+# Under WSL: the way out to Windows. Starting a Windows program runs /init, which asks Windows
+# over the socket in /run/WSL; that program is outside the sandbox and its network rules.
+WSL_HIDDEN = ("/init", "/run/WSL", "/mnt/wsl", "/mnt/wslg")
+
+
 class SandboxUnavailable(Exception):
     pass
+
+
+def windows_paths() -> list[Path]:
+    """What no sandbox may read under WSL: the Windows drives and the way to Windows programs.
+    Empty elsewhere. A workspace on a drive stays reachable: srt re-binds write paths."""
+    if wsl_version() is None:
+        return []
+    return [*map(Path, WSL_HIDDEN), *windows_mounts()]
 
 
 def install_dir(paths: Paths) -> Path:
@@ -179,7 +193,11 @@ def locate(paths: Paths) -> list[str] | None:
 def require(paths: Paths) -> list[str]:
     if not sys.platform.startswith("linux"):
         raise SandboxUnavailable(
-            "OS isolation is supported on Linux only (Windows: via WSL2, later)"
+            "OS isolation is supported on Linux only (on Windows, run Cairnward inside WSL2)"
+        )
+    if wsl_version() == 1:
+        raise SandboxUnavailable(
+            "OS isolation needs WSL2; this is WSL1 (in Windows: wsl --set-version <distro> 2)"
         )
     cmd = locate(paths)
     if cmd is None:
@@ -213,10 +231,11 @@ class SandboxSpec:
     allow_all_unix_sockets: bool = False
 
     def settings(self) -> dict[str, Any]:
+        deny = dict.fromkeys([*self.deny_read, *windows_paths()])  # here so no sandbox misses it
         settings: dict[str, Any] = {
             "network": {"allowedDomains": sorted(set(self.allowed_hosts)), "deniedDomains": []},
             "filesystem": {
-                "denyRead": [str(p) for p in self.deny_read if p.exists()],
+                "denyRead": [str(p) for p in deny if p.exists()],
                 "allowRead": [str(p) for p in self.allow_read],
                 "allowWrite": [str(p) for p in self.allow_write],
                 "denyWrite": [],

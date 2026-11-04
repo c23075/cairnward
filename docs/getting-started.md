@@ -1,5 +1,7 @@
 # Getting started (Debian/Ubuntu)
 
+On Windows, read [Running Cairnward on Windows (WSL2)](wsl2.md) first, then follow this inside WSL.
+
 ## 1. Install
 ```bash
 sudo apt install git bubblewrap socat ripgrep
