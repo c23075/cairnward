@@ -247,6 +247,8 @@ Where each kind of issue sits once research is a plugin:
 - Plugins come only from a path the user names. A list of known plugins needs someone to publish it.
 
 ### Where the build differs from this ADR
+- **Repository name:** the repository is `literature-review-agent-plugin`. The package and its
+  command stay `cairnward-research`, which is the name this ADR uses throughout.
 - **Rule 1 is narrower:** a direct `network` entry must be an exact local address and port. An
   outside host is refused, because the sandbox would reach it around egress, so "another protocol"
   isn't supported in contract 1.

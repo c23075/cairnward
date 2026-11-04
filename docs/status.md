@@ -29,7 +29,7 @@ for use, so all their real-world checks below apply.
 ## In progress
 | Item | State |
 |---|---|
-| Research as a plugin | Local only: the `plugin-split` branch here, and a separate `cairnward-research` repository with no remote. Your running server and data haven't moved |
+| Research as a plugin | Local only: the `plugin-split` branch here, and the research repository, `literature-review-agent-plugin`, with nothing pushed. Your running server and data haven't moved |
 
 After it's merged: restart `cairnward serve` from `main`, then run `cairnward-research install-plugin`
 and `cairnward-research import`. See [plugins](plugins.md) and [operations](operations.md).
@@ -46,7 +46,6 @@ and `cairnward-research import`. See [plugins](plugins.md) and [operations](oper
 | A7 | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
 | A8 | Decide whether the repository goes public | Release signing writes its name to a public log, so the workflow stops before signing while it's private |
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
-| A11 | Choose the research repository's name, and whether it goes on GitHub | You made `literature-review-agent-plugin`, and ADR-0017 says `cairnward-research`. Nothing is pushed yet |
 
 ## Known issues
 ### Security and privacy

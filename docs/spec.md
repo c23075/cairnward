@@ -250,7 +250,7 @@ A plugin is an MCP server with `kind = "plugin"`. It gets no capability that a p
 - **Versioned:** `contract_min` and `contract_max` must include the core's contract version (now 1).
 - **Commands:** `cairnward plugin add | list | pin | verify | run | allow-read | helper | remove`. `plugin run` starts a command in the plugin's sandbox with your terminal. `plugin helper` starts a program that can't use fetch (rclone) outside the sandbox with its traffic through egress.
 
-Research workflows are one such plugin, in their own repository (`cairnward-research`), with their design, requirements (FR-RES-*) and evals there. Old settings (`[research]`, `research_sources`, `include_research`) still load, so a config file doesn't break: the first two are ignored and belong in the plugin's `research.toml`.
+Research workflows are one such plugin, in their own repository (`literature-review-agent-plugin`, package `cairnward-research`), with their design, requirements (FR-RES-*) and evals there. Old settings (`[research]`, `research_sources`, `include_research`) still load, so a config file doesn't break: the first two are ignored and belong in the plugin's `research.toml`.
 
 ### 4.7 Artifacts
 Git repo per conversation, research job and agent run (one commit per write; restore = new commit). Previews of HTML/SVG in the dashboard use a sandboxed origin with no network.

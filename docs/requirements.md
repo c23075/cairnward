@@ -98,7 +98,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-ENC-5 | Crypto-shredding on purge | M | M1 | `test_store.py` |
 
 ### Research workflows
-FR-RES-1 to FR-RES-13 moved to the `cairnward-research` repository with ADR-0017 (D75).
+FR-RES-1 to FR-RES-13 moved to the `literature-review-agent-plugin` repository with ADR-0017 (D75).
 
 ### Plugins
 | ID | Requirement | Pri | MS | Verification |

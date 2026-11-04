@@ -8,7 +8,7 @@ plugin behaving well. The design is in [ADR-0017](adr/0017-research-as-a-plugin.
 A plugin ships a manifest. The research plugin writes its own:
 
 ```bash
-uv tool install ./cairnward-research
+uv tool install ./literature-review-agent-plugin
 ```
 
 ```bash

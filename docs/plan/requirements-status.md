@@ -97,7 +97,7 @@ real tests are named here.
 | FR-PLUG-5 approval after plugin output | ✅ | `test_plugin_contract.py`, with a scripted approver; not seen in a chat client. An agent's own network requests aren't covered |
 | FR-PLUG-6 conformance suite | ✅ | `isolation/test_plugin_contract.py`; only the research plugin and a test plugin have run it |
 
-Research requirements (FR-RES-*) are tracked in the `cairnward-research` repository.
+Research requirements (FR-RES-*) are tracked in the `literature-review-agent-plugin` repository.
 
 ### Artifacts, audit, redaction
 | ID | Status | Notes |

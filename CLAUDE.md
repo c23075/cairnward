@@ -2,7 +2,7 @@
 
 A local privacy gateway (model gateway, egress proxy, policy engine, audit log, transcript
 vault, MCP proxy, plugin contract) for one person's machine. Research workflows are a plugin in
-another repository (`cairnward-research`, ADR-0017).
+another repository (`literature-review-agent-plugin`, ADR-0017).
 Python 3.12+, uv, Apache-2.0. Design: `docs/spec.md` (decisions D1–D75), ADRs in
 `docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. The current
 state and next steps are in the newest `docs/plan/handoff-*.md`; requirement status is in
