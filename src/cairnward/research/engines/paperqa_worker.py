@@ -6,7 +6,7 @@ access to Cairnward's gateway only. Standalone on purpose: no Cairnward imports.
 
 stdin:  {"gateway": "http://127.0.0.1:8484/v1", "models": {"main", "fast", "embed"},
          "papers": [{"path", "docname", "title"}], "question", "cache", "evidence_k",
-         "skip_summary"}
+         "skip_summary", "cache_key"}
 env:    CAIRNWARD_API_KEY (a run key)
 stdout: a line "RESULT {json}" (answer, contexts) or "ERROR {json}".
 
@@ -14,10 +14,16 @@ Before anything runs, guard() checks the final settings: every model must be one
 Cairnward's virtual models and every API base the gateway; online metadata lookups
 (use_doc_details) and image enrichment (multimodal) must be off; no other URL may
 appear. A violation stops the worker (FR-RES-13); the sandbox would block it anyway.
+
+The index is cached with pickle, so loading it runs code. It's signed with an HMAC key that
+Cairnward keeps in its state folder and passes in on stdin: an index written by anything
+else is ignored and rebuilt, never loaded.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import pickle
@@ -106,6 +112,38 @@ def build_settings(spec: dict[str, Any], key: str) -> Any:
     )  # fmt: skip
 
 
+def _sig_path(path: Path) -> Path:
+    return path.with_name(path.name + ".sig")
+
+
+def _sign(key: bytes, data: bytes) -> str:
+    return hmac.new(key, data, hashlib.sha256).hexdigest()
+
+
+def load_cache(path: Path, key: bytes) -> Any:
+    """The cached index, or None when there's none or its signature doesn't match (it's
+    rebuilt). Checked before unpickling: pickle runs code."""
+    try:
+        data = path.read_bytes()
+        expected = _sig_path(path).read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not hmac.compare_digest(_sign(key, data), expected):
+        print("cairnward: the PaperQA2 index isn't signed by Cairnward; rebuilding it",
+              file=sys.stderr)  # fmt: skip
+        return None
+    return pickle.loads(data)  # signed by Cairnward, checked above
+
+
+def save_cache(path: Path, key: bytes, obj: Any) -> None:
+    data = pickle.dumps(obj)
+    tmp, sig_tmp = path.with_suffix(".tmp"), path.with_suffix(".sig.tmp")
+    tmp.write_bytes(data)
+    sig_tmp.write_text(_sign(key, data), encoding="ascii")
+    tmp.replace(path)
+    sig_tmp.replace(_sig_path(path))
+
+
 async def run(spec: dict[str, Any]) -> dict[str, Any]:
     from paperqa import Docs
 
@@ -115,10 +153,8 @@ async def run(spec: dict[str, Any]) -> dict[str, Any]:
     if problems:
         raise PermissionError("refusing to run: " + "; ".join(problems))
     cache = Path(spec["cache"])
-    docs = Docs()
-    if cache.exists():
-        with cache.open("rb") as fh:
-            docs = pickle.load(fh)
+    cache_key = bytes.fromhex(spec["cache_key"])
+    docs = load_cache(cache, cache_key) or Docs()
     known = {d.docname for d in docs.docs.values()}
     added = 0
     for paper in spec["papers"]:
@@ -127,10 +163,7 @@ async def run(spec: dict[str, Any]) -> dict[str, Any]:
                             docname=paper["docname"], settings=settings)  # fmt: skip
             added += 1
     if added:
-        tmp = cache.with_suffix(".tmp")
-        with tmp.open("wb") as fh:
-            pickle.dump(docs, fh)
-        tmp.replace(cache)
+        save_cache(cache, cache_key, docs)
     session = await docs.aquery(spec["question"], settings=settings)
     contexts = []
     for c in session.contexts:

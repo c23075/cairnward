@@ -34,7 +34,7 @@ from fastapi.responses import (
     RedirectResponse,
     Response,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from cairnward import __version__
 from cairnward.audit.log import AuditLog
@@ -561,12 +561,23 @@ def dashboard_app(
         disposition = f'attachment; filename="{name}"'
         return PlainTextResponse(text, headers={"Content-Disposition": disposition})
 
+    def parse[M: BaseModel](model: type[M], body: dict[str, Any]) -> M:
+        try:
+            return model.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(400, f"bad request body: {exc.errors()[0]['msg']}") from None
+
     @app.post("/api/vault/{conv_id}/{op}")
     async def vault_op(conv_id: str, op: str, request: Request) -> dict[str, Any]:
         v = need_vault()
         body: dict[str, Any] = {}
         if (await request.body()).strip():
-            body = await request.json()
+            try:
+                body = await request.json()
+            except ValueError:
+                raise HTTPException(400, "the request body isn't JSON") from None
+            if not isinstance(body, dict):
+                raise HTTPException(400, "the request body must be a JSON object")
         if op == "delete":
             vault_call(lambda: v.soft_delete(conv_id))
         elif op == "restore":
@@ -576,16 +587,16 @@ def dashboard_app(
         elif op == "pin":
             vault_call(lambda: v.set_pinned(conv_id, bool(body.get("pinned", True))))
         elif op == "title":
-            title = TitleIn.model_validate(body).title
+            title = parse(TitleIn, body).title
             vault_call(lambda: v.set_title(conv_id, title))
         elif op == "move":
-            folder_id = MoveIn.model_validate(body).folder_id
+            folder_id = parse(MoveIn, body).folder_id
             vault_call(lambda: v.move_to_folder(conv_id, folder_id))
         elif op == "lock":
-            secret = PassIn.model_validate(body).passphrase
+            secret = parse(PassIn, body).passphrase
             await asyncio.to_thread(vault_call, lambda: v.lock(conv_id, secret))
         elif op == "unlock":
-            data = PassIn.model_validate(body)
+            data = parse(PassIn, body)
             await asyncio.to_thread(vault_call, lambda: v.unlock(conv_id, data.passphrase,
                                                                  minutes=data.minutes))  # fmt: skip
         elif op == "relock":

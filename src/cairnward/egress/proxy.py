@@ -21,6 +21,7 @@ import contextlib
 import re
 import secrets
 import socket
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -142,6 +143,7 @@ class EgressProxy:
         self._server: asyncio.Server | None = None
         # Approval prompts are interactive; one at a time.
         self._ask_lock = asyncio.Lock()
+        self._checks: set[asyncio.Future[Decision]] = set()  # policy checks still running
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -161,6 +163,8 @@ class EgressProxy:
             await self._server.serve_forever()
 
     async def close(self) -> None:
+        for check in list(self._checks):  # a prompt nobody will answer now
+            check.cancel()
         if self._server:
             self._server.close()
             await self._server.wait_closed()
@@ -198,14 +202,41 @@ class EgressProxy:
                    for eff in scopes for p in eff.network_allow_hosts)  # fmt: skip
 
     async def _decide(self, action: Action) -> Decision:
-        try:
-            async with self._ask_lock:
-                return await asyncio.wait_for(
-                    asyncio.to_thread(self.engine.check, action), self.limits.approval_timeout_s
-                )
-        except TimeoutError:
+        """The policy decision, asking the user when needed, within approval_timeout_s.
+
+        One prompt at a time: the lock is held until the approver really returns, not just
+        until this connection stops waiting, so a prompt still on screen after a timeout
+        doesn't get a second one next to it. A late answer is dropped, not remembered: the
+        connection it was for has already been refused."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.limits.approval_timeout_s
+
+        def timed_out(why: str) -> Decision:
             rule = self.engine.rule_for(action)
-            return Decision(action, "deny", rule.risk, f"{rule.reason}: approval timed out")
+            return Decision(action, "deny", rule.risk, f"{rule.reason}: {why}")
+
+        try:
+            await asyncio.wait_for(self._ask_lock.acquire(), self.limits.approval_timeout_s)
+        except TimeoutError:
+            return timed_out("approval timed out (another approval is still open)")
+        cancelled = threading.Event()
+
+        def finished(f: asyncio.Future[Decision]) -> None:
+            self._checks.discard(f)
+            self._ask_lock.release()
+            if not f.cancelled():
+                f.exception()  # retrieved, so a late failure isn't reported as unhandled
+
+        check = asyncio.ensure_future(
+            asyncio.to_thread(self.engine.check, action, cancelled=cancelled)
+        )
+        self._checks.add(check)
+        check.add_done_callback(finished)
+        try:
+            return await asyncio.wait_for(asyncio.shield(check), max(0.0, deadline - loop.time()))
+        except TimeoutError:
+            cancelled.set()
+            return timed_out("approval timed out")
 
     async def _deny(self, writer: asyncio.StreamWriter, decision: Decision) -> None:
         await asyncio.to_thread(self.engine.audit_deny, decision)
@@ -263,7 +294,7 @@ class EgressProxy:
 
         if method.upper() == "CONNECT":
             host, port = _split_hostport(target, 443)
-            path = None
+            path, host_header = None, ""
         else:
             try:
                 url = urlsplit(target)
@@ -274,6 +305,8 @@ class EgressProxy:
                 raise _BadRequest("only CONNECT and absolute http:// URLs are proxied")
             host, port = _split_hostport(url.netloc.rpartition("@")[2], 80)
             path = (url.path or "/") + (f"?{url.query}" if url.query else "")
+            name = f"[{host}]" if ":" in host else host
+            host_header = name if port == 80 else f"{name}:{port}"
 
         display = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
         action = Action(
@@ -335,8 +368,11 @@ class EgressProxy:
                     writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
                     await writer.drain()
                 else:
-                    out = [f"{method} {path} {version}"]
-                    out += [f"{k}: {v}" for k, v in headers if k.lower() not in HOP_BY_HOP]
+                    # Host comes from the URL that was checked, never from the client: on a
+                    # shared address, another Host would reach a site policy never saw.
+                    out = [f"{method} {path} {version}", f"Host: {host_header}"]
+                    out += [f"{k}: {v}" for k, v in headers
+                            if k.lower() not in HOP_BY_HOP and k.lower() != "host"]  # fmt: skip
                     out.append("Connection: close")
                     first = ("\r\n".join(out) + "\r\n\r\n").encode()
                     up_writer.write(first)

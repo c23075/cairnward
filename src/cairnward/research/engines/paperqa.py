@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -55,6 +56,24 @@ def cache_dir() -> Path:
         Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "cairnward"
     )
     return Path(base) / "paperqa"  # fmt: skip
+
+
+def cache_key(paths: Paths) -> bytes:
+    """The key that signs the worker's pickled index (in the state folder, which the
+    sandbox hides; owner-only). Created on first use."""
+    path = paths.state_dir / "paperqa-cache.key"
+    try:
+        return bytes.fromhex(path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_bytes(32)
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="ascii") as fh:
+        fh.write(key.hex())
+    tmp.replace(path)
+    return key
 
 
 def python(paths: Paths) -> Path | None:
@@ -183,7 +202,8 @@ def prepare(cfg: Config, library: str, effort: str | None = None, *,
             d.chmod(0o700)
     meta = work / "models.json"
     if meta.exists() and json.loads(meta.read_text()) != models:
-        (work / "index.pkl").unlink(missing_ok=True)  # embeddings from other models
+        for name in ("index.pkl", "index.pkl.sig"):  # embeddings from other models
+            (work / name).unlink(missing_ok=True)
     meta.write_text(json.dumps(models))
     return Prepared(library, env_name, papers, rows, models, work)
 
@@ -215,8 +235,8 @@ def execute(cfg: Config, prep: Prepared, question: str, *, gateway_port: int, ke
     work = prep.work
     spec = {"gateway": f"http://127.0.0.1:{gateway_port}/v1", "models": prep.models,
             "papers": list(prep.papers.values()), "question": question,
-            "cache": str(work / "index.pkl"), "evidence_k": evidence_k,
-            "skip_summary": skip_summary}  # fmt: skip
+            "cache": str(work / "index.pkl"), "cache_key": cache_key(cfg.paths).hex(),
+            "evidence_k": evidence_k, "skip_summary": skip_summary}  # fmt: skip
     env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TZ") if k in os.environ}
     env.update(HOME=str(work / "home"), TMPDIR=str(work / "tmp"), CAIRNWARD_API_KEY=key,
                NO_PROXY="")  # fmt: skip

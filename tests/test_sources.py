@@ -129,3 +129,15 @@ async def test_lookup_and_pdf_download(tmp_path: Path) -> None:
 def test_unknown_source() -> None:
     with pytest.raises(src.SourceError, match="unknown source"):
         src.requests_for("google-scholar", "q", 5)
+
+
+async def test_oversized_answer_is_refused_and_not_cached(tmp_path: Path) -> None:
+    big = b"x" * (src.MAX_ANSWER_BYTES + 1)
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=big))
+    s = src.Searcher(tmp_path / "cache", transport=transport)
+    try:
+        with pytest.raises(src.SourceError, match="larger than"):
+            await s.get("openalex", "https://api.openalex.org/works?search=x")
+    finally:
+        await s.aclose()
+    assert not (tmp_path / "cache").exists()

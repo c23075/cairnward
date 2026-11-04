@@ -14,6 +14,7 @@ An "ask" goes to the approver; with nobody to ask, the answer is deny.
 from __future__ import annotations
 
 import fnmatch
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -265,8 +266,11 @@ class PolicyEngine:
         threshold = "high" if approvals == "high_only" else "medium"
         return _RISK_ORDER[rule.risk] >= _RISK_ORDER[threshold]
 
-    def check(self, action: Action, *, dry_run: bool = False) -> Decision:
-        """Decide; asks the approver when needed (unless dry_run)."""
+    def check(self, action: Action, *, dry_run: bool = False,
+              cancelled: threading.Event | None = None) -> Decision:  # fmt: skip
+        """Decide; asks the approver when needed (unless dry_run). If `cancelled` is set by
+        the time the approver answers, the caller stopped waiting: the answer is neither
+        used nor remembered."""
         eff = self.privacy_for(action)
         rule = self.rule_for(action)
         advisory = eff.value("isolation") == "off" and action.kind in ("net.connect", "fs.write")
@@ -298,6 +302,9 @@ class PolicyEngine:
         if dry_run:
             return done("deny", reason=f"{rule.reason} (would ask)", asked=False)
         answer = self.approver.request(req)
+        if cancelled is not None and cancelled.is_set():
+            return done("deny", reason=f"{rule.reason}: answered after the request timed out",
+                        asked=True, approved_by=answer.by)  # fmt: skip
         self.memory.remember(answer, req)
         if answer.granted:
             return done("allow", asked=True, approved_by=answer.by, scope=answer.scope,
