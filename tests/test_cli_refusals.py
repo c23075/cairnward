@@ -214,9 +214,11 @@ def with_backup(paths: Paths, repository: str) -> Any:
     return load_config(paths)
 
 
-def test_no_repository_says_how_to_set_one(paths: Paths) -> None:
-    with pytest.raises(backup.BackupError, match=r"\[backup\] repository"):
-        backup.repository(load_config(paths))
+def test_no_repository_means_the_default_folder(
+    paths: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert backup.repository(load_config(paths)) == tmp_path / "cairnward-backups"
 
 
 @pytest.mark.parametrize("repository", ["sftp:me@example.org:/backups", "ftp:example.org/x"])

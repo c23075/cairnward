@@ -100,7 +100,7 @@ real tests are named here.
 | FR-RES-8 arXiv | 🧪 | `test_sources.py`, `test_online.py` (synthetic responses) |
 | FR-RES-9 Semantic Scholar, OpenAlex, PubMed, Crossref | 🧪 | as above |
 | FR-RES-10 research tools over MCP | ✅ | `test_mcp_builtins.py`, `test_online.py` (`lit_find`) |
-| FR-RES-11 multi-agent YAML workflows | ⏸ | deferred (D71) |
+| FR-RES-11 multi-agent YAML workflows | 🧪 | `test_workflow.py` (real jobs, audit and policy; scripted model); not yet run with a real model |
 | FR-RES-12 PaperQA2 spike | ✅ | ADR-0014 |
 | FR-RES-13 PaperQA2 deep engine | ✅ | `test_paperqa_guard.py`, `test_deep_engine.py`; real eval through the isolated server: 8/8 |
 
@@ -124,15 +124,15 @@ real tests are named here.
 | FR-SYNC-1 none/on_demand/auto | ✅ | `test_backup.py` (backups; replication deferred) |
 | FR-SYNC-2 Drive mirror (rclone) | 🧪 | `test_drive.py` (stand-in rclone) |
 | FR-SYNC-3 restic backups, retention, restore | ✅ | `test_backup.py` with real restic to a folder; **remote repository not tried** |
-| FR-SYNC-4 multi-device replication | ⏸ | deferred (D71) |
-| FR-SYNC-6 locked items only encrypted; cloud warning | ◐ | backups always encrypted, cloud warning done; "encrypt this sync target" belongs to replication (deferred) |
+| FR-SYNC-4 multi-device replication | 🧪 | `test_replication.py`: real encryption, SQLite and git, devices as separate folders on one machine; **not tried between two machines or through real Syncthing** |
+| FR-SYNC-6 locked items only encrypted; cloud warning | ✅ | backups and the shared folder are always encrypted; cloud warning for both (`test_backup.py`, `test_replication.py`) |
 | FR-SYNC-8 purge rewrites snapshots | ✅ | `test_backup.py` |
 
 ### Dashboard and supply chain
 | ID | Status | Notes |
 |---|---|---|
 | FR-DASH-1 loopback, Host/Origin/CSRF, login link | ✅ | `security/test_local_api.py` |
-| FR-DASH-2 all views | ✅ | approvals, activity, audit, egress, vault, jobs, artifacts, backups, MCP, settings; a replication view waits for FR-SYNC-4 |
+| FR-DASH-2 all views | ✅ | approvals, activity, audit, egress, vault, jobs, artifacts, backups (with other devices), MCP, settings |
 | FR-DASH-3 / NFR-A1 WCAG 2.2 AA | ◐ | axe-core: 0 violations on all views and with dialogs open, light and dark; focus checked in dialogs; a manual check not done |
 | FR-SUP-2 model downloads verified | ✅ | `test_model_files.py` |
 

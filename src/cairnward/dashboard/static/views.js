@@ -167,7 +167,7 @@ function messageView(m) {
   if (typeof body.content === "string") text = body.content;
   else if (Array.isArray(body.content)) text = body.content.map(p => p.text || `[${p.type}]`).join("\n");
   if (body.tool_calls) text += (text ? "\n" : "") + body.tool_calls.map(c => `→ ${c.function?.name}(${c.function?.arguments || ""})`).join("\n");
-  return h("div", { class: `message ${m.role}` }, h("span", { class: "role" }, m.role + (m.model ? ` · ${m.model}` : "")), text);
+  return h("div", { class: `message ${m.role}` }, h("span", { class: "role" }, m.role + (m.model ? ` · ${m.model}` : "") + (m.forked ? " · a fork: continues from an earlier message" : "")), text);
 }
 
 export async function vault(main, params) {
@@ -458,13 +458,14 @@ export async function backups(main) {
   const changeSettings = async () => {
     const modes = [{ value: "none", label: "Off" }, { value: "on_demand", label: "Only when asked" }, { value: "auto", label: "Automatic" }];
     const v = await ask("Backup settings", {
-      text: "Backups are encrypted. Pick a folder on another disk if you can. Changes take effect when Cairnward restarts.",
+      text: "Backups hold your chats, artifacts, research library, audit log and settings, encrypted. Leave the folder empty for ~/cairnward-backups, or pick one on another disk if you can, because a backup on the same disk won't survive that disk failing. Changes take effect when Cairnward restarts.",
       fields: [{ name: "mode", label: "Backups", options: [...modes.filter(m => m.value === b.mode), ...modes.filter(m => m.value !== b.mode)] },
-               ...(b.remote ? [] : [{ name: "repository", label: "Folder (full path)", value: b.where || "" }])],
+               ...(b.remote ? [] : [{ name: "repository", label: "Folder (full path)", value: b.where || "" },
+                 { name: "access", label: "Who can read the folder", options: b.access === "group" ? [{ value: "group", label: "Me and my group" }, { value: "owner", label: "Only me" }] : [{ value: "owner", label: "Only me" }, { value: "group", label: "Me and my group" }] }])],
       confirm: "Save" });
     if (!v) return;
     try {
-      const r = await api("/api/backup/settings", { method: "POST", body: { mode: v.mode, repository: v.repository ?? null } });
+      const r = await api("/api/backup/settings", { method: "POST", body: { mode: v.mode, repository: v.repository ?? null, access: v.access ?? null } });
       toast(r.restart_needed ? "Saved. Restart Cairnward for it to take effect." : "Nothing changed.");
       backups(main);
     } catch (e) { toast(e.message); }
@@ -474,9 +475,10 @@ export async function backups(main) {
   const last = b.last;
   put(main, h("h1", {}, "Backups"),
     h("p", { class: "muted" }, "restic backups of the vault, research library, artifacts and settings, always encrypted. Run or restore them in a terminal: `cairnward backup run`, `cairnward backup restore --at DATE`."),
-    b.mode === "none" || !b.repository
-      ? h("div", { class: "warnbox", role: "status" }, "Backups are off. Set [backup] mode and repository in cairnward.toml, then `cairnward backup init`.")
+    b.mode === "none"
+      ? h("div", { class: "warnbox", role: "status" }, "Backups are off. Use Change settings, or run `cairnward backup use`.")
       : null,
+    b.same_disk_warning ? h("div", { class: "warnbox" }, b.same_disk_warning) : null,
     b.cloud_warning ? h("div", { class: "warnbox" }, b.cloud_warning) : null,
     dl(["Mode", b.mode === "auto" ? `automatic, every ${b.interval_hours} h while Cairnward runs` : b.mode === "on_demand" ? "on demand" : "off"],
       ["Where", b.where || "not set"],
@@ -488,13 +490,29 @@ export async function backups(main) {
     b.run_error ? h("div", { class: "warnbox", role: "alert" }, `The last backup failed: ${b.run_error}`) : null,
     h("p", { role: "status" }, b.running ? "Backing up. This can take a few minutes." : null),
     h("div", { class: "actions" },
-      h("button", { type: "button", class: "primary", disabled: b.running || b.mode === "none" || !b.repository, onclick: backUpNow }, "Back up now"),
+      h("button", { type: "button", class: "primary", disabled: b.running || b.mode === "none", onclick: backUpNow }, "Back up now"),
       h("button", { type: "button", onclick: changeSettings }, "Change settings")),
     h("h2", {}, "Purged conversations still in older backups"),
     b.pending.length
       ? table([{ label: "Conversation", key: "conversation", mono: true }, { label: "Purged", render: r => when(r.since) },
                { label: "Tries", key: "tries", num: true }, { label: "Last error", render: r => r.error || "-" }], b.pending)
-      : h("p", {}, "None: every purge has been removed from every backup."));
+      : h("p", {}, "None: every purge has been removed from every backup."),
+    await replicationSection());
+}
+
+async function replicationSection() {
+  const r = await api("/api/replication");
+  const heading = h("h2", {}, "Other devices");
+  if (!r.configured) return h("div", {}, heading, h("p", {}, "Not replicating. To keep the same chats and artifacts on another device through a shared folder: `cairnward replicate init <folder>`."));
+  const last = r.last;
+  const notes = [r.problem, r.cloud_warning, ...(last ? last.problems : [])].filter(Boolean);
+  const waiting = r.devices.filter(d => d.status === "pending");
+  return h("div", {}, heading,
+    h("dl", {}, [["Mode", r.mode], ["Folder", r.folder || "-"], ["Last sync", last ? when(last.time) : "never"]]
+      .flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+    waiting.length ? h("div", { class: "warnbox", role: "status" }, `Waiting for approval: ${waiting.map(d => d.id.slice(0, 10)).join(", ")}. Run \`cairnward replicate approve <id>\` if you recognise it.`) : null,
+    notes.map(n => h("div", { class: "warnbox", role: "status" }, n)),
+    table([{ label: "Device", render: d => d.name + (d.this ? " (this device)" : "") }, { label: "Id", render: d => d.id.slice(0, 10), mono: true }, { label: "Status", key: "status" }], r.devices));
 }
 
 // ------------------------------------------------------------------ artifacts

@@ -407,6 +407,8 @@ def run_checks(paths: Paths) -> list[Check]:
     checks.append(check_disk_encryption())
     checks.append(check_citation_engine(cfg))
     checks.append(check_backup(cfg))
+    if cfg.main.replication.mode != "none":
+        checks.append(check_replication(cfg))
     checks += check_parsers(cfg)
     return checks
 
@@ -470,6 +472,30 @@ def check_file_modes(cfg: Any) -> Check:
     return Check("file modes", "ok", "owner-only")
 
 
+def check_replication(cfg: Any) -> Check:
+    from cairnward import replication
+
+    st = replication.status(cfg)
+    if not st["configured"]:
+        return Check("replication", "fail", "turned on, but this device hasn't joined a folder",
+                     "cairnward replicate init <folder>, or join")  # fmt: skip
+    if st["problem"]:
+        return Check("replication", "fail", st["problem"])
+    waiting = [d["id"][:10] for d in st["devices"] if d["status"] == "pending"]
+    if waiting:
+        return Check("replication", "warn", f"device(s) waiting for approval: {', '.join(waiting)}",
+                     f"cairnward replicate approve {waiting[0]}")  # fmt: skip
+    last = st["last"]
+    if last is None:
+        return Check("replication", "warn", "no sync yet", "cairnward replicate sync")
+    if last["problems"]:
+        return Check("replication", "warn", f"last sync: {last['problems'][0]}")
+    detail = f"{len(st['devices'])} device(s), last sync {last['time']}"
+    if st["cloud_warning"]:
+        detail += f"; {st['cloud_warning']}"
+    return Check("replication", "ok", detail)
+
+
 def check_backup(cfg: Any) -> Check:
     from datetime import UTC, datetime
 
@@ -478,8 +504,7 @@ def check_backup(cfg: Any) -> Check:
     b = cfg.main.backup
     if b.mode == "none":
         return Check("backup", "warn", "off: conversations, library and artifacts aren't backed up",
-                     'set [backup] mode = "auto" and repository = "<folder on another disk>", '
-                     "then cairnward backup init")  # fmt: skip
+                     "cairnward backup use /a/folder/on/another/disk")  # fmt: skip
     try:
         st = backup.status(cfg)
     except backup.BackupError as exc:
@@ -490,6 +515,8 @@ def check_backup(cfg: Any) -> Check:
         return Check("backup", "fail", st.get("problem") or "repository not set up",
                      "cairnward backup init")  # fmt: skip
     notes = []
+    if st.get("same_disk_warning"):
+        notes.append(st["same_disk_warning"])
     if not b.password_command:
         notes.append("the password is only on this disk unless you keep a copy elsewhere "
                      f"({backup.password_file(cfg)})")  # fmt: skip

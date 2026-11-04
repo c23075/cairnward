@@ -154,6 +154,25 @@ class AnchorConfig(_Strict):
     )
 
 
+class ReplicationConfig(_Strict):
+    """The same chats and artifacts on several devices, through a shared folder (FR-SYNC-4)."""
+
+    mode: Literal["none", "on_demand", "auto"] = Field(
+        default="none",
+        description="none: off; on_demand: `cairnward replicate sync`; auto: also by serve",
+    )
+    folder: str | None = Field(
+        default=None,
+        description="a folder every device can reach: Syncthing, a NAS mount or a synced drive "
+        "(contents are encrypted). Set by `cairnward replicate init` or `join`",
+    )
+    interval_minutes: int = Field(default=5, ge=1, le=24 * 60, description="auto mode: how often")
+    exclude_environments: list[str] = Field(
+        default=[], description="conversations in these environments stay on this device"
+    )
+    include_artifacts: bool = Field(default=True, description="also share conversations' artifacts")
+
+
 class BackupConfig(_Strict):
     """Encrypted backups with restic (spec §4.8, FR-SYNC-1/3/8)."""
 
@@ -164,7 +183,12 @@ class BackupConfig(_Strict):
     repository: str | None = Field(
         default=None,
         description="a folder for the restic repository: a second disk, NAS mount or synced "
-        "folder (contents are encrypted by restic)",
+        "folder (contents are encrypted by restic). Default: ~/cairnward-backups",
+    )
+    access: Literal["owner", "group"] = Field(
+        default="owner",
+        description="who can read a folder repository: only you, or also your group (for example "
+        "to let another account copy it). Contents stay encrypted either way",
     )
     interval_hours: int = Field(default=24, ge=1, le=24 * 30, description="auto mode: how often")
     keep_daily: int = Field(default=7, ge=0, le=3650)
@@ -224,6 +248,7 @@ class MainConfig(_Strict):
     anchor: AnchorConfig = AnchorConfig()
     research: ResearchConfig = ResearchConfig()
     backup: BackupConfig = BackupConfig()
+    replication: ReplicationConfig = ReplicationConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
 
 

@@ -295,6 +295,35 @@ def test_run_hides_the_home_folder(paths: Paths, tmp_path: Path, home: Path) -> 
     assert not any("home_access" in w for w in p.warnings)
 
 
+def test_runs_can_not_read_the_backup_or_shared_folders(
+    paths: Paths, tmp_path: Path, home: Path
+) -> None:
+    ws = home / "ws"
+    ws.mkdir()
+    backups, shared = tmp_path / "bk", tmp_path / "shared"
+    paths.config_dir.mkdir(parents=True, exist_ok=True)
+    (paths.config_dir / "cairnward.toml").write_text(
+        f'[backup]\nrepository = "{backups}"\n[replication]\nfolder = "{shared}"\n'
+    )
+    for privacy in ('preset = "strict"', 'preset = "strict"\nhome_access = "readable"'):
+        deny = plan_in(paths, privacy, tmp_path, ws, ["sh"]).spec.deny_read
+        assert backups in deny and shared in deny
+    # a project kept inside the folder still works
+    inside = shared / "project"
+    inside.mkdir(parents=True)
+    assert (
+        shared not in plan_in(paths, 'preset = "strict"', tmp_path, inside, ["sh"]).spec.deny_read
+    )
+    # with no folder set, backups' default is what's hidden; a remote has no folder to hide
+    (paths.config_dir / "cairnward.toml").write_text("")
+    assert (
+        home / "cairnward-backups"
+        in plan_in(paths, 'preset = "strict"', tmp_path, ws, ["sh"]).spec.deny_read
+    )
+    (paths.config_dir / "cairnward.toml").write_text('[backup]\nrepository = "s3:s3.example/b"\n')
+    plan_in(paths, 'preset = "strict"', tmp_path, ws, ["sh"])
+
+
 def test_run_home_opt_out_warns(paths: Paths, tmp_path: Path, home: Path) -> None:
     ws = home / "ws"
     ws.mkdir()

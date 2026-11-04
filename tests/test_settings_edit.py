@@ -121,7 +121,7 @@ async def test_backup_view_hides_remote_paths(paths: Paths) -> None:
 
 def test_change_backup_rules(paths: Paths) -> None:
     cfg = load_config(paths)
-    for mode, repo, why in (("weekly", "/mnt/b", "mode must be"), ("auto", None, "needs a folder"),
+    for mode, repo, why in (("weekly", "/mnt/b", "mode must be"),
                             ("auto", "relative/path", "full path"),
                             ("auto", "s3:s3.example.org/bucket", "full path")):  # fmt: skip
         with pytest.raises(EditError, match=why):

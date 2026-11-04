@@ -44,9 +44,14 @@ def to_markdown(conv: Conversation, msgs: list[Message]) -> str:
     out = [f"# {conv.title or 'Conversation ' + conv.id[:10]}", "",
            f"- id: {conv.id}", f"- environment: {conv.environment or '-'}",
            f"- client: {conv.client or '-'}", f"- created: {conv.created_at}", ""]  # fmt: skip
+    previous = None
     for m in msgs:
         who = m.role + (f" ({m.model})" if m.model else "")
+        if m.parent_id is not None and previous is not None and m.parent_id != previous:
+            out += [f"--- a fork: this continues from message {m.parent_id[:10]}, not the one "
+                    "above ---", ""]  # fmt: skip
         out += [f"## {who}", "", _text(m), ""]
+        previous = m.id
     return "\n".join(out)
 
 

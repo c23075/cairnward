@@ -4,13 +4,17 @@ snapshot (the M3 test: purged content absent from all snapshots afterwards).
 Skipped unless restic (>= 0.15) is installed."""
 
 import json
+import os
+import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from cairnward import backup
 from cairnward.cli import main
 from cairnward.config import load_config
+from cairnward.config.edit import change_backup
 from cairnward.config.paths import Paths
 from cairnward.store import Vault
 
@@ -185,3 +189,84 @@ def test_locked_items_can_still_be_opened_after_a_restore(cfg_paths: Paths, tmp_
         assert crypto.open_sealed(v.open_item("library:thesis", secret), sealed) == (
             b"the-sealed-index"
         )
+
+
+def modes(folder: Path) -> set[int]:
+    return {stat.S_IMODE(p.stat().st_mode) & 0o077 for p in [folder, *folder.rglob("*")]}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_who_can_read_the_folder_is_your_choice(cfg_paths: Paths, tmp_path: Path) -> None:
+    """Real restic, whose files start read-only, including those added by later backups."""
+    repo = tmp_path / "repo"
+    cfg = load_config(cfg_paths)
+    seed(cfg_paths)
+    backup.init(cfg, log=lambda m: None)
+    backup.run(cfg, log=lambda m: None)
+    assert modes(repo) == {0}  # only you, by default
+
+    cfg, changed = change_backup(cfg, "on_demand", str(repo), access="group")
+    assert changed == ["access"]
+    backup.run(cfg, log=lambda m: None)
+    assert modes(repo) <= {0o050, 0o040} and 0o050 in modes(repo)  # group reads, never writes
+    assert all(not (stat.S_IMODE(p.stat().st_mode) & 0o007) for p in repo.rglob("*"))
+    assert backup.snapshots(cfg)  # restic still works with it
+    assert b"SECRET-PLAN-TEXT" not in b"".join(
+        p.read_bytes() for p in repo.rglob("*") if p.is_file()
+    )
+
+    cfg, _ = change_backup(cfg, "on_demand", str(repo), access="owner")
+    backup.apply_access(cfg)
+    assert modes(repo) == {0}
+
+
+def test_default_folder_and_turning_it_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                          capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
+    """`backup use` with no folder: the default one, set up and working."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
+    paths.config_dir.mkdir()
+    monkeypatch.setenv("CAIRNWARD_DATA_DIR", str(paths.data_dir))
+    monkeypatch.setenv("CAIRNWARD_STATE_DIR", str(paths.state_dir))
+    assert (
+        main(["--config-dir", str(paths.config_dir), "backup", "use", "--mode", "on_demand"]) == 0
+    )
+    out = capsys.readouterr().out
+    default = tmp_path / "cairnward-backups"
+    assert str(default) in out and "only you" in out and "same disk" in out
+    assert "password:" in out and (default / "config").exists()
+    assert "repository" not in paths.main_config.read_text().split("[backup]")[1].split("mode")[0]
+    cfg = load_config(paths)
+    assert cfg.main.backup.mode == "on_demand" and backup.initialised(cfg)
+    assert main(["--config-dir", str(paths.config_dir), "backup", "run"]) == 0
+
+
+def test_choosing_a_folder_and_access(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                      capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
+    paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
+    paths.config_dir.mkdir()
+    monkeypatch.setenv("CAIRNWARD_DATA_DIR", str(paths.data_dir))
+    monkeypatch.setenv("CAIRNWARD_STATE_DIR", str(paths.state_dir))
+    chosen = tmp_path / "my backups"
+    assert main(["--config-dir", str(paths.config_dir), "backup", "use", str(chosen),
+                 "--access", "group"]) == 0  # fmt: skip
+    assert "you and your group" in capsys.readouterr().out
+    cfg = load_config(paths)
+    assert (cfg.main.backup.repository, cfg.main.backup.access) == (str(chosen), "group")
+    assert backup.repository(cfg) == chosen and backup.initialised(cfg)
+
+
+def test_same_disk_warning(cfg_paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = load_config(cfg_paths)
+    cfg_paths.data_dir.mkdir(parents=True, exist_ok=True)
+    assert "same disk" in str(backup.same_disk_warning(cfg))
+    real_stat = Path.stat
+
+    def other_disk(self: Path, **kw: object) -> object:
+        result = real_stat(self)
+        if str(self).startswith(str(cfg_paths.data_dir)):
+            return SimpleNamespace(st_dev=result.st_dev + 1)
+        return result
+
+    monkeypatch.setattr(Path, "stat", other_disk)
+    assert backup.same_disk_warning(cfg) is None

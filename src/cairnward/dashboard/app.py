@@ -126,6 +126,7 @@ class BackupSettingsIn(BaseModel):
     mode: str = Field(max_length=20)
     repository: str | None = Field(default=None, max_length=1000)
     interval_hours: int | None = None
+    access: str | None = Field(default=None, max_length=10)
 
 
 class PrivacyChangeIn(BaseModel):
@@ -436,8 +437,8 @@ def dashboard_app(
         from cairnward import backup
 
         b = cfg.main.backup
-        if b.mode == "none" or not b.repository:
-            raise HTTPException(400, "backups are off: set a mode and a folder first")
+        if b.mode == "none":
+            raise HTTPException(400, "backups are off: choose a mode first")
         if backup_job["running"]:
             raise HTTPException(409, "a backup is already running")
         backup_job.update(running=True, error=None)
@@ -463,7 +464,7 @@ def dashboard_app(
 
         try:
             _new, changed = change_backup(load_config(cfg.paths), body.mode, body.repository,
-                                          body.interval_hours)  # fmt: skip
+                                          body.interval_hours, body.access)  # fmt: skip
         except EditError as exc:
             raise HTTPException(400, str(exc)) from None
         if changed:
@@ -473,6 +474,13 @@ def dashboard_app(
                              details={"changed": changed, "mode": body.mode})  # fmt: skip
         return {"changed": changed, "restart_needed": bool(changed)}
 
+    @app.get("/api/replication")
+    def replication_state() -> dict[str, Any]:
+        """Devices and the last sync (FR-SYNC-4). Changes are made with `cairnward replicate`."""
+        from cairnward import replication
+
+        return replication.status(cfg, check_folder=not isolated)
+
     @app.get("/api/backup")
     def backup_state() -> dict[str, Any]:
         """Mode and purged conversations still to remove from old backups (FR-SYNC-8)."""
@@ -480,12 +488,14 @@ def dashboard_app(
 
         b = cfg.main.backup
         kind = backup.remote_kind(cfg) if b.repository else None
-        repo = b.repository or ""
+        repo = str(backup.repository_or_problem(cfg))
         shown = repo if kind is None else f"{kind}:{_remote_host(repo)}"
         pending = backup.pending(cfg)
         return {
             "mode": b.mode,
-            "repository": bool(b.repository),
+            "repository": True,
+            "access": b.access,
+            "same_disk_warning": backup.same_disk_warning(cfg) if b.mode != "none" else None,
             "where": shown,  # a remote's host only, no bucket paths or keys
             "remote": kind,
             "environment": b.environment or cfg.main.defaults.environment if kind else None,
@@ -532,8 +542,11 @@ def dashboard_app(
         v = need_vault()
         conv = vault_call(lambda: v.conversation(conv_id))
         msgs = vault_call(lambda: v.messages(conv_id))
+        previous = [None, *(m.id for m in msgs)]
         return {"conversation": conv_dict(conv),
-                "messages": [dataclasses.asdict(m) for m in msgs]}  # fmt: skip
+                "messages": [{**dataclasses.asdict(m),
+                              "forked": bool(m.parent_id and p and m.parent_id != p)}
+                             for m, p in zip(msgs, previous, strict=False)]}  # fmt: skip
 
     @app.get("/api/vault/{conv_id}/export")
     def vault_export(conv_id: str, format: str = "md") -> Response:

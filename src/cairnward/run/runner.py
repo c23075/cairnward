@@ -138,6 +138,20 @@ def program_reads(command: list[str], path: str, *, workspace: Path, home: Path,
     return out
 
 
+def _sync_folders(cfg: Config, workspace: Path) -> list[Path]:
+    """The backup and replication folders. They're encrypted, but an agent has no reason to
+    read them and could send a copy out. Not one the workspace is inside: that would hide it."""
+    from cairnward import backup
+
+    repo = backup.repository_or_problem(cfg) if cfg.main.backup.repository else None
+    shared = cfg.main.replication.folder
+    found = [repo if isinstance(repo, Path) else None,
+             Path(shared).expanduser() if shared else None]  # fmt: skip
+    if not cfg.main.backup.repository:
+        found.append(backup.default_folder())
+    return [p for p in found if p is not None and not workspace.is_relative_to(p)]
+
+
 def _home_hidden(workspace: Path, tmp_dir: Path, writable: list[Path], profile: Profile,
                  command: list[str], env: dict[str, str]) -> list[Path]:  # fmt: skip
     """What a run re-allows after its home folder is denied: only paths that exist."""
@@ -238,7 +252,8 @@ def plan_run(
         p = cfg.paths
         writable = _ensure_dirs(home_dirs(profile))
         # PaperQA2's index holds library text and a pickle: profiles may write ~/.cache
-        deny = [*secret_dirs(), p.config_dir, p.data_dir, p.state_dir, cache_dir()]
+        deny = [*secret_dirs(), p.config_dir, p.data_dir, p.state_dir, cache_dir(),
+                *_sync_folders(cfg, workspace)]  # fmt: skip
         # srt's own helpers may live in a hidden folder and must stay readable.
         reads = srt_dirs(p, srt)
         if eff.value("home_access") != "hidden":

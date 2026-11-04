@@ -145,6 +145,27 @@ def test_opt_out_reads_the_home_folder_but_not_listed_secrets(tmp_path: Path, ho
     assert out["read"] == {str(doc): True, str(key): False, str(conf): False}
 
 
+def test_backup_and_shared_folders_are_hidden_outside_the_home_folder_too(
+    tmp_path: Path, home: Path
+) -> None:
+    ws = home / "ws"
+    ws.mkdir()
+    backup, shared = (
+        plant(tmp_path / "bk" / "config"),
+        plant(tmp_path / "sh" / "cairnward-sync.json"),
+    )
+    config = tmp_path / "cfg"
+    config.mkdir(exist_ok=True)
+    (config / "cairnward.toml").write_text(
+        f'[backup]\nrepository = "{backup.parent}"\n[replication]\nfolder = "{shared.parent}"\n'
+    )
+    other = plant(tmp_path / "elsewhere" / "file")  # the control: outside home and still readable
+    out = probe(tmp_path, ws, [backup, shared, other], [ws / "w"])
+    assert out["read"] == {str(backup): False, str(shared): False, str(other): True}
+    out = probe(tmp_path, ws, [backup, shared], [ws / "w"], privacy='home_access = "readable"')
+    assert out["read"] == {str(backup): False, str(shared): False}
+
+
 def test_workspace_is_the_home_folder(tmp_path: Path, home: Path) -> None:
     doc, key = plant(home / "Documents/tax.pdf"), plant(home / ".ssh/id_ed25519")
     conf, hist = plant(home / ".config/rclone/rclone.conf"), plant(home / ".bash_history")

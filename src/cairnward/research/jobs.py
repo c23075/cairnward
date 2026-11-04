@@ -37,7 +37,7 @@ NOTE_FIELDS = ("aim", "method", "sample", "findings", "limitations")
 # Seconds per step on the reference machine (spec D63): screening an abstract ~2 min; reading
 # a paper and writing notes ~7 min; both with the main model.
 STEP_PRIOR_S = {"prepare": 30, "screen": 120, "select": 1, "notes": 420, "synthesis": 300,
-                "table": 5, "ask": 120}  # fmt: skip
+                "table": 5, "ask": 120, "workflow": 300}  # fmt: skip
 
 
 _last_created = [datetime.min.replace(tzinfo=UTC)]
@@ -69,7 +69,7 @@ class Step:
 @dataclass
 class Job:
     id: str
-    kind: Literal["ask", "review"]
+    kind: Literal["ask", "review", "workflow"]
     params: dict[str, Any]
     steps: list[Step]
     status: Status = "queued"
@@ -161,9 +161,19 @@ class JobStore:
         return self._dir(job_id) / "result.md"
 
 
-def new_job(kind: Literal["ask", "review"], params: dict[str, Any], steps: list[Step], *,
-            not_before: str | None = None, actor: str = "user") -> Job:  # fmt: skip
+def new_job(kind: Literal["ask", "review", "workflow"], params: dict[str, Any],
+            steps: list[Step], *, not_before: str | None = None,
+            actor: str = "user") -> Job:  # fmt: skip
     return Job(secrets.token_hex(6), kind, params, steps, not_before=not_before, actor=actor)
+
+
+def workflow_job(library: str, spec: dict[str, Any], question: str | None = None,
+                 **kw: Any) -> Job:  # fmt: skip
+    """A YAML workflow (FR-RES-11). Its definition is saved with the job, so it resumes as it
+    started even if the file has changed."""
+    steps = [Step("workflow", {"id": s["id"], "title": s["id"]}) for s in spec["steps"]]
+    return new_job("workflow", {"library": library, "question": question, "workflow": spec},
+                   steps, **kw)  # fmt: skip
 
 
 def ask_job(library: str, questions: list[str], *, engine: str = "lean",
@@ -337,6 +347,9 @@ class JobRunner:
         self.wake.set()
         return job
 
+    def is_cancelled(self, job_id: str) -> bool:
+        return job_id in self._cancelled or self.store.load(job_id).status == "cancelled"
+
     def cancel(self, job_id: str) -> bool:
         job = self.store.load(job_id)
         if job.status in ("done", "failed", "cancelled"):
@@ -407,6 +420,10 @@ class JobRunner:
         return job
 
     async def _step(self, job: Job, step: Step) -> Any:
+        if job.kind == "workflow":
+            from cairnward.research.workflow import run_step
+
+            return await run_step(self, job, step)
         library = job.params["library"]
         if step.name == "ask":
             if job.params.get("engine") == "paperqa":
@@ -606,6 +623,10 @@ def render(job: Job) -> str:
     lines = [f"# Research job {job.id} ({job.kind})", "",
              f"- library: {job.params.get('library')}", f"- created: {job.created}",
              f"- finished: {job.finished}", ""]  # fmt: skip
+    if job.kind == "workflow":
+        from cairnward.research.workflow import render as render_workflow
+
+        return "\n".join([*lines, *render_workflow(job)])
     if job.kind == "ask":
         for s in job.steps:
             lines.append(f"## {s.params['question']}")

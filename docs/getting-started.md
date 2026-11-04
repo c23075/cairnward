@@ -199,18 +199,14 @@ uv run cairnward backend template openrouter-free
 Keys come from environment variables (e.g. `export OPENROUTER_API_KEY=...`), never from config files. Hosted backends are still refused until an environment allows them (`hosted_backends = "ask"` or `"allow"`), never get locked conversations, and free tiers that may train on your prompts only answer in environments marked `scratch = true`.
 
 ## 8. Back up
-Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. Add to `cairnward.toml`, with a folder on another disk:
-```toml
-[backup]
-mode = "auto"            # or "on_demand"
-repository = "/media/backup/cairnward"
+Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. They hold your chats, artifacts, research library, job results, audit log and settings. To turn them on:
+```bash
+uv run cairnward backup use /media/backup/cairnward
 ```
+With no folder they go to `~/cairnward-backups`, but that's on the same disk as your data, so it protects against mistakes and not a failed disk. `--mode on_demand` backs up only when asked. By default only you can read the folder; `--access group` also lets your group read it (for example so another account can copy it). The contents stay encrypted either way. The same settings are in `[backup]` in `cairnward.toml` and in the dashboard's Backups view, and `include_research`, `include_artifacts` and `include_config` choose what's included.
 A remote repository works too (`s3:`, `rest:`, `b2:`, `azure:`, `gs:`, `swift:` or `rclone:`, e.g. `repository = "s3:s3.eu-central-1.amazonaws.com/my-bucket/cairnward"`, with the provider's keys in restic's usual environment variables). Its traffic goes through Cairnward's egress, so `serve` must be running and the backup environment (`[backup] environment`, default the default one) must allow the host, e.g. by adding it to `network_allow_hosts`.
 
-Then create the repository (keep the password it shows somewhere safe) and take the first backup:
-```bash
-uv run cairnward backup init
-```
+That also creates the repository, and shows its password once: keep a copy somewhere else. Then take the first backup:
 ```bash
 uv run cairnward backup run
 ```
@@ -219,7 +215,28 @@ With `serve` running, `auto` backs up every 24 hours. Purging a conversation als
 uv run cairnward backup restore --at 2026-11-01
 ```
 
-## 9. Check everything on your machine
+## 9. The same chats on another device (optional)
+Use any folder both devices can reach: a Syncthing folder, a NAS mount or a synced drive. Cairnward only reads and writes files there, and everything it writes is encrypted. On the first device:
+
+```bash
+uv run cairnward replicate init /path/to/shared/folder
+```
+
+This shows a sync key, once. Keep it like a password: it opens the folder. **Every conversation on the device is published at the next sync**, so list any environment that should stay put in `[replication] exclude_environments` first. On the other device, when the folder has arrived:
+
+```bash
+uv run cairnward replicate join /path/to/shared/folder
+```
+
+Back on the first device, approve it (`status` lists devices), then restart `serve` on both to start syncing every 5 minutes. `cairnward replicate sync` does it right away.
+
+```bash
+uv run cairnward replicate approve <id>
+```
+
+If both devices reply in the same conversation before syncing, both replies are kept, as a fork. Purging a conversation purges it everywhere, once each device has synced. Turn off version history for this folder in Syncthing or your cloud drive, or old files outlive purges and locks. Research libraries and settings aren't shared. If you lose a device, `replicate block <id>` stops its changes being accepted, but it can still read the folder with the key it holds: to shut it out, run `replicate leave` then `init` on a new folder, and `join` from the others.
+
+## 10. Check everything on your machine
 With `cairnward serve` running and your models pulled, one command runs the doctor, the lit.ask eval (and PaperQA2 next to it when installed), the coding eval with each installed agent, and summarises what your chat clients did:
 ```bash
 uv run cairnward check

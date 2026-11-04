@@ -17,6 +17,8 @@ from typing import Any
 import httpx
 import pytest
 
+from cairnward import replication
+from cairnward.config import load_config
 from cairnward.config.paths import Paths
 
 HERE = Path(__file__).parent
@@ -95,6 +97,7 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
         '[roles.main]\nbackend = "local-ollama"\nmodel = "m"\n'
         '[roles.fast]\nbackend = "local-ollama"\nmodel = "m"\n'
     )
+    replication.init(load_config(paths), tmp_path / "shared", name="laptop", mode="on_demand")
     cw = [sys.executable, "-m", "cairnward"]
     serve = subprocess.Popen(
         [*cw, "serve"],
@@ -186,6 +189,7 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
     assert out["h1_jobs"] == "Research jobs"
     assert out["a11y_settings"] == [] and out["a11y_vault"] == [] and out["a11y_audit"] == []
     assert out["h1_backups"] == "Backups"
+    assert "laptop (this device)" in out["otherDevices"] and "cw-sync-" not in out["otherDevices"]
     assert "approvals = off" in out["weakenWarning"] and "approvals" in out["savedBanner"]
     toml = (paths.config_dir / "cairnward.toml").read_text()
     assert 'network = "off"' in toml and 'approvals = "off"' in toml

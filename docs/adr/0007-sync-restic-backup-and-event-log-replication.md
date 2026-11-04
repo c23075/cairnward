@@ -1,6 +1,6 @@
 # ADR-0007: Sync: restic for backup, per-device event logs for replication
 
-- Status: Accepted; amended 2026-10-31 by spec D50: purging also rewrites restic snapshots (`restic rewrite` + `prune`)
+- Status: Accepted; amended 2026-10-31 by spec D50: purging also rewrites restic snapshots (`restic rewrite` + `prune`); amended 2026-11-04 by spec D72: replication's transport is a shared folder only, logs are per device and conversation
 - Date: 2026-10-31
 - Spec: §4.12, D27, D30, D40
 
@@ -20,6 +20,9 @@ Option 3.
 - `replicate` jobs: each device writes only its own event-log files; state is rebuilt by a deterministic merge (Lamport clock, device ID); concurrent turns fork the chat; artifacts replicate as git history.
 - Transport for both: local folder/NAS/Syncthing, rclone (Drive), or git remote.
 - Automerge is the fallback if collaborative document editing is ever needed.
+
+## Amendment (D72)
+Built with a shared folder as the only transport; rclone and git remotes weren't needed, since Syncthing, a NAS or a mounted drive all look like a folder. Logs are split per conversation rather than one per device, because append-only logs can't otherwise honour a purge: with one file per conversation, each device deletes that conversation's file. A concurrent turn forks inside the existing message tree, which already handles edited histories, rather than making a new conversation. Artifacts still replicate as git history, carried as bundles in the folder.
 
 ## Consequences
 - No two devices ever write the same file, so file-level conflicts disappear.

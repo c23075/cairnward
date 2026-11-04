@@ -110,7 +110,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-RES-8 | arXiv search (opt-in, cached, audited) | M | M3 | recorded responses |
 | FR-RES-9 | Semantic Scholar, OpenAlex, PubMed, Crossref | S | M3 | recorded responses |
 | FR-RES-10 | Research tools exposed via MCP (`lit.search`, `lit.ask`, `lit.review.start`) | M | M2 | integration |
-| FR-RES-11 | Sub-agent fan-out in workflows with budgets, `max_parallel`, nested audit; YAML workflows | S | M3 | — (deferred, D71) |
+| FR-RES-11 | Sub-agent fan-out in workflows with budgets, `max_parallel`, nested audit; YAML workflows | S | M3 | `test_workflow.py`; not yet run with a real model |
 | FR-RES-12 | PaperQA2 spike with written recommendation | M | M1 | ADR-0014 ✅ |
 | FR-RES-13 | Optional PaperQA2 "deep" engine as a sandboxed worker (all calls through the gateway, hosted defaults off), compared with the lean pipeline on the same evals | S | M3 | `tests/test_paperqa_guard.py`, `tests/isolation/test_paperqa_engine.py` ✅; `evals/pdf_qa --compare` (owner-side, real models) |
 
@@ -140,7 +140,7 @@ All security requirements below describe what each protection does **when it is 
 |---|---|---|---|---|
 | FR-SYNC-1 | Modes none/on_demand/auto for every job | M | M3 | `test_backup.py` |
 | FR-SYNC-3 | restic backups of vault, artifacts, research library; retention; restore to date | M | M3 | local restic repo |
-| FR-SYNC-4 | Replication via per-device event logs + git; deterministic merge; fork on concurrent turns | S | M3 | Hypothesis convergence |
+| FR-SYNC-4 | Replication via per-device event logs + git history for artifacts, through a shared folder; deterministic merge; fork on concurrent turns | S | M3 | Hypothesis convergence (`test_replication.py`) |
 | FR-SYNC-6 | Locked items only written encrypted; cloud warning; "encrypt this sync target" | M | M3 | `test_backup.py` (backups encrypted, cloud warning) |
 | FR-SYNC-8 | Purge rewrites restic snapshots and prunes; pending state shown; retries | M | M3 | `test_backup.py` (content absent from all snapshots) |
 | FR-SYNC-2 | Drive mirror (read-only) via rclone with preview | S | M3 | rclone local backend |

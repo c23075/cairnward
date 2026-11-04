@@ -1,0 +1,40 @@
+# cairnward research workflow <library> examples/workflows/compare-methods.yaml \
+#   --question "Is sleep duration related to working memory in adults?"
+name: compare-methods
+description: One set of method notes per paper, then a comparison across them.
+
+# Unset limits use defaults, so a workflow can't run without any.
+budget:
+  max_requests: 60
+  max_minutes: 240
+
+# How many papers at once. Keep 1 on a CPU: calls wait in the same queue anyway.
+max_parallel: 1
+max_papers: 50
+
+steps:
+  - id: methods
+    for_each: papers
+    system: You summarise one research paper's methods. Cite pages like (p. 4).
+    prompt: |
+      Question: {{question}}
+
+      Paper: {{item.title}}
+
+      {{item.text}}
+
+      In two or three sentences: the study design, the sample, and how the outcome was measured.
+    max_tokens: 400
+
+  - id: comparison
+    system: You compare research methods. Name the papers you mention.
+    prompt: |
+      Question: {{question}}
+
+      Notes on each paper:
+
+      {{steps.methods}}
+
+      Compare the methods: where they agree, where they differ, and what that means for
+      answering the question.
+    max_tokens: 1000
