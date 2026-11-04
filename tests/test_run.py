@@ -257,6 +257,8 @@ def test_sandbox_debug_switch(
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    if not sys.platform.startswith("linux"):
+        pytest.skip("OS isolation is Linux only, so nothing else plans a hidden home folder")
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
