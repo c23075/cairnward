@@ -322,8 +322,16 @@ def stage(cfg: Config, dest: Path) -> dict[str, Any]:
                         (folder / "key.json").write_text(json.dumps(keys[0]), encoding="utf-8")
                 counts["conversations"] += 1
                 counts["messages"] += len(msgs)
+            if has_keys:  # locked jobs, runs, libraries: useless without their wrapped keys
+                items = _rows(k, "SELECT * FROM conversation_keys WHERE conversation_id LIKE '%:%'")
+                if items:
+                    (dest / "locked-items").mkdir()
+                    (dest / "locked-items" / "keys.json").write_text(json.dumps(items),
+                                                                     encoding="utf-8")  # fmt: skip
     if b.include_research and (data / "research.db").exists():
         _copy_db(data / "research.db", dest / "research" / "research.db")
+        if (data / "library-locks").is_dir():
+            shutil.copytree(data / "library-locks", dest / "research" / "library-locks")
     if (data / "audit.db").exists():
         _copy_db(data / "audit.db", dest / "audit" / "audit.db")
     if (data / "audit.jsonl").exists():
@@ -570,6 +578,12 @@ def import_conversations(cfg: Config, export: Path) -> dict[str, int]:
             if key.exists():
                 _insert(k, "conversation_keys", json.loads(key.read_text(encoding="utf-8")))
             added += 1
+        items = export / "locked-items" / "keys.json"  # locked jobs, runs, libraries
+        if items.exists():
+            for row in json.loads(items.read_text(encoding="utf-8")):
+                if not k.execute("SELECT 1 FROM conversation_keys WHERE conversation_id = ?",
+                                 (row["conversation_id"],)).fetchone():  # fmt: skip
+                    _insert(k, "conversation_keys", row)
         k.commit()
         v.commit()
     _audit(cfg, "backup.import", added=added, skipped=skipped)

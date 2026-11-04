@@ -173,7 +173,7 @@ isolated server, on [synthetic test papers](docs/bench/):
 mirror, remote backups, hosted providers, a real remote MCP server or OAuth provider, and the
 chat apps' manual checklist. Everything above used short synthetic papers, not real ones.
 
-**Known gaps:** the research library can't be locked, the release workflow has never run, and no
+**Known gaps:** locking a research library doesn't cover its source PDFs, the release workflow has never run, and no
 one but the assistant that wrote the code has reviewed its security. It's meant for Linux; CI
 also runs the unit tests on Windows.
 

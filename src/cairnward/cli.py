@@ -433,6 +433,12 @@ def build_parser() -> argparse.ArgumentParser:
     lk.add_argument("--json", action="store_true")
     lr = lib_sub.add_parser("remove", help="delete a library's index (the PDFs stay)")
     lr.add_argument("name")
+    for action, text in (
+        ("lock", "encrypt a library's index with a passphrase (the PDFs stay)"),
+        ("unlock", "remove that lock and restore the index"),
+        ("recover", "forgotten passphrase: set a new one with the recovery key"),
+    ):
+        lib_sub.add_parser(action, help=text).add_argument("name")  # fmt: skip
 
     sbx = sub.add_parser("sandbox", help="the OS sandbox (Anthropic sandbox-runtime)")
     sbx_sub = sbx.add_subparsers(dest="sandbox_command", metavar="ACTION", required=True)
@@ -1635,6 +1641,44 @@ def _artifacts_lock(args: argparse.Namespace, vault: Any, action: str) -> int:
     return 0
 
 
+def _library_lock(cfg: Config, research: Any, args: argparse.Namespace, action: str) -> int:
+    from cairnward.audit import AuditLog, enabled_for
+    from cairnward.research.lock import item_id, lock_library, unlock_library
+    from cairnward.store import Vault
+    from cairnward.store.crypto import DecryptionError
+    from cairnward.store.vault import LockedError, VaultError
+    from cairnward.vault_cli import ask_passphrase
+
+    name, data = args.name, cfg.paths.data_dir
+    lib = research.find(name)
+    with Vault.open(cfg.paths) as vault:
+        try:
+            if action == "unlock":
+                unlock_library(vault, research, data, name, ask_passphrase("Passphrase: "))
+                print(f"removed the lock from library '{name}'")
+            else:
+                identity = ask_passphrase("Recovery key (AGE-SECRET-KEY-1...): ") if (
+                    action == "recover") else None  # fmt: skip
+                first = ask_passphrase("New passphrase: ")
+                if ask_passphrase("Again: ") != first:
+                    print("the passphrases differ: nothing changed", file=sys.stderr)
+                    return 1
+                if identity is not None:
+                    vault.recover(item_id(name), identity, first)
+                    print(f"library '{name}' has a new passphrase (still locked)")
+                else:
+                    lock_library(vault, research, data, name, first)
+                    print(f"locked library '{name}': only the passphrase opens it.")
+                    print(f"Your PDFs in {lib.folder} aren't encrypted, and older backups "
+                          "still hold the index.")  # fmt: skip
+        except (VaultError, LockedError, DecryptionError) as exc:
+            print(f"cairnward: {exc}", file=sys.stderr)
+            return 1
+    with AuditLog.open(cfg.paths, enabled_for(cfg)) as log:
+        log.append(f"library.{action}", actor="user", target=name, environment=lib.environment)
+    return 0
+
+
 def _cmd_dashboard(args: argparse.Namespace) -> int:
     import webbrowser
 
@@ -1937,6 +1981,9 @@ def _cmd_library(args: argparse.Namespace) -> int:
             if cmd == "list":
                 for lib, n_docs, n_chunks in research.list_libraries():
                     model = lib.embedding_model or "not indexed"
+                    if lib.locked:
+                        print(f"{lib.name:20} locked  [{lib.environment}]  {lib.folder}")
+                        continue
                     print(
                         f"{lib.name:20} {n_docs:5} docs {n_chunks:7} chunks  [{lib.environment}] "
                         f"{model}  {lib.folder}"
@@ -1951,8 +1998,15 @@ def _cmd_library(args: argparse.Namespace) -> int:
                 return 0
             if cmd == "remove":
                 research.remove(args.name)
+                from cairnward.research.lock import item_id
+                from cairnward.store import Vault
+
+                with Vault.open(cfg.paths) as vault:  # a locked library's key goes with it
+                    vault.remove_item(item_id(args.name))
                 print(f"Removed the index of '{args.name}' (your PDFs are untouched).")
                 return 0
+            if cmd in ("lock", "unlock", "recover"):
+                return _library_lock(cfg, research, args, cmd)
             if cmd == "ask":
                 return _library_ask(cfg, research, args)
             if cmd == "zotero":

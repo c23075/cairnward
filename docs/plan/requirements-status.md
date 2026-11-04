@@ -83,7 +83,7 @@ real tests are named here.
 | FR-VLT-2 rebuild conversations from stateless requests | ✅ | `test_vault_reconstruction.py` (property-based) |
 | FR-VLT-3 vault browser with shortcuts | ✅ | browser test |
 | FR-VLT-4 retention, `vault = "off"`/digests | ✅ | `test_vault_cli.py` |
-| FR-ENC-1 lock with passphrase, recovery key | ◐ | conversations, their artifacts, finished jobs, run artifact repositories and the recovery key (`security/test_lock.py`, `test_recovery_key.py`, `test_artifact_lock.py`, `test_item_lock.py`); **run snapshots not covered** |
+| FR-ENC-1 lock with passphrase, recovery key | ◐ | conversations, their artifacts, finished jobs, run artifact repositories, research libraries and the recovery key (`security/test_lock.py`, `test_recovery_key.py`, `test_artifact_lock.py`, `test_item_lock.py`, `test_library_lock.py`); **run snapshots not covered** |
 | FR-ENC-2 passphrase never leaks | ✅ | `security/test_lock.py`, `security/test_recovery_key.py` |
 | FR-ENC-5 crypto-shredding on purge | ✅ | `test_store.py` |
 
