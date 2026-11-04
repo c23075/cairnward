@@ -11,6 +11,20 @@ from pathlib import Path
 # into run_dir, which exists only for the run and is removed afterwards.
 ConfigWriter = Callable[[str, str, str, str, Path], dict[str, str]]
 
+# Read by git, which every agent runs. Credentials in ~/.config/git stay hidden (SECRET_DIRS).
+GIT_CONFIG = (".gitconfig", ".config/git")
+# Language runtimes (no user data): a workspace's .venv or node_modules points at these.
+TOOLCHAIN_DIRS = (
+    ".local/share/uv/python",
+    ".local/share/fnm/node-versions",
+    ".local/share/mise/installs",
+    ".nvm/versions",
+    ".pyenv/versions",
+    ".asdf/installs",
+    ".volta/tools/image",
+    ".rustup/toolchains",
+)
+
 
 @dataclass(frozen=True)
 class Profile:
@@ -21,6 +35,7 @@ class Profile:
     notes: str = ""
     extra_hosts: list[str] = field(default_factory=list)
     config: ConfigWriter | None = None
+    readable_home: tuple[str, ...] = GIT_CONFIG  # read-only, on top of writable_home_dirs
 
 
 def _generic(base: str, key: str, model: str, fast: str) -> dict[str, str]:
@@ -91,6 +106,13 @@ PROFILES: dict[str, Profile] = {
         _aider,
         (".aider", ".cache"),
         "lean prompts and diff edits: the best fit for CPU-only machines (D64)",
+        # not ~/.env, which Aider also reads: it's for keys, and runs use the gateway's
+        readable_home=(
+            *GIT_CONFIG,
+            ".aider.conf.yml",
+            ".aider.model.settings.yml",
+            ".aider.model.metadata.json",
+        ),
     ),
     "qwen-code": Profile(
         "qwen-code",
@@ -129,3 +151,9 @@ PROFILES: dict[str, Profile] = {
 def home_dirs(profile: Profile, home: Path | None = None) -> list[Path]:
     home = home or Path.home()
     return [home / d for d in profile.writable_home_dirs]
+
+
+def home_reads(profile: Profile, home: Path | None = None) -> list[Path]:
+    """Home-folder paths a run of this profile may read: its own settings and the runtimes."""
+    home = home or Path.home()
+    return [home / d for d in (*profile.readable_home, *TOOLCHAIN_DIRS)]

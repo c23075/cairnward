@@ -4,8 +4,9 @@
    egress session, both revoked when the run ends; `run.start` / `run.end` are audited.
 2. Build a clean environment: a few basics plus what the agent profile needs.
 3. With isolation on: wrap the command in srt (network only to the gateway and allowed
-   hosts, via egress; writes only to the workspace; secrets and Cairnward's own data
-   hidden). With isolation off: run directly (advisory: the agent could bypass egress).
+   hosts, via egress; writes only to the workspace; the home folder hidden except what the
+   run needs, secrets and Cairnward's own data hidden always). With isolation off: run
+   directly (advisory: the agent could bypass egress).
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ import httpx
 
 from cairnward.config.loader import Config
 from cairnward.core.server import sockets
-from cairnward.run.profiles import PROFILES, Profile, home_dirs
+from cairnward.run.profiles import PROFILES, Profile, home_dirs, home_reads
 from cairnward.run.snapshots import SnapshotError, Snapshots
 from cairnward.sandbox import (
     SandboxSpec,
@@ -39,8 +40,9 @@ from cairnward.sandbox import (
     wrap,
     wrap_with_ask,
 )
-from cairnward.sandbox.srt import install_dir
+from cairnward.sandbox.srt import srt_dirs
 
+INTERPRETERS = ("python", "node", "bun", "deno", "bash", "sh", "zsh", "ruby", "perl")
 BASE_ENV = (
     "PATH",
     "HOME",
@@ -65,6 +67,102 @@ def _ensure_dirs(dirs: list[Path]) -> list[Path]:
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
     return dirs
+
+
+def _install_dirs(file: Path, home: Path) -> list[Path]:
+    """What a program at `file` needs to run: its prefix when it's in a bin folder with a lib
+    or venv next to it, else its folder. Never the home folder or a shared one like ~/.local."""
+    folder = file.parent
+    if folder == home:
+        return [file]
+    prefix = folder.parent
+    if folder.name != "bin" or prefix == home:
+        return [folder]
+    if prefix == home / ".local":  # pip --user; ~/.local/share holds other programs' data
+        return [folder, prefix / "lib", prefix / "lib64"]
+    return [prefix] if (prefix / "lib").is_dir() or (prefix / "pyvenv.cfg").exists() else [folder]
+
+
+def _shebang(file: Path) -> str | None:
+    """The interpreter a script names (`#!/usr/bin/env node` -> node)."""
+    try:
+        with file.open("rb") as f:
+            line = f.readline(512)
+    except OSError:
+        return None
+    words = line[2:].decode(errors="ignore").split() if line.startswith(b"#!") else []
+    if words and Path(words[0]).name == "env":
+        words = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
+    return words[0] if words else None
+
+
+def program_reads(command: list[str], path: str, *, workspace: Path, home: Path,
+                  virtual_env: str | None = None) -> list[Path]:  # fmt: skip
+    """Home-folder paths needed to start `command`: the program, each link to it and the
+    interpreter of each script on the way (~/.local/bin/aider -> a uv tool -> its Python), the
+    script an interpreter runs, the active venv, and programs the agent finds on PATH."""
+    out: list[Path] = []
+
+    def add_program(file: Path) -> None:
+        if file.is_relative_to(home):
+            out.extend(_install_dirs(file, home))
+
+    seen: set[Path] = set()
+    todo = [command[0]]
+    while todo:
+        name = todo.pop()
+        found = shutil.which(name, path=path, mode=os.F_OK | os.X_OK)
+        if found is None:
+            continue
+        file = workspace / found  # the agent starts in the workspace
+        while file not in seen:
+            seen.add(file)
+            add_program(file)
+            if not file.is_symlink():
+                todo += [i for i in [_shebang(file)] if i]
+                break
+            file = Path(os.path.normpath(file.parent / file.readlink()))
+
+    stem = Path(command[0]).name.rstrip("0123456789.")
+    if len(command) > 1 and stem in INTERPRETERS:
+        script = workspace / command[1]
+        if script.is_file() and script.is_relative_to(home):
+            out.append(script if script.parent == home else script.parent)
+
+    if virtual_env and Path(virtual_env).is_relative_to(home) and Path(virtual_env) != home:
+        out.append(Path(virtual_env))
+    for entry in path.split(os.pathsep):
+        if Path(entry).is_absolute() and Path(entry) != home:
+            add_program(Path(entry) / "_")
+            add_program(Path(entry).resolve() / "_")
+    return out
+
+
+def _sync_folders(cfg: Config, workspace: Path) -> list[Path]:
+    """The backup and replication folders. They're encrypted, but an agent has no reason to
+    read them and could send a copy out. Not one the workspace is inside: that would hide it."""
+    from cairnward import backup
+
+    repo = backup.repository_or_problem(cfg) if cfg.main.backup.repository else None
+    shared = cfg.main.replication.folder
+    found = [repo if isinstance(repo, Path) else None,
+             Path(shared).expanduser() if shared else None]  # fmt: skip
+    if not cfg.main.backup.repository:
+        found.append(backup.default_folder())
+    return [p for p in found if p is not None and not workspace.is_relative_to(p)]
+
+
+def _home_hidden(workspace: Path, tmp_dir: Path, writable: list[Path], profile: Profile,
+                 command: list[str], env: dict[str, str]) -> list[Path]:  # fmt: skip
+    """What a run re-allows after its home folder is denied: only paths that exist."""
+    home = Path.home()
+    reads = [workspace, tmp_dir, *writable, *home_reads(profile, home),
+             *program_reads(command, env.get("PATH", ""), workspace=workspace, home=home,
+                            virtual_env=env.get("VIRTUAL_ENV"))]  # fmt: skip
+    kept = {p for p in reads if p.exists()}
+    # Only the outermost: bwrap can't start on a nested mount where a re-allowed folder shows a
+    # symlink (uv's cpython-3.12-linux-... inside its Python folder).
+    return [p for p in dict.fromkeys(reads) if p in kept and not kept.intersection(p.parents)]
 
 
 @dataclass(frozen=True)
@@ -149,13 +247,33 @@ def plan_run(
             warnings.append(
                 "network = ask: answer requests for new hosts with `cairnward approvals`"
             )
+        from cairnward.research.engines.paperqa import cache_dir
+
         p = cfg.paths
+        writable = _ensure_dirs(home_dirs(profile))
+        # PaperQA2's index holds library text and a pickle: profiles may write ~/.cache
+        deny = [*secret_dirs(), p.config_dir, p.data_dir, p.state_dir, cache_dir(),
+                *_sync_folders(cfg, workspace)]  # fmt: skip
+        # srt's own helpers may live in a hidden folder and must stay readable.
+        reads = srt_dirs(p, srt)
+        if eff.value("home_access") != "hidden":
+            warnings.append(
+                "home_access = readable: the agent can read your home folder, except "
+                "known secret folders"
+            )
+        elif Path.home().resolve().is_relative_to(workspace.resolve()):
+            warnings.append(
+                "the workspace contains your home folder, so home_access = hidden can't apply: "
+                "the agent can read and change it, except known secret folders"
+            )
+        else:
+            deny.append(Path.home())
+            reads += _home_hidden(workspace, tmp_dir, writable, profile, command, env)
         spec = SandboxSpec(
             allowed_hosts=hosts,
-            allow_write=[workspace, tmp_dir, *_ensure_dirs(home_dirs(profile))],
-            deny_read=[*secret_dirs(), p.config_dir, p.data_dir, p.state_dir],
-            # srt's own helpers live in the data folder and must stay readable.
-            allow_read=(install_dir(p),),
+            allow_write=[workspace, tmp_dir, *writable],
+            deny_read=deny,
+            allow_read=tuple(reads),
         )
         spec.write(settings_file)
         if egress:
@@ -182,7 +300,7 @@ def prompt_warnings(cfg: Config, profile: str, environment: str, model: str) -> 
     if tokens is None:
         return []
     try:
-        resolved = resolve(cfg, model)
+        resolved = resolve(cfg, model, default_environment=environment)
     except UnknownModel:
         return []
     out = []
@@ -198,6 +316,22 @@ def prompt_warnings(cfg: Config, profile: str, environment: str, model: str) -> 
             f"{seconds / 60:.0f} min before the first answer on {resolved.model}"
         )
     return out
+
+
+def check_model_environment(cfg: Config, environment: str, model: str) -> None:
+    """The gateway refuses a run's calls outside its environment: say so before starting.
+    A model it wouldn't know is left to the gateway's own answer."""
+    from cairnward.gateway.models import UnknownModel, resolve
+
+    try:
+        wanted = resolve(cfg, model, default_environment=environment).environment
+    except UnknownModel:
+        return
+    if wanted != environment:
+        raise RunError(
+            f"model '{model}' is in environment '{wanted}' but this run is in '{environment}': "
+            f"use --env {wanted} or a cw/{environment}:<effort> model"
+        )
 
 
 def program_digest(command: list[str]) -> tuple[str, str]:
@@ -280,6 +414,8 @@ def run_agent(
     profile = PROFILES.get(profile_name)
     if profile is None:
         raise RunError(f"unknown profile '{profile_name}' (known: {', '.join(PROFILES)})")
+    if model:
+        check_model_environment(cfg, env_name, model)
     if shutil.which(command[0]) is None and not Path(command[0]).exists():
         raise RunError(f"command not found: {command[0]}")
     check_program(cfg, env_name, command, trust_change=trust_program_change, log=log)

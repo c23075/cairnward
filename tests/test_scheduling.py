@@ -1,7 +1,9 @@
 import asyncio
+import dataclasses
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -208,6 +210,87 @@ CHAT = {"model": "cw/e:low", "messages": [{"role": "user", "content": "hi"}]}
 def limited(deps: GatewayDeps, name: str, **limits: int) -> None:
     deps.config.clients.clients[name] = Client(kind="agent", profile="aider",
                                                budget=ClientBudget(**limits))  # fmt: skip
+
+
+async def test_run_is_pinned_to_its_environment(tmp_path: Path) -> None:
+    client, deps, audit, fake = await make(tmp_path)
+    deps.config.environments["other"] = deps.config.environments["e"]
+    deps.config.clients.clients["aider"] = Client(kind="agent", profile="aider",
+                                                  default_environment="other")  # fmt: skip
+    h = {"Authorization": f"Bearer {deps.run_keys.issue('aider', 'run-1', environment='e')}"}
+    chat = "/v1/chat/completions"
+    assert (await client.post(chat, headers=h, json=CHAT)).status_code == 200
+    calls = len(fake.requests)
+
+    # another environment is refused and audited, and never reaches the model
+    for path, model, body in (
+        (chat, "cw/other:low", CHAT),
+        ("/v1/embeddings", "cw/other:embed", {"input": "hi"}),
+    ):
+        resp = await client.post(path, headers=h, json={**body, "model": model})
+        assert resp.status_code == 403 and resp.json()["error"]["type"] == "run_environment"
+        assert "this run is in 'e'" in resp.json()["error"]["message"]
+        last = audit.records()[-1]
+        assert (last.action, last.decision, last.environment) == ("model.call", "deny", "e")
+        assert last.run_id == "run-1"
+        assert last.details["requested_environment"] == "other"
+        assert last.details["virtual_model"] == model
+    assert len(fake.requests) == calls
+
+    # cw/raw/<model> uses the run's environment, not the client's default
+    for path, body in ((chat, CHAT), ("/v1/embeddings", {"input": "hi"})):
+        resp = await client.post(path, headers=h, json={**body, "model": "cw/raw/m"})
+        assert resp.status_code == 200
+        assert audit.records()[-1].environment == "e"
+    own = {"model": "cw/e:embed", "input": "hi"}
+    assert (await client.post("/v1/embeddings", headers=h, json=own)).status_code == 200
+
+    # the client's own key isn't tied to one environment
+    plain = {"Authorization": f"Bearer {ClientKeys.at(deps.config.paths.state_dir).add('aider')}"}
+    resp = await client.post(chat, headers=plain, json={**CHAT, "model": "cw/other:low"})
+    assert resp.status_code == 200 and audit.records()[-1].environment == "other"
+    await client.aclose()
+    audit.close()
+
+
+async def test_disabled_client_is_refused(tmp_path: Path) -> None:
+    client, deps, audit, fake = await make(tmp_path)
+    limited(deps, "w")
+    plain = {"Authorization": f"Bearer {ClientKeys.at(deps.config.paths.state_dir).add('w')}"}
+    run = {"Authorization": f"Bearer {deps.run_keys.issue('w', 'run-1', environment='e')}"}
+    # initialize is answered by the MCP SDK alone, so the hub itself isn't needed here
+    mcp_deps = dataclasses.replace(deps, mcp=SimpleNamespace(cfg=deps.config))
+    mcp_app = create_app(mcp_deps)
+    mcp = httpx.AsyncClient(transport=httpx.ASGITransport(app=mcp_app),
+                            base_url="http://127.0.0.1:8484")  # fmt: skip
+    hello = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-03-26", "capabilities": {},
+        "clientInfo": {"name": "t", "version": "1"}}}  # fmt: skip
+    accept = {"Accept": "application/json, text/event-stream"}
+
+    async def statuses(h: dict[str, str]) -> list[int]:
+        return [
+            (await client.post("/v1/chat/completions", headers=h, json=CHAT)).status_code,
+            (await client.post("/v1/embeddings", headers=h,
+                               json={"model": "cw/e:embed", "input": "hi"})).status_code,
+            (await client.get("/v1/models", headers=h)).status_code,
+            (await mcp.post("/mcp", headers={**h, **accept}, json=hello)).status_code,
+        ]  # fmt: skip
+
+    assert await statuses(plain) == [200, 200, 200, 200]
+    assert await statuses(run) == [200, 200, 200, 200]
+    calls = len(fake.requests)
+    deps.config.clients.clients["w"] = Client(kind="agent", profile="aider", enabled=False)
+    assert await statuses(plain) == [401, 401, 401, 401]
+    assert await statuses(run) == [401, 401, 401, 401]
+    assert len(fake.requests) == calls
+    # switching it back on restores the same keys
+    limited(deps, "w")
+    assert await statuses(run) == [200, 200, 200, 200]
+    await mcp_app.state.mcp_manager.aclose()
+    await mcp.aclose()
+    await client.aclose()
+    audit.close()
 
 
 async def test_client_daily_request_budget(tmp_path: Path) -> None:

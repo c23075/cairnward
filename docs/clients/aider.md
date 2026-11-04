@@ -18,7 +18,7 @@ What `cairnward run` does for Aider:
 - points Aider at the gateway: `cw/coding:<effort>` as the main model, `cw/coding:low` as the weak model;
 - uses **diff edits** (`AIDER_EDIT_FORMAT=diff`): without it Aider rewrites whole files for models it doesn't know, which costs far more tokens on a CPU;
 - turns off Aider's analytics and update check. (LiteLLM inside Aider still tries to download a model price list from `raw.githubusercontent.com`; the sandbox and egress refuse it, and Aider carries on.)
-- with isolation on: Aider can write only the project folder, can't read `~/.ssh` or Cairnward's data, and reaches only the gateway and hosts allowed for the environment.
+- with isolation on: Aider can write only the project folder and its state folders, can't read the rest of your home folder (`~/.ssh`, `~/.env`, other projects) or Cairnward's data, and reaches only the gateway and hosts allowed for the environment.
 
 After the run:
 ```bash

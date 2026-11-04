@@ -48,7 +48,7 @@ All security requirements below describe what each protection does **when it is 
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
 | FR-ISO-1 | `cairnward run -- <cmd>` runs a command under bubblewrap with a loopback-only network namespace; gateway, MCP and proxy reachable via bridged sockets | M | M0 | `tests/isolation/` (direct TCP/UDP/DNS fail; gateway works) |
-| FR-ISO-2 | Filesystem policy for runs: workspace rw, agent config rw, secrets dirs hidden, rest read-only | M | M0 | `tests/isolation/`, `test_run.py` |
+| FR-ISO-2 | Filesystem policy for runs: workspace rw, agent config rw, home folder hidden except what the run needs, secrets dirs hidden always, rest read-only | M | M0 | `tests/isolation/`, `test_run.py` |
 | FR-ISO-3 | Cairnward core runs in its own loopback-only namespace; only `cairnward-egress` has network | M | M0 | `tests/isolation/test_isolated_serve.py` |
 | FR-ISO-4 | Container templates for server clients on an internal-only network | M | M2 | integration (Podman) |
 | FR-ISO-5 | `cairnward doctor` checks prerequisites and runs isolation self-tests | M | M0 | unit + isolation suite |

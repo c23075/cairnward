@@ -102,6 +102,22 @@
           "default": null,
           "title": "Egress Report"
         },
+        "home_access": {
+          "anyOf": [
+            {
+              "enum": [
+                "readable",
+                "hidden"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Home Access"
+        },
         "hosted_backends": {
           "anyOf": [
             {
@@ -395,6 +411,7 @@
         "backup_purge": null,
         "crypto_shred": null,
         "egress_report": null,
+        "home_access": null,
         "hosted_backends": null,
         "isolation": null,
         "mcp_pinning": null,

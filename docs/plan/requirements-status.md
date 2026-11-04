@@ -49,7 +49,7 @@ real tests are named here.
 | ID | Status | Notes |
 |---|---|---|
 | FR-ISO-1 `cairnward run` sandbox | ✅ | `tests/isolation/` (CI) |
-| FR-ISO-2 filesystem policy for runs | ✅ | `tests/isolation/`, `test_run.py` |
+| FR-ISO-2 filesystem policy for runs | ✅ | `tests/isolation/test_run_home.py`, `test_run.py`; real Aider checked, Qwen Code only as a stand-in |
 | FR-ISO-3 core isolated, only egress networked | ✅ | `test_isolated_serve.py`; running in isolated mode on this machine |
 | FR-ISO-4 container templates for server clients | 🧪 | checked with `docker compose config` only; not run with Podman/Docker |
 | FR-ISO-5 doctor + isolation self-test | ✅ | `test_doctor_setup.py`; passed on this machine |

@@ -28,11 +28,13 @@ CryptoShred = OnOff
 BackupPurge = Literal["off", "ask", "on"]
 McpPinning = OnOff
 EgressReport = OnOff
+HomeAccess = Literal["readable", "hidden"]
 
 # The protection settings, in display order, with a one-line description each.
 SETTINGS: dict[str, str] = {
     "isolation": "OS sandbox + network namespaces for agents, clients and the core",
     "network": "outbound access for tools and Cairnward",
+    "home_access": "whether sandboxed coding agents can read the rest of your home folder",
     "hosted_backends": "use of hosted (cloud) model backends",
     "training_backends": "backends that may train on prompts (most free tiers): scratch only",
     "approvals": "risk-tiered approval prompts",
@@ -68,6 +70,7 @@ class PrivacyOverrides(BaseModel):
         default=None,
         description="hosts allowed when network = 'allowlist' or pre-approved in 'ask'",
     )
+    home_access: HomeAccess | None = None
     hosted_backends: HostedBackends | None = None
     training_backends: TrainingBackends | None = None
     approvals: Approvals | None = None
@@ -92,6 +95,7 @@ PRESETS: dict[str, dict[str, str]] = {
     "open": {
         "isolation": "off",
         "network": "open",
+        "home_access": "readable",
         "hosted_backends": "allow",
         "training_backends": "allow",
         "approvals": "off",
@@ -107,6 +111,7 @@ PRESETS: dict[str, dict[str, str]] = {
     "balanced": {
         "isolation": "on",
         "network": "ask",
+        "home_access": "hidden",
         "hosted_backends": "ask",
         "training_backends": "scratch_only",
         "approvals": "high_only",
@@ -122,6 +127,7 @@ PRESETS: dict[str, dict[str, str]] = {
     "strict": {
         "isolation": "on",
         "network": "allowlist",
+        "home_access": "hidden",
         "hosted_backends": "deny",
         "training_backends": "scratch_only",
         "approvals": "tiered",
@@ -143,6 +149,7 @@ DEFAULT_PRESET: PresetName = "balanced"
 _STRENGTH: dict[str, dict[str, int]] = {
     "isolation": {"off": 0, "on": 1},
     "network": {"open": 0, "ask": 1, "allowlist": 2, "off": 3},
+    "home_access": {"readable": 0, "hidden": 1},
     "hosted_backends": {"allow": 0, "ask": 1, "deny": 2},
     "training_backends": {"allow": 0, "scratch_only": 1},
     "approvals": {"off": 0, "high_only": 1, "tiered": 2},
@@ -160,6 +167,7 @@ _STRENGTH: dict[str, dict[str, int]] = {
 _TYPES: dict[str, Any] = {
     "isolation": Isolation,
     "network": Network,
+    "home_access": HomeAccess,
     "hosted_backends": HostedBackends,
     "training_backends": TrainingBackends,
     "approvals": Approvals,

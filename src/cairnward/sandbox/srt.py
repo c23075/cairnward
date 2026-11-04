@@ -29,23 +29,106 @@ MIN_NODE_TEXT = ".".join(map(str, MIN_NODE))
 PKG_DIR = Path(__file__).parent / "srt_pkg"
 CLI_REL = Path("node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js")
 
-# Never readable from inside a sandbox (relative to the home directory).
+# Never readable from inside a sandbox (relative to the home directory). Runs hide the whole
+# home folder by default; this list still applies inside what they re-allow, and it's all the
+# core, MCP servers and research engines have.
 SECRET_DIRS = (
+    # keys and cloud or code-host credentials
     ".ssh",
     ".gnupg",
     ".aws",
     ".azure",
+    ".oci",
     ".config/gcloud",
+    ".config/doctl",
     ".kube",
     ".docker",
     ".password-store",
     ".local/share/keyrings",
-    ".mozilla",
-    ".config/google-chrome",
-    ".config/chromium",
     ".netrc",
     ".git-credentials",
+    ".config/git/credentials",
     ".config/gh",
+    ".config/hub",
+    ".config/glab-cli",
+    ".config/rclone",
+    ".config/restic",
+    ".vault-token",
+    ".terraform.d/credentials.tfrc.json",
+    ".s3cfg",
+    ".boto",
+    ".pgpass",
+    ".my.cnf",
+    ".env",
+    # package registries
+    ".pypirc",
+    ".npmrc",
+    ".yarnrc.yml",
+    ".config/pip",
+    ".pip",
+    ".config/uv/uv.toml",
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+    ".gem/credentials",
+    ".m2/settings.xml",
+    ".gradle/gradle.properties",
+    # other AI tools' sign-ins (agent state folders stay readable to their own runs)
+    ".claude",
+    ".claude.json",
+    ".codex",
+    ".aider/oauth-keys.env",
+    ".qwen/oauth_creds.json",
+    # shell and tool history
+    ".bash_history",
+    ".zsh_history",
+    ".zhistory",
+    ".histfile",
+    ".local/share/fish",
+    ".python_history",
+    ".node_repl_history",
+    ".psql_history",
+    ".mysql_history",
+    ".sqlite_history",
+    ".rediscli_history",
+    ".lesshst",
+    ".viminfo",
+    # browsers and their caches
+    ".mozilla",
+    ".librewolf",
+    ".waterfox",
+    ".floorp",
+    ".zen",
+    ".config/google-chrome",
+    ".config/chromium",
+    ".config/BraveSoftware",
+    ".config/microsoft-edge",
+    ".config/vivaldi",
+    ".config/opera",
+    ".cache/mozilla",
+    ".cache/librewolf",
+    ".cache/google-chrome",
+    ".cache/chromium",
+    ".cache/BraveSoftware",
+    ".cache/microsoft-edge",
+    ".cache/vivaldi",
+    ".cache/opera",
+    # mail, messaging and editors (saved sign-ins, open files, message stores)
+    ".thunderbird",
+    ".cache/thunderbird",
+    ".config/Signal",
+    ".config/Slack",
+    ".config/discord",
+    ".config/Element",
+    ".local/share/TelegramDesktop",
+    ".config/Code",
+    ".config/Code - OSS",
+    ".config/VSCodium",
+    ".config/Cursor",
+    ".vscode",
+    ".vscode-server",
+    # flatpak and snap apps keep all of the above in their own folders
+    ".var/app",
+    "snap",
 )
 
 
@@ -55,6 +138,16 @@ class SandboxUnavailable(Exception):
 
 def install_dir(paths: Paths) -> Path:
     return paths.data_dir / "sandbox-runtime"
+
+
+def srt_dirs(paths: Paths, srt_cmd: list[str]) -> list[Path]:
+    """What must stay readable for srt's helpers (seccomp) to start inside the sandbox: the
+    install folder, and the package `srt_cmd` runs from ($CAIRNWARD_SRT, `srt` on PATH)."""
+    dirs = [install_dir(paths)]
+    cli = Path(shutil.which(srt_cmd[-1]) or srt_cmd[-1]).resolve()
+    if cli.name == CLI_REL.name:
+        dirs.append(cli.parent.parent)
+    return dirs
 
 
 def node_version(node: str = "node") -> tuple[int, int] | None:

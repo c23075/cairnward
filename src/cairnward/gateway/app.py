@@ -181,17 +181,44 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         return await call_next(request)
 
     def identity(request: Request) -> tuple[str, str | None] | None:
-        """(client name, run id) for the presented key."""
+        """(client name, run id) for the presented key; None for a disabled client's keys."""
         auth = request.headers.get("authorization", "")
         key = auth[7:].strip() if auth.lower().startswith("bearer ") else None
-        if run := deps.run_keys.identify(key):
-            return run
-        name = deps.keys.identify(key)
-        return (name, None) if name else None
+        ident: tuple[str, str | None] | None = deps.run_keys.identify(key)
+        if ident is None:
+            name = deps.keys.identify(key)
+            ident = (name, None) if name else None
+        if ident and (known := cfg.clients.clients.get(ident[0])) and not known.enabled:
+            return None
+        return ident
 
     def client_of(request: Request) -> str | None:
         ident = identity(request)
         return ident[0] if ident else None
+
+    def run_environment(run_id: str | None) -> str | None:
+        return deps.run_keys.environment.get(run_id) if run_id else None
+
+    async def outside_run_environment(
+        resolved: Resolved, client: str, run_id: str | None
+    ) -> JSONResponse | None:
+        """A 403 if a run asks for an environment other than its own, audited: the environment
+        also selects the privacy level (D57), so an agent must not choose its way out of it."""
+        pinned = run_environment(run_id)
+        if pinned is None or resolved.environment == pinned:
+            return None
+        why = f"this run is in '{pinned}', not '{resolved.environment}'"
+        action = Action(
+            kind="model.call",
+            target=resolved.backend,
+            environment=pinned,
+            client=client,
+            run_id=run_id,
+            actor=f"agent:{client}",
+            details={"virtual_model": resolved.name, "requested_environment": resolved.environment},
+        )
+        await asyncio.to_thread(deps.engine.audit_deny, Decision(action, "deny", "high", why))
+        return _error(403, why, "run_environment")
 
     client_usage = deps.client_usage or ClientUsage.at(deps.config.paths.state_dir)
     reasoning_leaks = deps.reasoning_leaks or ReasoningLeaks.at(deps.config.paths.state_dir)
@@ -283,11 +310,15 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                 return _error(429, why, "budget_exceeded")
             run_use.requests += 1
         client_cfg = cfg.clients.clients.get(client)
-        default_env = client_cfg.default_environment if client_cfg else None
+        default_env = run_environment(run_id) or (
+            client_cfg.default_environment if client_cfg else None
+        )
         try:
             resolved = resolve_embedding(cfg, body.model, default_environment=default_env)
         except UnknownModel as exc:
             return _error(404, str(exc), "invalid_request_error", "model_not_found")
+        if refused := await outside_run_environment(resolved, client, run_id):
+            return refused
         if over := await client_over_budget(client, run_id, resolved.environment):
             return over
         await count_for_client(client)
@@ -354,11 +385,15 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             return _error(401, "missing or unknown API key (cairnward client add <name>)", "auth")
         client, run_id = ident
         client_cfg = cfg.clients.clients.get(client)
-        default_env = client_cfg.default_environment if client_cfg else None
+        default_env = run_environment(run_id) or (
+            client_cfg.default_environment if client_cfg else None
+        )
         try:
             resolved = resolve(cfg, body.model, default_environment=default_env, client=client)
         except UnknownModel as exc:
             return _error(404, str(exc), "invalid_request_error", "model_not_found")
+        if refused := await outside_run_environment(resolved, client, run_id):
+            return refused
 
         usage_of_run = deps.run_keys.usage.get(run_id) if run_id else None
         if usage_of_run and (why := usage_of_run.exceeded()):
