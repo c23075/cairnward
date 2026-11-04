@@ -6,7 +6,7 @@ import pytest
 from cairnward.config import load_config
 from cairnward.config.paths import Paths
 from cairnward.doctor import _memory_check, check_isolation, run_checks
-from cairnward.setup import choose, set_preset
+from cairnward.setup import choose, set_preset, setup
 
 
 @pytest.fixture
@@ -99,3 +99,9 @@ def test_isolation_checks_when_requested(paths: Paths, monkeypatch: pytest.Monke
     assert checks["bwrap"].status == "fail" and "bubblewrap" in checks["bwrap"].fix
     assert checks["node"].status == "fail" and checks["sandbox-runtime"].status == "fail"
     assert "isolation self-test" not in checks  # not attempted without prerequisites
+
+
+def test_setup_warns_about_the_backup_password(paths: Paths) -> None:
+    said: list[str] = []
+    setup(paths, preset="balanced", ask=None, say=said.append)
+    assert any("Keep a copy somewhere else" in line for line in said)

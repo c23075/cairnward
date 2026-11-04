@@ -40,6 +40,7 @@ def test_model_calls_allow_for_a_slow_machine() -> None:
     w = worker()
     (entry,) = w.llm_config("openai/cw/e", GW, "key")["model_list"]
     assert entry["litellm_params"]["timeout"] >= 1800
+    assert entry["litellm_params"]["max_retries"] == 0
     assert entry["litellm_params"]["api_base"] == GW
     assert w.guard({**good(), "llm_config": w.llm_config("openai/cw/e", GW, "key")}, GW) == []
 

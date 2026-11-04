@@ -15,6 +15,7 @@ from typing import Any
 
 from cairnward import __version__
 from cairnward.config import SETTINGS, Config, ConfigError, default_paths, load_config
+from cairnward.config.paths import make_owner_only, private_by_default
 from cairnward.config.privacy import EffectivePrivacy
 from cairnward.config.schema import render, schemas, write_schemas
 
@@ -801,6 +802,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from cairnward.core.server import serve
 
     cfg = _load(args)
+    if changed := make_owner_only(cfg.paths):
+        _log(f"Made {changed} file(s) in Cairnward's folders owner-only.")
     if not sys.stdin.isatty():
         _log("No terminal: requests that need approval are denied.")
     try:
@@ -2151,6 +2154,7 @@ def _cmd_privacy_show(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    private_by_default()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

@@ -403,6 +403,7 @@ def run_checks(paths: Paths) -> list[Check]:
     checks += check_backends(cfg)
     checks += check_isolation(cfg)
     checks += check_data(cfg)
+    checks.append(check_file_modes(cfg))
     checks.append(check_disk_encryption())
     checks.append(check_citation_engine(cfg))
     checks.append(check_backup(cfg))
@@ -459,6 +460,16 @@ def check_parsers(cfg: Any) -> list[Check]:
     return out
 
 
+def check_file_modes(cfg: Any) -> Check:
+    from cairnward.config.paths import wider_than_owner
+
+    wide = wider_than_owner(cfg.paths)
+    if wide:
+        return Check("file modes", "warn", f"{len(wide)} readable by others, e.g. {wide[0]}",
+                     "starting cairnward serve fixes this")  # fmt: skip
+    return Check("file modes", "ok", "owner-only")
+
+
 def check_backup(cfg: Any) -> Check:
     from datetime import UTC, datetime
 
@@ -479,6 +490,9 @@ def check_backup(cfg: Any) -> Check:
         return Check("backup", "fail", st.get("problem") or "repository not set up",
                      "cairnward backup init")  # fmt: skip
     notes = []
+    if not b.password_command:
+        notes.append("the password is only on this disk unless you keep a copy elsewhere "
+                     f"({backup.password_file(cfg)})")  # fmt: skip
     if st["pending_purges"]:
         notes.append(f"{st['pending_purges']} purged conversation(s) still to remove from backups")
     last = st["last"]
