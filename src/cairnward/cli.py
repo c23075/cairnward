@@ -114,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doc = sub.add_parser("doctor", help="check prerequisites and that protections work")
     doc.add_argument("--json", action="store_true", help="machine-readable output")
-    bk = sub.add_parser("backup", help="encrypted backups with restic (vault, library, artifacts)")
+    bk = sub.add_parser("backup", help="encrypted backups with restic (vault, plugins, artifacts)")
     bk_sub = bk.add_subparsers(dest="backup_command", metavar="ACTION", required=True)
     bk_use = bk_sub.add_parser("use", help="turn backups on: choose the folder and who can read it")
     bk_use.add_argument("folder", nargs="?",
@@ -151,11 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     rp_no.add_argument("device", help="its id, or the start of it")
     rp_sub.add_parser("leave", help="stop replicating on this device (its chats stay here)")
     chk = sub.add_parser("check", help="doctor + evals + client checks on this machine, one report")
-    chk.add_argument("--env", default="litreview-offline", help="environment for the lit.ask eval")
-    chk.add_argument("--no-paperqa", action="store_true", help="don't compare with PaperQA2")
     chk.add_argument("--no-coding", action="store_true", help="skip the coding-agent eval")
-    chk.add_argument("--review", action="store_true",
-                     help="also run the review-pipeline eval (long on a CPU)")  # fmt: skip
     chk.add_argument("--out", type=Path, help="report path (default docs/bench/check-<date>.md)")
     stp = sub.add_parser("setup", help="choose a privacy preset and check prerequisites")
     stp.add_argument("--preset", choices=["open", "balanced", "strict"])
@@ -172,6 +168,33 @@ def build_parser() -> argparse.ArgumentParser:
     mcp.add_argument("--url", help="MCP endpoint (default: $CAIRNWARD_MCP_URL or the gateway)")
     mcp.add_argument("--key", help="API key (default: $CAIRNWARD_API_KEY)")
     mcp_sub = mcp.add_subparsers(dest="mcp_command", metavar="ACTION")
+    plug = sub.add_parser("plugin", help="plugins: MCP servers under the plugin contract")
+    plug_sub = plug.add_subparsers(dest="plugin_command", metavar="ACTION", required=True)
+    plug_add = plug_sub.add_parser("add", help="add a plugin from its manifest (plugin.toml)")
+    plug_add.add_argument("manifest", type=Path)
+    plug_add.add_argument("--yes", action="store_true", help="don't ask")
+    plug_list = plug_sub.add_parser("list", help="plugins and whether they can start")
+    plug_list.add_argument("--json", action="store_true")
+    plug_pin = plug_sub.add_parser("pin", help="accept a plugin's installed code as it is now")
+    plug_pin.add_argument("name")
+    plug_verify = plug_sub.add_parser("verify", help="run the contract's tests (needs serve)")
+    plug_verify.add_argument("name")
+    plug_verify.add_argument("--env", help="environment to test in")
+    plug_run = plug_sub.add_parser("run", help="run a command in a plugin's sandbox")
+    plug_run.add_argument("name")
+    plug_run.add_argument("--env", help="environment for its key")
+    plug_run.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
+    plug_read = plug_sub.add_parser("allow-read", help="let a plugin read one more folder")
+    plug_read.add_argument("name")
+    plug_read.add_argument("folder", type=Path)
+    plug_help = plug_sub.add_parser(
+        "helper", help="run a program a plugin needs outside its sandbox, through egress"
+    )
+    plug_help.add_argument("name")
+    plug_help.add_argument("--env", required=True, help="environment whose network policy applies")
+    plug_help.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
+    plug_rm = plug_sub.add_parser("remove", help="take a plugin out of mcp.toml (keeps its data)")
+    plug_rm.add_argument("name")
     mcp_sub.add_parser("list", help="configured MCP servers and their permissions")
     mcp_tools = mcp_sub.add_parser("tools", help="a server's tools, pin state and warnings")
     mcp_tools.add_argument("server")
@@ -236,68 +259,6 @@ def build_parser() -> argparse.ArgumentParser:
     v_rec = vlt_sub.add_parser("recover", help="set a new passphrase with the recovery key")
     v_rec.add_argument("id")
 
-    rs = sub.add_parser("research", help="research jobs (run in the background by the server)")
-    rs_sub = rs.add_subparsers(dest="research_command", metavar="ACTION", required=True)
-    rv = rs_sub.add_parser("review", help="notes per paper + comparison table + references")
-    rv.add_argument("library")
-    rv.add_argument("--question", required=True, help="the review question")
-    rv.add_argument("--style", choices=["apa", "ieee"], default="apa")
-    rv.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
-    rv.add_argument(
-        "--files",
-        nargs="+",
-        metavar="PDF",
-        help="review only these PDFs (in the library folder; indexed when the job starts)",
-    )
-    rv.add_argument("--files-from", type=Path, metavar="LIST",
-                    help="like --files, read from a file with one path per line")  # fmt: skip
-    rv.add_argument("--criteria", help="inclusion/exclusion criteria for screening, or @file")
-    rv.add_argument("--no-screen", action="store_true",
-                    help="read every paper in full (no title/abstract screening)")  # fmt: skip
-    rw = rs_sub.add_parser("workflow", help="run a YAML workflow over a library")
-    rw.add_argument("library")
-    rw.add_argument("file", type=Path, help="the workflow (see examples/workflows/)")
-    rw.add_argument("--question", help="filled in for {{question}}")
-    rw.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
-    eng = rs_sub.add_parser("engine", help="optional engines (PaperQA2, citeproc-js, pandoc)")
-    eng.add_argument("action", choices=["install", "status", "export-lock"],
-                     help="export-lock: copy the lock recorded on this machine into the "
-                     "repository (to review and commit)")  # fmt: skip
-    eng.add_argument("name", choices=["paperqa", "citeproc-js", "pandoc", "docling"])
-    rsearch = rs_sub.add_parser("search", help="search OpenAlex, Semantic Scholar, arXiv, "
-                                "Crossref, PubMed (opt-in per environment)")  # fmt: skip
-    rsearch.add_argument("query")
-    rsearch.add_argument("--env", help="environment (default: the library's, or litreview-online)")
-    rsearch.add_argument("--library", help="use this library's environment")
-    rsearch.add_argument("--source", action="append", dest="sources", metavar="NAME",
-                         help="only this source (repeatable)")  # fmt: skip
-    rsearch.add_argument("--limit", type=int, default=10, help="results per source (max 50)")
-    rsearch.add_argument("--json", action="store_true")
-    radd = rs_sub.add_parser("add", help="download open-access PDFs into a library and index them")
-    radd.add_argument("library")
-    radd.add_argument("ids", nargs="+", metavar="ID", help="doi:10.x/y, arxiv:2401.01234 or a DOI")
-    rb = rs_sub.add_parser("ask", help="answer every question in a file (one per line)")
-    rb.add_argument("library")
-    rb.add_argument("file", type=Path)
-    rb.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
-    rb.add_argument(
-        "--engine",
-        choices=["lean", "paperqa"],
-        default="lean",
-        help="paperqa: the optional deep engine (slower; good for overnight)",
-    )
-    rb.add_argument("--evidence-k", type=int, default=10, help="paperqa: passages to weigh")
-    rb.add_argument("--skip-summary", action="store_true", help="paperqa: no summaries")
-
-    jb = sub.add_parser("jobs", help="research jobs: list, progress, results")
-    jb_sub = jb.add_subparsers(dest="jobs_command", metavar="ACTION")
-    jb_sub.add_parser("list", help="all jobs (default)")
-    for name, text in (("show", "progress of one job"), ("cancel", "stop a job")):
-        jb_sub.add_parser(name, help=text).add_argument("id")
-    jres = jb_sub.add_parser("result", help="print a finished job's result")
-    jres.add_argument("id")
-    jres.add_argument("--bib", action="store_true", help="print the review's BibTeX instead")
-
     art = sub.add_parser("artifacts", help="versioned files of conversations, jobs and runs")
     art_sub = art.add_subparsers(dest="artifacts_command", metavar="ACTION")
     art_sub.add_parser("list", help="repositories (default)")
@@ -312,8 +273,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     for name, text in art_actions:
         a = art_sub.add_parser(name, help=text)
-        a.add_argument("scope", choices=["conversation", "job", "run"])
-        a.add_argument("owner", help="conversation, job or run id")
+        a.add_argument("scope", choices=["conversation", "job", "run", "plugin"])
+        a.add_argument("owner", help="conversation, job or run id, or plugin name")
         if name in ("log",):
             a.add_argument("path", nargs="?")
         if name in ("show", "restore"):
@@ -322,13 +283,6 @@ def build_parser() -> argparse.ArgumentParser:
             a.add_argument("--rev")
         if name == "restore":
             a.add_argument("rev")
-
-    cite = sub.add_parser("cite", help="format references (APA 7, IEEE, or a .csl style)")
-    cite.add_argument("file", type=Path, help="CSL-JSON (e.g. exported from Zotero)")
-    cite.add_argument("--style", default="apa", help="apa (default), ieee, or a .csl file")
-    cite.add_argument("--plain", action="store_true", help="no Markdown italics")
-    cite.add_argument("--engine", choices=["auto", "builtin", "citeproc-js", "pandoc"],
-                      help="CSL engine (default: [research] citation_engine, auto)")  # fmt: skip
 
     red = sub.add_parser("redaction", help="the redaction scanner: optional Presidio, try it out")
     red_sub = red.add_subparsers(dest="redaction_command", metavar="ACTION", required=True)
@@ -393,84 +347,6 @@ def build_parser() -> argparse.ArgumentParser:
     rp = runs_sub.add_parser("prune", help="delete old snapshots")
     rp.add_argument("--keep", type=int, default=20, help="keep the newest N runs (default 20)")
 
-    lib = sub.add_parser("library", help="literature libraries: folders of PDFs, indexed")
-    lib_sub = lib.add_subparsers(dest="library_command", metavar="ACTION", required=True)
-    lc = lib_sub.add_parser("create", help="register a folder of PDFs as a library")
-    lc.add_argument("name")
-    lc.add_argument("folder", type=Path)
-    lc.add_argument("--env", default="litreview-offline", help="environment (privacy, models)")
-    lset = lib_sub.add_parser("set", help="parsing options: --parser docling, --metadata grobid")
-    lset.add_argument("name")
-    lset.add_argument(
-        "--parser",
-        choices=["basic", "docling"],
-        help="text extraction (docling: layout, tables, OCR; optional engine)",
-    )
-    lset.add_argument(
-        "--metadata",
-        choices=["pdf", "grobid"],
-        help="metadata and reference lists (grobid: your GROBID service)",
-    )
-    ldr = lib_sub.add_parser("drive", help="mirror PDFs from Google Drive (or any rclone remote), "
-                             "read-only, then index")  # fmt: skip
-    ldr.add_argument("name")
-    ldr.add_argument("--remote", required=True, help="rclone remote and folder, e.g. gdrive:Papers")
-    ldr.add_argument("--preview", action="store_true", help="only show what would be copied")
-    ldr.add_argument(
-        "--prune",
-        action="store_true",
-        help="delete local copies of PDFs no longer on the remote (drive/ only)",
-    )
-    ldr.add_argument("--no-index", action="store_true")
-    lz = lib_sub.add_parser("zotero", help="copy PDFs and metadata from Zotero (read-only, "
-                            "local API), then index")  # fmt: skip
-    lz.add_argument("name", help="the library to fill")
-    lz.add_argument("--collection", help="a Zotero collection (e.g. Thesis or Thesis/Chapter 2); "
-                    "default: the whole Zotero library")  # fmt: skip
-    lz.add_argument("--url", default="http://127.0.0.1:23119/api", help="Zotero's local API")
-    lz.add_argument(
-        "--storage", type=Path, help="Zotero's storage folder (default ~/Zotero/storage)"
-    )
-    lz.add_argument("--no-index", action="store_true", help="only copy; index later")
-    lz.add_argument("--list-collections", action="store_true", help="show Zotero's collections")
-    li = lib_sub.add_parser("index", help="parse, chunk and embed new or changed PDFs")
-    li.add_argument("name")
-    li.add_argument("--prune", action="store_true", help="forget PDFs no longer in the folder")
-    li.add_argument("--rebuild", action="store_true", help="re-index everything from scratch")
-    lib_sub.add_parser("list", help="libraries and their size")
-    ls_ = lib_sub.add_parser("show", help="documents in a library")
-    ls_.add_argument("name")
-    lq = lib_sub.add_parser("search", help="find passages (vector + keyword search)")
-    lq.add_argument("name")
-    lq.add_argument("query")
-    lq.add_argument("-k", type=int, default=5, help="number of passages (default 5)")
-    lq.add_argument("--json", action="store_true")
-    la = lib_sub.add_parser("ask", help="answer a question from the library, citing pages")
-    la.add_argument("name")
-    la.add_argument("question")
-    la.add_argument("-k", type=int, default=8, help="passages to give the model (default 8)")
-    la.add_argument("--effort", help="effort level (default: the environment's)")
-    la.add_argument("--json", action="store_true")
-    la.add_argument("--engine", choices=["lean", "paperqa"], default="lean",
-                    help="lean (default) or paperqa (optional deep engine; slower)")  # fmt: skip
-    la.add_argument("--evidence-k", type=int, default=10, help="paperqa: passages to weigh")
-    la.add_argument("--skip-summary", action="store_true",
-                    help="paperqa: no per-passage summaries (faster)")  # fmt: skip
-    lrf = lib_sub.add_parser("refs", help="CSL-JSON of the library's papers (from PDF metadata)")
-    lrf.add_argument("name")
-    lk = lib_sub.add_parser("check", help="check a draft's quotations and references")
-    lk.add_argument("name")
-    lk.add_argument("draft", type=Path, help="a Markdown or text file")
-    lk.add_argument("--json", action="store_true")
-    lr = lib_sub.add_parser("remove", help="delete a library's index (the PDFs stay)")
-    lr.add_argument("name")
-    for action, text in (
-        ("lock", "encrypt a library's index with a passphrase (the PDFs stay)"),
-        ("unlock", "remove that lock and restore the index"),
-        ("recover", "forgotten passphrase: set a new one with the recovery key"),
-    ):
-        lib_sub.add_parser(action, help=text).add_argument("name")  # fmt: skip
-
     sbx = sub.add_parser("sandbox", help="the OS sandbox (Anthropic sandbox-runtime)")
     sbx_sub = sbx.add_subparsers(dest="sandbox_command", metavar="ACTION", required=True)
     sbx_sub.add_parser("install", help="install the pinned sandbox-runtime (needs Node.js 22.12+)")
@@ -507,6 +383,28 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--all", action="store_true", help="one-line summary per environment")
     show.add_argument("--json", action="store_true", help="machine-readable output")
     return parser
+
+
+def _cmd_plugin(args: argparse.Namespace) -> int:
+    from cairnward.plugins import cli as plugin_cli
+
+    cfg = _load(args)
+    action = args.plugin_command
+    if action == "add":
+        return plugin_cli.add(cfg, args.manifest, yes=args.yes)
+    if action == "list":
+        return plugin_cli.list_plugins(cfg, args.json)
+    if action == "pin":
+        return plugin_cli.pin(cfg, args.name)
+    if action == "verify":
+        return plugin_cli.verify(cfg, args.name, args.env)
+    if action == "remove":
+        return plugin_cli.remove(cfg, args.name)
+    if action == "allow-read":
+        return plugin_cli.allow_read(cfg, args.name, args.folder)
+    if action == "helper":
+        return plugin_cli.helper(cfg, args.name, args.env, [c for c in args.cmd if c != "--"])
+    return plugin_cli.run(cfg, args.name, args.env, [c for c in args.cmd if c != "--"])
 
 
 def _load(args: argparse.Namespace) -> Config:
@@ -1221,277 +1119,11 @@ def _cmd_models(args: argparse.Namespace) -> int:
     return 0
 
 
-def parse_at(value: str, now: Any = None) -> str:
-    """'23:30' (local, today or tomorrow) or an ISO date-time -> ISO UTC."""
-    from datetime import UTC, datetime, timedelta
-
-    now = now or datetime.now().astimezone()
-    if len(value) <= 5 and ":" in value:
-        hh, mm = (int(x) for x in value.split(":"))
-        at = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if at <= now:
-            at += timedelta(days=1)
-    else:
-        at = datetime.fromisoformat(value)
-        if at.tzinfo is None:
-            at = at.astimezone()
-    return str(at.astimezone(UTC).isoformat(timespec="seconds"))
-
-
-def _research_search(args: argparse.Namespace, mgmt: Any) -> int:
-    body = {"query": args.query, "environment": args.env, "library": args.library,
-            "sources": args.sources, "limit": args.limit}  # fmt: skip
-    resp = mgmt.post("/v1/research/search", json=body, timeout=180)
-    if resp.status_code != 200:
-        print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
-        return 1
-    out = resp.json()
-    if args.json:
-        print(json.dumps(out, indent=1))
-        return 0
-    for name, rep in out["sources"].items():
-        if "error" in rep:
-            print(f"  {name}: {rep['error']}", file=sys.stderr)
-    for n, r in enumerate(out["records"], 1):
-        who = ", ".join(r["authors"][:3]) + (" et al." if len(r["authors"]) > 3 else "")
-        ident = (f"doi:{r['doi']}" if r["doi"] else f"arxiv:{r['arxiv']}" if r["arxiv"]
-                 else f"{r['source']}:{r['id']}")  # fmt: skip
-        extra = " · ".join(x for x in (
-            "open-access PDF" if r["pdf_url"] else "", f"cited {r['cited_by']}"
-            if r["cited_by"] is not None else "", r["source"]) if x)  # fmt: skip
-        print(f"{n:2}. {who} ({r['year'] or 'n.d.'}). {r['title']}"
-              + (f". {r['venue']}" if r["venue"] else ""))  # fmt: skip
-        print(f"    {ident}  [{extra}]")
-    if not out["records"]:
-        print("no results")
-    if out.get("warning"):
-        print(f"note: {out['warning']}", file=sys.stderr)
-    print(f"(environment {out['environment']}; add papers with: cairnward research add "
-          "<library> <id> ...)", file=sys.stderr)  # fmt: skip
-    return 0
-
-
-def _research_add(args: argparse.Namespace, cfg: Config, mgmt: Any) -> int:
-    import base64
-
-    from cairnward.research import LibraryError, Research
-
-    try:
-        with Research.open(cfg.paths) as research:
-            folder = research.get(args.library).folder
-    except LibraryError as exc:
-        print(f"cairnward: {exc}", file=sys.stderr)
-        return 1
-    resp = mgmt.post("/v1/research/fetch", json={"library": args.library, "ids": args.ids},
-                     timeout=600)  # fmt: skip
-    if resp.status_code != 200:
-        print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
-        return 1
-    target = folder / "online"
-    saved = 0
-    for item in resp.json()["items"]:
-        if "error" in item:
-            print(f"  {item['id']}: {item['error']}", file=sys.stderr)
-            continue
-        target.mkdir(parents=True, exist_ok=True)
-        pdf = target / Path(item["filename"]).name
-        pdf.write_bytes(base64.b64decode(item["pdf_b64"]))
-        pdf.with_name(pdf.name + ".csl.json").write_text(json.dumps(item["csl"], indent=1),
-                                                         encoding="utf-8")  # fmt: skip
-        print(f"  added {pdf.relative_to(folder)}: {item['title'][:70]}")
-        saved += 1
-    if saved:
-        print("indexing ...")
-        return main(["--config-dir", str(cfg.paths.config_dir), "library", "index", args.library])
-    return 1
-
-
-def _cmd_jobs(args: argparse.Namespace) -> int:
-    from cairnward.run.runner import RunError, management
-
-    cfg = _load(args)
-    if args.command == "research" and args.research_command == "engine":
-        import subprocess
-
-        from cairnward.research import csl
-        from cairnward.research.engines import paperqa
-
-        if args.name == "citeproc-js":
-            if args.action == "install":
-                try:
-                    lib = csl.install_citeproc_js(cfg.paths)
-                except (csl.CslError, subprocess.CalledProcessError) as exc:
-                    print(f"cairnward: {exc}", file=sys.stderr)
-                    return 1
-                print(f"citeproc-js installed ({lib}); with citation_engine = \"auto\" it now "
-                      "formats references")  # fmt: skip
-                return 0
-            found = csl.citeproc_js(cfg.paths)
-            print(f"citeproc-js: {'installed (' + str(found) + ')' if found else 'not installed'}")
-            return 0 if found else 1
-        if args.action == "export-lock":
-            from cairnward.research.engines import docling, locks
-
-            if args.name != "docling":
-                print("cairnward: only Docling's lock is recorded on install (Presidio's ships "
-                      "with Cairnward)", file=sys.stderr)  # fmt: skip
-                return 2
-            try:
-                dest = locks.export(
-                    "docling", docling.engine_dir(cfg.paths) / "requirements.lock.txt"
-                )
-            except OSError as exc:
-                print(f"cairnward: {exc}", file=sys.stderr)
-                return 1
-            print(f"wrote {dest}\nReview it, then commit it: installs on {locks.platform_tag()} "
-                  "will use it instead of resolving")  # fmt: skip
-            return 0
-        if args.name == "docling":
-            from cairnward.research.engines import docling
-
-            if args.action == "install":
-                print("Installing Docling with CPU-only PyTorch and its models (about 3 GB).")
-                try:
-                    record = docling.install(cfg.paths)
-                except (docling.DoclingError, subprocess.CalledProcessError) as exc:
-                    print(f"cairnward: {exc}", file=sys.stderr)
-                    return 1
-                print(f"Docling installed from the {record['lock_source']} lock (sha256 "
-                      f"{record['lock_sha256'][:16]}...), models sha256 "
-                      f"{record['models_sha256'][:16]}...")  # fmt: skip
-                if not record["lock_source"].startswith("repository"):
-                    print("To ship this lock: cairnward research engine export-lock docling, "
-                          "then commit the file")  # fmt: skip
-                return 0
-            exe = docling.python(cfg.paths)
-            problems = docling.verify(cfg.paths) if exe else []
-            print(f"docling: {'installed' if exe else 'not installed'}"
-                  + "".join(f"; {p}" for p in problems))  # fmt: skip
-            return 0 if exe and not problems else 1
-        if args.name == "pandoc":
-            pandoc_exe = csl.pandoc()
-            if args.action == "install":
-                print("pandoc isn't installed by Cairnward: install it with your package "
-                      "manager (e.g. sudo apt install pandoc); version 2.11 or newer")  # fmt: skip
-            print(f"pandoc: {'found (' + pandoc_exe + ')' if pandoc_exe else 'not found'}")
-            return 0 if pandoc_exe else 1
-        if args.action == "install":
-            print("Installing PaperQA2 (about 250 MB, hash-checked) in its own environment...")
-            paperqa.install(cfg.paths)
-            return 0
-        exe = paperqa.python(cfg.paths)
-        print(f"paperqa: {'installed (' + str(exe) + ')' if exe else 'not installed'}")
-        return 0 if exe else 1
-    try:
-        mgmt = management(cfg)
-    except RunError as exc:
-        print(f"cairnward: {exc} (jobs run inside the server)", file=sys.stderr)
-        return 1
-
-    def fail(resp: Any) -> int:
-        print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
-        return 1
-
-    def line(j: dict[str, Any]) -> str:
-        eta = f", about {j['eta_s'] // 60} min left" if j.get("eta_s") else ""
-        when = (
-            f", starts {j['not_before']}" if j.get("not_before") and j["status"] == "queued" else ""
-        )
-        engine = " (paperqa)" if j.get("engine") == "paperqa" else ""
-        return (f"{j['id']}  {j['kind']:6} {j['status']:9} {j['done']}/{j['total']}  "
-                f"{j['library']}{engine}{when}{eta}")  # fmt: skip
-
-    with mgmt:
-        if args.command == "research" and args.research_command == "search":
-            return _research_search(args, mgmt)
-        if args.command == "research" and args.research_command == "add":
-            return _research_add(args, cfg, mgmt)
-        if args.command == "research":
-            start = parse_at(args.at) if args.at else None
-            body: dict[str, Any] = {"library": args.library, "not_before": start}
-            if args.research_command == "workflow":
-                body |= {"kind": "workflow", "question": args.question,
-                         "workflow": args.file.read_text(encoding="utf-8")}  # fmt: skip
-            elif args.research_command == "review":
-                criteria = args.criteria
-                if criteria and criteria.startswith("@"):
-                    criteria = Path(criteria[1:]).read_text(encoding="utf-8").strip()
-                body |= {"kind": "review", "question": args.question, "style": args.style,
-                         "criteria": criteria, "screen": not args.no_screen}  # fmt: skip
-                files = list(args.files or [])
-                if args.files_from:
-                    files += [x.strip() for x in args.files_from.read_text(
-                        encoding="utf-8").splitlines() if x.strip()]  # fmt: skip
-                if args.files or args.files_from:
-                    # absolute here: the server's working directory isn't ours
-                    body["files"] = [
-                        str(Path(f).expanduser().absolute()) if Path(f).expanduser().exists() else f
-                        for f in files
-                    ]
-            else:
-                questions = args.file.read_text(encoding="utf-8").splitlines()
-                body |= {"kind": "ask", "questions": [q for q in questions if q.strip()],
-                         "engine": args.engine, "evidence_k": args.evidence_k,
-                         "skip_summary": args.skip_summary}  # fmt: skip
-            resp = mgmt.post("/v1/jobs", json=body)
-            if resp.status_code != 200:
-                return fail(resp)
-            job = resp.json()
-            print(f"queued: {line(job)}")
-            if job.get("not_found"):
-                print("not in the library folder yet (reviewed only if there when the job "
-                      "starts): " + ", ".join(job["not_found"]))  # fmt: skip
-            print(f"follow it with: cairnward jobs show {job['id']}")
-            return 0
-        action = args.jobs_command or "list"
-        if action == "list":
-            jobs = mgmt.get("/v1/jobs").json()
-            if not jobs:
-                print("no research jobs")
-            for j in jobs:
-                print(line(j))
-            return 0
-        if action == "cancel":
-            resp = mgmt.post(f"/v1/jobs/{args.id}/cancel")
-            if resp.status_code != 200:
-                return fail(resp)
-            print("cancelled" if resp.json()["cancelled"] else "already finished")
-            return 0
-        resp = mgmt.get(f"/v1/jobs/{args.id}")
-        if resp.status_code != 200:
-            return fail(resp)
-        job = resp.json()
-        if action == "result":
-            if job.get("locked"):
-                print(f"locked: cairnward artifacts unlock job {job['id']}", file=sys.stderr)
-                return 1
-            if not job.get("result"):
-                print(f"not finished yet: {line(job)}", file=sys.stderr)
-                return 1
-            path = Path(job["result"])
-            if args.bib:
-                path = path.with_name("references.bib")
-                if not path.exists():
-                    print("this job has no BibTeX (only reviews do)", file=sys.stderr)
-                    return 1
-            sys.stdout.write(path.read_text(encoding="utf-8"))
-            return 0
-        print(line(job))
-        for st in job["steps"]:
-            mark = {"done": "ok ", "failed": "BAD", "pending": "   "}[st["status"]]
-            took = f" ({st['seconds']:.0f}s)" if st["seconds"] else ""
-            err = f"  {st['error']}" if st["error"] else ""
-            print(f"  [{mark}] {st['name']}: {(st['label'] or '')[:70]}{took}{err}")
-        if job.get("result"):
-            print(f"result: {job['result']}")
-        return 0
-
-
 def _cmd_redaction(args: argparse.Namespace) -> int:
     import subprocess
 
     from cairnward.redaction import Scanner, scan_texts
-    from cairnward.research.engines import presidio
+    from cairnward.redaction_engines import presidio
 
     cfg = _load(args)
     if args.redaction_command == "install":
@@ -1675,7 +1307,7 @@ def _backup_action(cfg: Config, args: argparse.Namespace, action: str) -> int:
                 f"{snap['short_id']}  {snap['time'][:19].replace('T', ' ')}  "
                 f"{snap.get('summary', {}).get('total_files_processed', '?')} files"
             )
-        print("(each holds the conversations, library and artifacts as they were)")
+        print("(each holds the conversations, plugins' data and artifacts as they were)")
         return 0
     if action == "status":
         st = backup.status(cfg)
@@ -1781,44 +1413,6 @@ def _artifacts_lock(args: argparse.Namespace, vault: Any, action: str) -> int:
     return 0
 
 
-def _library_lock(cfg: Config, research: Any, args: argparse.Namespace, action: str) -> int:
-    from cairnward.audit import AuditLog, enabled_for
-    from cairnward.research.lock import item_id, lock_library, unlock_library
-    from cairnward.store import Vault
-    from cairnward.store.crypto import DecryptionError
-    from cairnward.store.vault import LockedError, VaultError
-    from cairnward.vault_cli import ask_passphrase
-
-    name, data = args.name, cfg.paths.data_dir
-    lib = research.find(name)
-    with Vault.open(cfg.paths) as vault:
-        try:
-            if action == "unlock":
-                unlock_library(vault, research, data, name, ask_passphrase("Passphrase: "))
-                print(f"removed the lock from library '{name}'")
-            else:
-                identity = ask_passphrase("Recovery key (AGE-SECRET-KEY-1...): ") if (
-                    action == "recover") else None  # fmt: skip
-                first = ask_passphrase("New passphrase: ")
-                if ask_passphrase("Again: ") != first:
-                    print("the passphrases differ: nothing changed", file=sys.stderr)
-                    return 1
-                if identity is not None:
-                    vault.recover(item_id(name), identity, first)
-                    print(f"library '{name}' has a new passphrase (still locked)")
-                else:
-                    lock_library(vault, research, data, name, first)
-                    print(f"locked library '{name}': only the passphrase opens it.")
-                    print(f"Your PDFs in {lib.folder} aren't encrypted, and older backups "
-                          "still hold the index.")  # fmt: skip
-        except (VaultError, LockedError, DecryptionError) as exc:
-            print(f"cairnward: {exc}", file=sys.stderr)
-            return 1
-    with AuditLog.open(cfg.paths, enabled_for(cfg)) as log:
-        log.append(f"library.{action}", actor="user", target=name, environment=lib.environment)
-    return 0
-
-
 def _cmd_dashboard(args: argparse.Namespace) -> int:
     import webbrowser
 
@@ -1918,357 +1512,6 @@ def _cmd_runs(args: argparse.Namespace) -> int:
             return 1
 
 
-def _run_closing(backends: Any, coro: Any) -> Any:
-    """Run `coro`, then close the backends' HTTP clients in the same event loop (closing
-    them from a second asyncio.run fails once a real connection was opened)."""
-    import asyncio
-
-    async def go() -> Any:
-        try:
-            return await coro
-        finally:
-            await backends.aclose()
-
-    return asyncio.run(go())
-
-
-def _embedder(cfg: Config, environment: str) -> tuple[Any, Any, Any]:
-    """(embedder, audit log, backends) for CLI research commands."""
-    from cairnward.audit import AuditLog, enabled_for
-    from cairnward.backends import Backends
-    from cairnward.policy import DenyApprover, PolicyEngine, TerminalApprover
-    from cairnward.research import InProcessEmbedder
-
-    audit = AuditLog.open(cfg.paths, enabled_for(cfg))
-    approver = TerminalApprover() if sys.stdin.isatty() else DenyApprover()
-    backends = Backends(cfg.backends)
-    engine = PolicyEngine(cfg, approver=approver, audit=audit)
-    return InProcessEmbedder(cfg, engine, backends, environment=environment), audit, backends
-
-
-def _library_ask(cfg: Config, research: Any, args: argparse.Namespace) -> int:
-    """Through the running server when there is one (its queue keeps research from
-    competing with chats for the CPU); otherwise in this process."""
-
-    import httpx
-
-    from cairnward.research.ask import Answer, Source, run_ask
-    from cairnward.run.runner import RunError, management
-
-    research.get(args.name)  # fail early on a wrong name
-    if getattr(args, "engine", "lean") == "paperqa":
-        from cairnward.research.engines import paperqa
-
-        print("Asking with PaperQA2 (slow on a CPU: several model calls per question)...",
-              file=sys.stderr)  # fmt: skip
-        try:
-            pq = paperqa.ask(cfg, args.name, args.question, effort=args.effort,
-                             evidence_k=args.evidence_k, skip_summary=args.skip_summary,
-                             log=lambda m: print(m, file=sys.stderr))  # fmt: skip
-        except paperqa.EngineError as exc:
-            print(f"cairnward: {exc}", file=sys.stderr)
-            return 1
-        if args.json:
-            print(json.dumps(pq.as_dict(), indent=2))
-        else:
-            sys.stdout.write(pq.render())
-        return 0
-    body = {"library": args.name, "question": args.question, "k": args.k, "effort": args.effort}
-    data: dict[str, Any] | None = None
-    try:
-        with management(cfg) as mgmt:
-            print("Asking through the running Cairnward (this can take a few minutes on a CPU)...",
-                  file=sys.stderr)  # fmt: skip
-            resp = mgmt.post("/v1/research/ask", json=body, timeout=3600)
-            if resp.status_code != 200:
-                print(f"cairnward: {resp.json().get('detail', resp.text)}", file=sys.stderr)
-                return 1
-            data = resp.json()
-    except (RunError, httpx.ConnectError):
-        embedder, audit, backends = _embedder(cfg, research.get(args.name).environment)
-        try:
-            answer = _run_closing(backends, run_ask(cfg, embedder.engine, backends, args.name,
-                                                    args.question, k=args.k, effort=args.effort,
-                                                    actor="user"))  # fmt: skip
-        finally:
-            audit.close()
-        data = answer.as_dict()
-    if args.json:
-        print(json.dumps(data, indent=2))
-        return 0
-    answer = Answer(**{**data, "sources": [Source(**s) for s in data["sources"]]})
-    sys.stdout.write(answer.render())
-    return 0
-
-
-def _library_drive(cfg: Config, research: Any, args: argparse.Namespace) -> int:
-    from cairnward.audit import AuditLog, enabled_for
-    from cairnward.policy import PolicyEngine
-    from cairnward.policy.engine import Action
-    from cairnward.research import drive
-
-    lib = research.get(args.name)
-    with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit:
-        engine = PolicyEngine(cfg, audit=audit)
-        action = Action(
-            "net.connect",
-            drive.HOST,
-            environment=lib.environment,
-            actor="user",
-            details={"via": "rclone", "remote": args.remote.split(":", 1)[0]},
-        )
-        rule = engine.rule_for(action)
-        if rule.base == "deny":
-            _log(f"not allowed in environment '{lib.environment}': {rule.reason}")
-            return 1
-        if rule.base == "ask":
-            print("note: new hosts are asked about; answer with: cairnward approvals")
-        from cairnward.run.runner import RunError, egress_session
-
-        try:
-            with egress_session(cfg, lib.environment, "rclone") as proxy:
-                run = drive.make_runner(proxy)
-                for warning in drive.check_remote(args.remote, run):
-                    print(f"note: {warning}")
-                local = lib.folder / "drive"
-                if args.preview:
-                    todo = drive.plan(drive.listing(args.remote, run), local)
-                else:
-                    todo = drive.mirror(args.remote, local, prune=args.prune, run=run)
-        except RunError as exc:
-            _log(str(exc))
-            return 1
-        except drive.DriveError as exc:
-            audit.append(
-                "drive.mirror",
-                actor="user",
-                environment=lib.environment,
-                target=args.name,
-                outcome="error",
-                details={"error": str(exc)[:300]},
-            )
-            _log(str(exc))
-            return 1
-        counts = {k: len(v) for k, v in todo.items()}
-        audit.append("drive.mirror", actor="user", environment=lib.environment, target=args.name,
-                     details={**counts, "preview": args.preview, "prune": args.prune})  # fmt: skip
-    verb = "would copy" if args.preview else "copied"
-    print(f"Drive: {verb} {counts['new']} new and {counts['changed']} changed PDF(s); "
-          f"{counts['unchanged']} unchanged; {counts['gone']} no longer on the remote"
-          + (" (deleted here)" if args.prune and not args.preview else ""))  # fmt: skip
-    for rel in (todo["new"] + todo["changed"])[:20]:
-        print(f"  {rel}")
-    if args.preview or args.no_index or not (counts["new"] or counts["changed"]):
-        return 0
-    research.close()
-    return main(["--config-dir", str(cfg.paths.config_dir), "library", "index", args.name])
-
-
-def _library_zotero(cfg: Config, research: Any, args: argparse.Namespace) -> int:
-    from cairnward.audit import AuditLog, enabled_for
-    from cairnward.research.zotero import Zotero, ZoteroError, import_items
-
-    try:
-        zotero = Zotero(args.url, storage=args.storage)
-    except ZoteroError as exc:
-        _log(str(exc))
-        return 1
-    try:
-        if args.list_collections:
-            for c in sorted(zotero.collections(), key=lambda c: c["name"].lower()):
-                print(c["name"])
-            return 0
-        lib = research.get(args.name)
-        report = import_items(zotero, lib.folder, args.collection)
-    except ZoteroError as exc:
-        _log(str(exc))
-        return 1
-    finally:
-        zotero.close()
-    with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit:
-        audit.append("zotero.import", actor="user", environment=lib.environment, target=args.name,
-                     details={k: (len(v) if isinstance(v, list) else v)
-                              for k, v in report.items()})  # fmt: skip
-    print(f"Zotero: {report['items']} items, {report['copied']} PDFs copied, "
-          f"{report['unchanged']} unchanged, {len(report['no_pdf'])} without a PDF")  # fmt: skip
-    for title in report["no_pdf"][:10]:
-        print(f"  no PDF: {title}")
-    if args.no_index or not (report["copied"] or report["unchanged"]):
-        return 0
-    research.close()
-    return main(["--config-dir", str(cfg.paths.config_dir), "library", "index", args.name])
-
-
-def _cmd_library(args: argparse.Namespace) -> int:
-
-    from cairnward.research import EmbeddingDenied, LibraryError, Research
-
-    cfg = _load(args)
-    cmd = args.library_command
-    try:
-        with Research.open(cfg.paths) as research:
-            if cmd == "create":
-                if args.env not in cfg.environments:
-                    _log(f"unknown environment '{args.env}'")
-                    return 2
-                lib = research.create(args.name, args.folder, args.env)
-                print(
-                    f"Created library '{lib.name}' for {lib.folder} "
-                    f"(environment '{lib.environment}')."
-                )
-                print(f"Next: cairnward library index {lib.name}")
-                return 0
-            if cmd == "list":
-                for lib, n_docs, n_chunks in research.list_libraries():
-                    model = lib.embedding_model or "not indexed"
-                    if lib.locked:
-                        print(f"{lib.name:20} locked  [{lib.environment}]  {lib.folder}")
-                        continue
-                    print(
-                        f"{lib.name:20} {n_docs:5} docs {n_chunks:7} chunks  [{lib.environment}] "
-                        f"{model}  {lib.folder}"
-                    )
-                return 0
-            if cmd == "show":
-                for d in research.documents(args.name):
-                    title = (d.title or "")[:60]
-                    print(f"{d.status:8} {d.pages or 0:4}p {d.chunks:4}c  {d.path}  {title}")
-                    if d.error and d.status != "indexed":
-                        print(f"{'':20}{d.error}")
-                return 0
-            if cmd == "remove":
-                research.remove(args.name)
-                from cairnward.research.lock import item_id
-                from cairnward.store import Vault
-
-                with Vault.open(cfg.paths) as vault:  # a locked library's key goes with it
-                    vault.remove_item(item_id(args.name))
-                print(f"Removed the index of '{args.name}' (your PDFs are untouched).")
-                return 0
-            if cmd in ("lock", "unlock", "recover"):
-                return _library_lock(cfg, research, args, cmd)
-            if cmd == "ask":
-                return _library_ask(cfg, research, args)
-            if cmd == "zotero":
-                return _library_zotero(cfg, research, args)
-            if cmd == "drive":
-                return _library_drive(cfg, research, args)
-            if cmd == "set":
-                from cairnward.research.parsing import set_options
-
-                lib = research.get(args.name)
-                opts = set_options(cfg.paths.data_dir, args.name, parser=args.parser,
-                                   metadata=args.metadata)  # fmt: skip
-                print(f"{args.name}: parser {opts['parser']}, metadata {opts['metadata']}")
-                if opts["metadata"] == "grobid" and not cfg.main.research.grobid_url:
-                    print('note: set [research] grobid_url = "http://127.0.0.1:8070" in '
-                          "cairnward.toml (your GROBID service)")  # fmt: skip
-                print(f"Re-read the PDFs with: cairnward library index {args.name} --rebuild")
-                return 0
-            if cmd == "refs":
-                from cairnward.research.cite import from_documents
-
-                docs = [d for d in research.documents(args.name) if d.status == "indexed"]
-                from cairnward.research import grobid
-
-                refs = from_documents(docs, research.get(args.name).folder,
-                                      lambda rel: grobid.load(cfg.paths.data_dir, args.name,
-                                                              rel)[0])  # fmt: skip
-                print(json.dumps(refs, indent=2, ensure_ascii=False))
-                return 0
-            if cmd == "check":
-                from cairnward.research.check import check_draft
-
-                draft_report = check_draft(
-                    research, args.name, args.draft.read_text(encoding="utf-8")
-                )
-                if args.json:
-                    print(json.dumps(draft_report.as_dict(), indent=2))
-                    return 1 if draft_report.problems else 0
-                for q in draft_report.quotes:
-                    mark = "ok " if q.ok else "BAD"
-                    print(
-                        f'[{mark}] quote "{q.quote[:70]}" '
-                        + (f"-> {q.where}" if q.where else "not found in the library")
-                    )
-                for r in draft_report.references:
-                    mark = {"in_library": "ok ", "doi_unverified": "doi", "not_found": "BAD"}[
-                        r.status
-                    ]
-                    print(
-                        f"[{mark}] reference {r.entry[:70]}" + (f" -> {r.match}" if r.match else "")
-                    )
-                if not draft_report.quotes and not draft_report.references:
-                    print("no quotations or References section found")
-                print(f"{draft_report.problems} problem(s)")
-                return 1 if draft_report.problems else 0
-            lib = research.get(args.name)
-            embedder, audit, backends = _embedder(cfg, lib.environment)
-            try:
-                if cmd == "index":
-                    from cairnward.research.parsing import hooks
-
-                    parse_many, enrich = hooks(
-                        cfg, args.name, lib.environment, proxy=backends.web_proxy(lib.environment)
-                    )
-                    report = _run_closing(
-                        backends,
-                        research.index(
-                            args.name,
-                            embedder,
-                            prune=args.prune,
-                            rebuild=args.rebuild,
-                            progress=print,
-                            parse_many=parse_many,
-                            enrich=enrich,
-                        ),
-                    )
-                    audit.append(
-                        "library.index",
-                        actor="user",
-                        environment=lib.environment,
-                        target=args.name,
-                        details={
-                            k: getattr(report, k)
-                            for k in (
-                                "added",
-                                "updated",
-                                "unchanged",
-                                "no_text",
-                                "failed",
-                                "missing",
-                                "chunks",
-                                "seconds",
-                            )
-                        },
-                    )
-                    print(
-                        f"\nIndexed '{args.name}': {report.added} added, {report.updated} updated, "
-                        f"{report.unchanged} unchanged, {report.no_text} without text, "
-                        f"{report.failed} failed, {report.missing} missing; "
-                        f"{report.chunks} chunks in {report.seconds:.0f}s."
-                    )
-                    return 1 if report.failed else 0
-                hits = _run_closing(
-                    backends, research.search(args.name, args.query, embedder, k=args.k)
-                )
-            finally:
-                audit.close()
-            if args.json:
-                from dataclasses import asdict
-
-                print(json.dumps([asdict(h) for h in hits], indent=2))
-                return 0
-            for i, h in enumerate(hits, 1):
-                title = h.title or h.path
-                print(f"{i}. {title} ({h.pages})  score {h.score}")
-                print(f"   {h.text[:300]}{'…' if len(h.text) > 300 else ''}\n")
-            return 0
-    except (LibraryError, EmbeddingDenied, ValueError) as exc:
-        _log(f"cairnward library: {exc}")
-        return 1
-
-
 def _cmd_sandbox(args: argparse.Namespace) -> int:
     from cairnward.sandbox import SRT_VERSION, SandboxUnavailable, install, locate, node_version
 
@@ -2347,7 +1590,15 @@ def _cmd_privacy_show(args: argparse.Namespace) -> int:
     return 0
 
 
+MOVED = {"library", "research", "jobs", "cite"}  # ADR-0017
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    given = list(sys.argv[1:] if argv is None else argv)
+    if given and given[0] in MOVED:
+        print(f"`cairnward {given[0]}` moved to the research plugin: cairnward-research "
+              f"{given[0]} ... (see docs/plugins.md)", file=sys.stderr)  # fmt: skip
+        return 2
     private_by_default()
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -2376,8 +1627,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_run(args)
         if args.command == "sandbox":
             return _cmd_sandbox(args)
-        if args.command == "library":
-            return _cmd_library(args)
         if args.command == "runs":
             return _cmd_runs(args)
         if args.command == "bench":
@@ -2390,32 +1639,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_dashboard(args)
         if args.command == "models":
             return _cmd_models(args)
-        if args.command in ("research", "jobs"):
-            return _cmd_jobs(args)
         if args.command == "artifacts":
             return _cmd_artifacts(args)
-        if args.command == "cite":
-            from cairnward.research.cite import CiteError, format_references, load_items
-
-            paths = default_paths(args.config_dir)
-            engine = args.engine
-            if engine is None:
-                try:
-                    engine = load_config(paths).main.research.citation_engine
-                except ConfigError:  # an unreadable config shouldn't stop formatting
-                    engine = "auto"
-            try:
-                entries, used = format_references(load_items(args.file), args.style,
-                                                  md=not args.plain, engine=engine,
-                                                  paths=paths)  # fmt: skip
-            except (CiteError, ValueError, OSError) as exc:
-                print(f"cairnward cite: {exc}", file=sys.stderr)
-                return 1
-            print("\n\n".join(entries))
-            print(f"(formatted with {used})", file=sys.stderr)
-            return 0
         if args.command == "mcp":
             return _cmd_mcp(args)
+        if args.command == "plugin":
+            return _cmd_plugin(args)
         if args.command == "vault":
             from cairnward import vault_cli
 
@@ -2445,9 +1674,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "check":
             from cairnward import check
 
-            return check.run(default_paths(args.config_dir), env=args.env,
-                             paperqa=not args.no_paperqa, coding=not args.no_coding,
-                             review=args.review, out=args.out)  # fmt: skip
+            return check.run(default_paths(args.config_dir), coding=not args.no_coding,
+                             out=args.out)  # fmt: skip
         if args.command == "setup":
             return _cmd_setup(args)
         if args.command == "client":

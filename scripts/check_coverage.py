@@ -24,7 +24,9 @@ LEFT_OUT = {
     "check.py": "a report about the machine: needs real models",
     "doctor.py": "a report about the machine: many checks need the real sandbox and tools",
     "core/server.py": "runs as a subprocess this job can't measure; tests/isolation runs it",
-    "research/engines/": "workers with their own Python; tests/isolation runs them",
+    "redaction_engines/presidio_worker.py": "a worker with its own Python; a real run tests it",
+    "plugins/cli.py": "argument handling; tests/isolation runs it for real",
+    "plugins/conformance.py": "needs the real sandbox; tests/isolation runs it",
 }
 
 

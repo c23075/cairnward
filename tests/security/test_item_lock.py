@@ -17,7 +17,6 @@ from cairnward.artifacts import (
 )
 from cairnward.cli import main
 from cairnward.config.paths import Paths
-from cairnward.research.jobs import JobStore
 from cairnward.store import Vault
 from cairnward.store.vault import LockedError, VaultError
 
@@ -69,10 +68,9 @@ def test_locking_a_job_leaves_only_a_stub(paths: Paths) -> None:
             store.read("job", JOB, "result.md")
         with pytest.raises(ArtifactLockedError):
             store.write("job", JOB, "x.md", "x")
-    job = JobStore(paths.data_dir).load(JOB)  # still listed, by the real loader
-    assert job.status == "done" and job.steps == [] and job.summary()["locked"] is True
-    assert job.summary()["library"] is None
-    assert not JobStore(paths.data_dir).result_path(JOB).exists()
+    job = json.loads((folder / "job.json").read_text())  # still listed
+    assert job["status"] == "done" and job["steps"] == [] and job["params"] == {"locked": True}
+    assert not (folder / "result.md").exists()
 
 
 def test_unlock_restores_everything(paths: Paths) -> None:
@@ -85,7 +83,7 @@ def test_unlock_restores_everything(paths: Paths) -> None:
         unlock_item(v, paths.data_dir, "job", JOB, SECRET)
         assert not (folder / SEALED).exists()
         assert (folder / "result.md").read_text() == RESULT
-        assert JobStore(paths.data_dir).load(JOB).params["question"] == QUESTION
+        assert json.loads((folder / "job.json").read_text())["params"]["question"] == QUESTION
         assert ArtifactStore(paths.data_dir).read("job", JOB, "result.md").decode() == RESULT
         with pytest.raises(VaultError, match="not locked"):
             unlock_item(v, paths.data_dir, "job", JOB, SECRET)

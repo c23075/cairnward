@@ -155,7 +155,7 @@ async def test_artifact_routes(env: Any) -> None:  # noqa: F811
 
 
 @pytest.mark.parametrize("path", ["/api/approvals", "/api/activity", "/api/audit/export",
-                                  "/api/vault/x/export", "/api/jobs"])  # fmt: skip
+                                  "/api/vault/x/export"])  # fmt: skip
 async def test_a_part_that_isnt_running_says_so(tmp_path: Path, path: str) -> None:
     cfg = load_config(Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state"))
     auth = DashboardAuth()

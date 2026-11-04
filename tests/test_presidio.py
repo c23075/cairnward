@@ -12,7 +12,7 @@ import pytest
 from cairnward.config.models import RedactionConfig
 from cairnward.config.paths import Paths
 from cairnward.redaction import Scanner, scan_texts
-from cairnward.research.engines import presidio
+from cairnward.redaction_engines import presidio
 
 FAKE = """
 import os

@@ -115,15 +115,6 @@ def test_serve_and_run(tmp_path: Path, mode: str) -> None:
                     run.stderr
                 )
             assert (ws / "written.txt").exists()
-            # the core's background work runs in every mode: the job runner picks up a
-            # review of an empty library, which fails at its first step
-            (tmp_path / "papers").mkdir()
-            created = cw.cw("library", "create", "empty", str(tmp_path / "papers"))
-            assert created.returncode == 0, created.stdout + created.stderr
-            queued = cw.cw("research", "review", "empty", "--question", "Anything?")
-            assert queued.returncode == 0, queued.stdout + queued.stderr
-            shown = cw.wait_job(queued.stdout.split()[1], timeout=90)
-            assert " failed " in shown and "no indexed papers" in shown, shown
     finally:
         srv.shutdown()
     if cw.core_isolated:

@@ -93,6 +93,7 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
         '[privacy]\npreset = "balanced"\nisolation = "off"\n'
     )
     (paths.config_dir / "backends.toml").write_text(
+        '[backends.lan]\ndriver = "ollama"\nlocation = "lan"\nurl = "http://192.168.1.20:11434"\n'
         f'[backends.local-ollama]\ndriver = "ollama"\nurl = "http://127.0.0.1:{srv.server_address[1]}"\n'
         '[roles.main]\nbackend = "local-ollama"\nmodel = "m"\n'
         '[roles.fast]\nbackend = "local-ollama"\nmodel = "m"\n'
@@ -186,7 +187,7 @@ def test_dashboard_in_a_browser(tmp_path: Path) -> None:
     assert out["rows"] == 1 and out["messageText"].endswith(evil) and out["pwned"] is False
     assert out["locked"] is True
     assert out["h1_settings"] == "Settings" and out["h1_egress"] == "Egress report"
-    assert out["h1_jobs"] == "Research jobs"
+    assert "backend lan uses plain http across your network" in out["settingsText"]
     assert out["a11y_settings"] == [] and out["a11y_vault"] == [] and out["a11y_audit"] == []
     assert out["h1_backups"] == "Backups"
     assert "laptop (this device)" in out["otherDevices"] and "cw-sync-" not in out["otherDevices"]

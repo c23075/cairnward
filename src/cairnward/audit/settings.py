@@ -18,6 +18,7 @@ from typing import Any
 from cairnward.audit.log import AuditLog
 from cairnward.config.loader import Config
 from cairnward.config.privacy import SETTINGS
+from cairnward.plugins.contract import weakenings
 
 
 def snapshot(cfg: Config) -> dict[str, Any]:
@@ -34,6 +35,7 @@ def snapshot(cfg: Config) -> dict[str, Any]:
     return {
         "global": one(None),
         "environments": [{"name": name, **one(name)} for name in sorted(cfg.environments)],
+        "plugin_weakenings": weakenings(cfg.mcp),
     }
 
 
@@ -46,6 +48,10 @@ def _envs(snap: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def diff(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
     changes: list[dict[str, Any]] = []
     scopes = [("global", before.get("global", {}), after["global"])]
+    if before.get("plugin_weakenings", []) != after.get("plugin_weakenings", []):
+        changes.append({"scope": "plugins", "setting": "plugin_weakenings",
+                        "before": before.get("plugin_weakenings", []),
+                        "after": after.get("plugin_weakenings", [])})  # fmt: skip
     b_envs, a_envs = _envs(before), _envs(after)
     for name in sorted(set(b_envs) | set(a_envs)):
         scopes.append((f"environment:{name}", b_envs.get(name, {}), a_envs.get(name, {})))

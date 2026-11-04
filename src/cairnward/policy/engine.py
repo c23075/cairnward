@@ -78,6 +78,8 @@ class Action:
     # Untrusted content (web pages, files, tool output) that entered the context since the
     # user's last message, e.g. ("read paper.pdf p.4",). Shown in user-only dialogs.
     provenance: tuple[str, ...] = ()
+    # Plugins whose output came before this action (ADR-0017, rule 6): it needs approval.
+    plugin_output: tuple[str, ...] = ()
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -224,18 +226,8 @@ class PolicyEngine:
             server = self.config.mcp.servers.get(server_name)
             env = self.config.environments.get(action.environment or "")
             if server_name == "cairnward" and env is not None:  # Cairnward's own tools
-                research_tools = ("lit_search", "lit_ask", "lit_review_start")
-                needed = "research" if tool in research_tools else None
-                if tool.startswith("artifact_"):
-                    needed = "artifacts"
-                if needed and needed in env.tools:
+                if tool.startswith("artifact_") and "artifacts" in env.tools:
                     return Rule("allow", "low", f"Cairnward's {tool} (read-only, local)")
-                if (
-                    tool == "lit_find"
-                    and env.research_sources
-                    and ({"research", "scholar"} & set(env.tools))
-                ):  # each host it contacts is checked again as net.connect
-                    return Rule("allow", "low", "Cairnward's lit_find (online sources on here)")
                 return Rule("deny", "high", f"Cairnward's {tool} isn't enabled here")
             if server is None or env is None or server_name not in env.mcp_servers:
                 return Rule("deny", "high", f"MCP server '{server_name}' isn't enabled here")
@@ -273,6 +265,10 @@ class PolicyEngine:
         used nor remembered."""
         eff = self.privacy_for(action)
         rule = self.rule_for(action)
+        if action.plugin_output and rule.base != "deny":  # high: never answered from memory
+            rule = Rule("ask", "high", f"{rule.reason}; it follows output from plugin "
+                        f"{', '.join(action.plugin_output)}, which may be trying to steer the "
+                        "model", explicit_ask=True)  # fmt: skip
         advisory = eff.value("isolation") == "off" and action.kind in ("net.connect", "fs.write")
 
         def done(final: Final, **kw: Any) -> Decision:
@@ -295,7 +291,7 @@ class PolicyEngine:
             rememberable=rule.risk != "high" and action.kind not in USER_ONLY,
             needs_secret=action.kind == "encrypt",
         )  # fmt: skip
-        remembered = self.memory.granted(req)
+        remembered = None if action.plugin_output else self.memory.granted(req)
         if remembered:
             return done("allow", reason=f"{rule.reason}; approved earlier for this {remembered}",
                         approved_by="user", scope=remembered)  # fmt: skip

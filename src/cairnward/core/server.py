@@ -69,8 +69,11 @@ def inbox_for(cfg: Config, log: Log) -> ApprovalInbox:
 
 
 def _srt_if_wanted(cfg: Config) -> list[str] | None:
-    """The sandbox command when any environment wants isolation and it's installed."""
-    if not any(cfg.privacy(e).value("isolation") == "on" for e in [None, *cfg.environments]):
+    """The sandbox command when any environment wants isolation, or a plugin (which always
+    runs in it) is configured, and it's installed."""
+    plugin = any(s.kind == "plugin" and not s.unsandboxed for s in cfg.mcp.servers.values())
+    wanted = any(cfg.privacy(e).value("isolation") == "on" for e in [None, *cfg.environments])
+    if not (plugin or wanted):
         return None
     try:
         return require(cfg.paths)
@@ -95,7 +98,7 @@ async def retention_loop(cfg: Config, vault: Vault, log: Log) -> None:
 def core_background(cfg: Config, vault: Vault, hub: McpHub, log: Log) -> list[Any]:
     """Background work of the core, the same in both modes (isolated core, single process):
     one list so a mode can't silently miss one (the job runner once was)."""
-    return [retention_loop(cfg, vault, log), hub.jobs.run_forever(), hub.idle_loop()]
+    return [retention_loop(cfg, vault, log), hub.idle_loop()]
 
 
 async def replication_loop(cfg: Config, log: Log) -> None:
@@ -245,8 +248,6 @@ def _core_parts(
     isolated: bool,
     launcher: Launcher,
     log: Log = lambda m: None,
-    deep_executor: Any = None,
-    docling_runner: Any = None,
     backup_now: Any = None,
 ) -> tuple[Any, Any, McpHub, Any]:
     from cairnward.core.management import management_app
@@ -256,64 +257,18 @@ def _core_parts(
     from cairnward.gateway.scheduling import BenchProfile, Scheduler
     from cairnward.mcp.hub import McpHub
     from cairnward.mcp.pins import PinStore
+    from cairnward.plugins.services import PluginSessions
     from cairnward.policy.provenance import ProvenanceTracker
-    from cairnward.research.online import Online
 
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     run_keys = RunKeys()
+    plugins = PluginSessions(run_keys)
     tracker = ProvenanceTracker()
     scheduler = Scheduler({n: b.max_parallel for n, b in cfg.backends.backends.items()})
 
-    async def research_ask(library: str, question: str, **kw: Any) -> Any:
-        from cairnward.research.ask import run_ask
-
-        return await run_ask(cfg, engine, backends, library, question, scheduler=scheduler, **kw)
-
-    def chat_for(library: str, effort: str | None = None, actor: str | None = None) -> Any:
-        """The library's environment's model, at its default effort unless given."""
-        from cairnward.research import Research
-        from cairnward.research.llm import InProcessChat
-
-        with Research.open(cfg.paths) as research:
-            env = research.get(library).environment
-        return InProcessChat(cfg, engine, backends, environment=env, scheduler=scheduler,
-                             effort=effort, actor=actor or "cairnward",
-                             purpose="workflow" if actor else "review")  # fmt: skip
-
-    async def index_library(library: str, files: list[str] | None, actor: str) -> dict[str, Any]:
-        from cairnward.research import InProcessEmbedder, Research
-
-        with Research.open(cfg.paths) as research:
-            env = research.get(library).environment
-            embedder = InProcessEmbedder(cfg, engine, backends, environment=env, actor=actor)
-            from cairnward.research.parsing import hooks
-
-            parse_many, enrich = hooks(cfg, library, env, docling_runner=docling_runner,
-                                       proxy=backends.web_proxy(env))  # fmt: skip
-            report = await research.index(library, embedder, only=files, parse_many=parse_many,
-                                          enrich=enrich)  # fmt: skip
-        fields = ("added", "updated", "unchanged", "no_text", "failed", "missing", "chunks",
-                  "seconds")  # fmt: skip
-        details = {k: getattr(report, k) for k in fields}
-        audit.append("library.index", actor=actor, environment=env, target=library,
-                     details=details | {"files": len(files) if files else None})  # fmt: skip
-        return details
-
-    from cairnward.research import Research
-    from cairnward.research.engines.deep import DeepEngine, LocalExecutor
-    from cairnward.research.jobs import JobRunner, JobStore
-
-    deep = DeepEngine(cfg, run_keys=run_keys, audit=audit,
-                      executor=deep_executor or LocalExecutor(cfg, log))  # fmt: skip
-    jobs = JobRunner(JobStore(cfg.paths.data_dir), research=lambda: Research.open(cfg.paths),
-                     ask=research_ask, chat_for=chat_for, audit=audit, log=log,
-                     deep=deep, index=index_library, paths=cfg.paths,
-                     cite_engine=cfg.main.research.citation_engine)  # fmt: skip
-
-    online = Online(cfg, engine, backends)
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
                  provenance=tracker, vault=vault, backends=backends,
-                 research_ask=research_ask, jobs=jobs, online=online)  # fmt: skip
+                 plugins=plugins)  # fmt: skip
     gateway = create_app(
         GatewayDeps(
             cfg,
@@ -326,11 +281,12 @@ def _core_parts(
             mcp=hub,
             provenance=tracker,
             scheduler=scheduler,
+            plugins=plugins,
         )
     )
     auth = DashboardAuth()
     dashboard = dashboard_app(cfg, auth=auth, audit=audit, vault=vault, inbox=inbox, mcp=hub,
-                              isolated=isolated, jobs=jobs, backup_now=backup_now)  # fmt: skip
+                              isolated=isolated, backup_now=backup_now)  # fmt: skip
     management = management_app(
         cfg,
         audit=audit,
@@ -342,9 +298,7 @@ def _core_parts(
         mcp=hub,
         vault=vault,
         dashboard=auth,
-        research_ask=research_ask,
-        jobs=jobs,
-        online=online,
+        plugins=plugins,
     )
     return gateway, management, hub, dashboard
 
@@ -510,42 +464,18 @@ async def _client_socket(cfg: Config, opener: Opener) -> asyncio.Server | None:
     return srv
 
 
-class RemoteDocling:
-    """The isolated core asks the outer process to run Docling (srt can't nest)."""
-
-    def __init__(self, control_socket: str) -> None:
-        self.socket = control_socket
-
-    async def __call__(self, environment: str, files: list[Path]) -> list[dict[str, Any]]:
-        import httpx
-
-        from cairnward.research.engines.docling import DoclingError
-
-        transport = httpx.AsyncHTTPTransport(uds=self.socket)
-        async with httpx.AsyncClient(transport=transport, base_url="http://egress",
-                                     timeout=httpx.Timeout(None, connect=10)) as c:  # fmt: skip
-            resp = await c.post(
-                "/v1/engines/docling/parse",
-                json={"environment": environment, "files": [str(f) for f in files]},
-            )
-        if resp.status_code != 200:
-            raise DoclingError(resp.json().get("detail", resp.text))
-        results: list[dict[str, Any]] = resp.json()["results"]
-        return results
-
-
 def core_sandbox(cfg: Config) -> SandboxSpec:
-    """What the core may reach: local model servers and backend hosts (handed to egress),
-    and the GROBID service when one is set."""
+    """What the core may reach: local model servers and backend hosts (handed to egress), and
+    plugins' fetch hosts."""
     hosts = []
     urls = [b.url for b in cfg.backends.backends.values()]
-    if cfg.main.research.grobid_url:
-        urls.append(cfg.main.research.grobid_url)
     for url in urls:
         u = urlsplit(url)
         port = u.port or (443 if u.scheme == "https" else 80)
         host = u.hostname or ""
         hosts.append(f"[{host}]:{port}" if ":" in host else f"{host}:{port}")
+    for spec in cfg.mcp.servers.values():  # the fetch service; each request is still checked
+        hosts += spec.fetch_hosts
     p = cfg.paths
     return SandboxSpec(
         allowed_hosts=srt_hosts(hosts),
@@ -557,7 +487,6 @@ def core_sandbox(cfg: Config) -> SandboxSpec:
 
 def serve_isolated(cfg: Config, *, log: Log) -> int:
     from cairnward.mcp.launch import BridgeLauncher, LocalLauncher
-    from cairnward.research.engines.deep import run_worker
 
     srt = require(cfg.paths)  # raises SandboxUnavailable
     server = cfg.main.server
@@ -589,21 +518,12 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
             cfg.paths.state_dir / "mcp",
         )
 
-        async def deep(**kw: Any) -> dict[str, Any]:
-            return await asyncio.to_thread(run_worker, cfg, log=log, **kw)
-
-        async def docling(environment: str, files: list[Path]) -> list[dict[str, Any]]:
-            from cairnward.research.engines import docling as dl
-
-            return await asyncio.to_thread(dl.run_worker, cfg, environment, files, log=log)
-
         def backup_now() -> dict[str, Any]:
             from cairnward import backup
 
             return backup.run_now(cfg, log)
 
-        ctl = _uds_server(control_app(sessions, mcp=bridge, deep=deep, docling=docling,
-                                      backup_now=backup_now), socks["egress"])  # fmt: skip
+        ctl = _uds_server(control_app(sessions, mcp=bridge, backup_now=backup_now), socks["egress"])
 
         with tempfile.TemporaryDirectory(prefix="cairnward-core-") as tmp:
             settings = core_sandbox(cfg).write(Path(tmp) / "srt.json")
@@ -709,7 +629,6 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     """Inside the sandbox: gateway and management on Unix sockets."""
     from cairnward.backends import Backends
     from cairnward.mcp.launch import RemoteLauncher
-    from cairnward.research.engines.deep import RemoteExecutor
 
     socks = sockets(cfg)
     srt_proxy = os.environ.get("HTTP_PROXY", "")
@@ -729,8 +648,6 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             isolated=True,
             launcher=RemoteLauncher(str(egress_control)),
             log=log,
-            deep_executor=RemoteExecutor(str(egress_control)),
-            docling_runner=RemoteDocling(str(egress_control)),
             backup_now=remote_backup(str(egress_control)),
         )
         gw = _uds_server(gateway, socks["gateway"])

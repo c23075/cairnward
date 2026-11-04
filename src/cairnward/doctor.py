@@ -488,60 +488,27 @@ def run_checks(paths: Paths) -> list[Check]:
     checks += check_data(cfg)
     checks.append(check_file_modes(cfg))
     checks.append(check_disk_encryption())
-    checks.append(check_citation_engine(cfg))
     checks.append(check_backup(cfg))
     if cfg.main.replication.mode != "none":
         checks.append(check_replication(cfg))
-    checks += check_parsers(cfg)
+    checks += check_plugins(cfg)
     return checks
 
 
-def check_parsers(cfg: Any) -> list[Check]:
-    """Docling and GROBID, when a library uses them (D68)."""
-    import json
+def check_plugins(cfg: Any) -> list[Check]:
+    """Plugins that can't start, and what's been weakened for them (ADR-0017)."""
+    from cairnward.plugins import conformance, contract
 
-    from cairnward.research.parsing import options_file
-
-    try:
-        opts = json.loads(options_file(cfg.paths.data_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    uses = {o.get(k) for o in opts.values() if isinstance(o, dict) for k in ("parser", "metadata")}
     out = []
-    if "docling" in uses:
-        from cairnward.research.engines import docling
-
-        if docling.python(cfg.paths) is None:
-            out.append(Check("docling", "fail", "a library uses Docling but it isn't installed",
-                             "cairnward research engine install docling"))  # fmt: skip
-        else:
-            problems = docling.verify(cfg.paths)
-            out.append(
-                Check(
-                    "docling",
-                    "warn" if problems else "ok",
-                    "; ".join(problems) or "installed, unchanged since install",
-                )
-            )
-    if "grobid" in uses:
-        from cairnward.research.grobid import Grobid, GrobidError
-
-        url = cfg.main.research.grobid_url
-        if not url:
-            out.append(Check("grobid", "fail", "a library uses GROBID but grobid_url isn't set",
-                             '[research] grobid_url = "http://127.0.0.1:8070"'))  # fmt: skip
-        else:
-            try:
-                g = Grobid(url, timeout=5)
-                alive = g.alive()
-                g.close()
-            except GrobidError as exc:
-                out.append(Check("grobid", "fail", str(exc)))
-            else:
-                out.append(Check("grobid", "ok" if alive else "warn",
-                                 f"{url} {'answers' if alive else 'is not answering'}",
-                                 "" if alive else "start it: docker run --rm --network none "
-                                 "-p 127.0.0.1:8070:8070 grobid/grobid:<version>"))  # fmt: skip
+    for name, server in cfg.mcp.servers.items():
+        if server.kind != "plugin":
+            continue
+        problem = contract.contract_problem(name, server)
+        if problem is None and not server.unsandboxed:
+            problem = contract.pin_problem(name, server) or conformance.not_verified(cfg, name)
+        detail = problem or f"{server.version or 'no version given'}, verified"
+        out.append(Check(f"plugin {name}", "fail" if problem else "ok", detail))
+    out += [Check("plugin exception", "warn", w) for w in contract.weakenings(cfg.mcp)]
     return out
 
 
@@ -616,21 +583,3 @@ def check_backup(cfg: Any) -> Check:
     detail = f"{b.mode}, {st.get('snapshots', '?')} snapshots, last {last['time'][:16]}"
     return Check("backup", "warn" if notes else "ok",
                  detail + ("; " + "; ".join(notes) if notes else ""))  # fmt: skip
-
-
-def check_citation_engine(cfg: Any) -> Check:
-    from cairnward.research import csl
-
-    setting = cfg.main.research.citation_engine
-    found = csl.available(cfg.paths)
-    try:
-        used = csl.choose(setting, "apa", cfg.paths)
-    except csl.CslError as exc:
-        return Check("citation engine", "fail", f"{setting}: {exc}")
-    if used == "builtin":
-        return Check("citation engine", "warn" if setting == "auto" else "ok",
-                     f"{setting}: built-in APA/IEEE only",
-                     "for Zotero-identical output and other styles: cairnward research engine "
-                     "install citeproc-js (or install pandoc)")  # fmt: skip
-    return Check("citation engine", "ok",
-                 f"{setting}: {used} (installed: {', '.join(found)})")  # fmt: skip

@@ -36,6 +36,7 @@ def from_messages(messages: list[dict[str, Any]]) -> tuple[str, ...]:
 @dataclass
 class _State:
     items: list[str] = field(default_factory=list)
+    plugins: list[str] = field(default_factory=list)  # plugins behind those items (ADR-0017)
     conversation: str | None = None
     updated: float = field(default_factory=time.monotonic)
 
@@ -52,6 +53,7 @@ class ProvenanceTracker:
             state = self._by.setdefault((client, run_id), _State())
             if messages and messages[-1].get("role") == "user":
                 state.items = []  # the user spoke last: a fresh start
+                state.plugins = []
             state.items = list(dict.fromkeys([*state.items, *found]))[-MAX_ITEMS:]
             state.updated = time.monotonic()
             return tuple(state.items)
@@ -62,6 +64,19 @@ class ProvenanceTracker:
             label = f"output of {name[:80]}"
             state.items = list(dict.fromkeys([*state.items, label]))[-MAX_ITEMS:]
             state.updated = time.monotonic()
+
+    def note_plugin(self, client: str, run_id: str | None, name: str) -> None:
+        with self._lock:
+            state = self._by.setdefault((client, run_id), _State())
+            state.plugins = list(dict.fromkeys([*state.plugins, name]))
+            state.updated = time.monotonic()
+
+    def plugins(self, client: str, run_id: str | None) -> tuple[str, ...]:
+        """Plugins whose output entered since the user's last message. Not dropped as stale:
+        a slow review can't be allowed to wash the output's origin away."""
+        with self._lock:
+            state = self._by.get((client, run_id))
+            return tuple(state.plugins) if state else ()
 
     def note_conversation(self, client: str, run_id: str | None, conversation: str) -> None:
         with self._lock:

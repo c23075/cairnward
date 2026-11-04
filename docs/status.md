@@ -1,22 +1,27 @@
 # Project status
 
-Last updated 2026-11-04. This is the owner's view of where Cairnward stands. Detail on each
+Last updated 2026-11-05. This is the owner's view of where Cairnward stands. Detail on each
 requirement is in [requirements-status.md](plan/requirements-status.md), and the
 [handoff](plan/) is working notes for agents.
 
 ## Summary
-The planned code is built, and most of what remains is testing. Of the 100 requirements tracked:
+The planned code is built, and most of what remains is testing or needs you. **It isn't production
+ready yet:** the code and its tests are in good order, but the backup has never been restored, it
+has never run on real WSL2 or real papers, and nobody but the assistant that wrote it has reviewed
+it. Those are in the actions below.
+
+Research now lives in its own package, as a plugin ([ADR-0017](adr/0017-research-as-a-plugin.md)).
+Of the 104 requirements tracked (91 here and 13 in the research repository):
 
 | State | Count |
 |---|---|
-| Done and covered by tests or measurements | 76 |
+| Done and covered by tests or measurements | 81 |
 | Built, but only tested against a stand-in | 13 |
-| Partly done | 8 |
+| Partly done | 7 |
 | Left out by decision (Ollama-compatible endpoint, Anthropic driver, TLS interception) | 3 |
 
-The two biggest unknowns are how accurate it is on real papers, because every result so far uses
-short synthetic ones, and whether it works on Windows, because WSL2 support has never run on real
-WSL2.
+The biggest unknowns are how accurate it is on real papers, because every result so far uses short
+synthetic ones, and whether it works on Windows, because WSL2 support has never run on real WSL2.
 
 **Machines in use:** a Debian desktop and a Windows laptop. All the optional features are planned
 for use, so all their real-world checks below apply.
@@ -24,7 +29,10 @@ for use, so all their real-world checks below apply.
 ## In progress
 | Item | State |
 |---|---|
-| WSL2 support | Committed on the `wsl2` branch, not pushed or merged |
+| Research as a plugin | Local only: the `plugin-split` branch here, and the research repository, `literature-review-agent-plugin`, with nothing pushed. Your running server and data haven't moved |
+
+After it's merged: restart `cairnward serve` from `main`, then run `cairnward-research install-plugin`
+and `cairnward-research import`. See [plugins](plugins.md) and [operations](operations.md).
 
 ## Decisions and actions for the owner
 | # | What | Why it matters |
@@ -37,7 +45,6 @@ for use, so all their real-world checks below apply.
 | A6 | Decide the Strict overhead target | Strict takes 105 ms with isolation, against a 50 ms target. Recommendation: change the target, not the code |
 | A7 | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
 | A8 | Decide whether the repository goes public | Release signing writes its name to a public log, so the workflow stops before signing while it's private |
-| A9 | Decide on the injection test corpus. Recommendation: write it | The requirements name it, and it doesn't exist yet |
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
 
 ## Known issues
@@ -52,7 +59,8 @@ for use, so all their real-world checks below apply.
 | I6 | A research library is plain while unlocked, its source PDFs are never encrypted, and it has no timed unlock (T-24) | Accepted |
 | I7 | Run snapshots can't be locked, and locking doesn't erase earlier plaintext from disks or old backups | Accepted |
 | I8 | Presidio's small spaCy model misses some names, so redaction isn't complete | Accepted |
-| I20 | PaperQA2 can say a source "explicitly states" something it doesn't. The checker only catches this inside quotation marks ([reruns](bench/results-2026-11-04-paperqa-reruns.md)) | Open |
+| I20 | PaperQA2's fast model can write wrong summaries, and the main model repeats them as what a source says. The prompt change stopped the false "explicitly states" claims in the latest runs, but q3 still mentions a date no paper gives (`docs/bench/results-2026-11-05-plugin.md` in the research repository) | Open, partly fixed |
+| I23 | A paper's planted instruction can still reach an answer. On the real model, one got its code into 2 of 4 lean runs, one of them with the new rule in place. The bad citation it asked for was flagged; an instruction without one wouldn't be | Open: limited, not preventable. An answer has no tools, and plugin output is gated |
 
 ### Functionality
 | # | Issue | State |
@@ -62,8 +70,8 @@ for use, so all their real-world checks below apply.
 | I11 | `keyring:` references usually fail under WSL. Use `env:` | Accepted: documented |
 | I12 | Only the built-in APA and IEEE citation styles work until pandoc or citeproc-js is installed | Your choice |
 | I13 | Audit anchoring is off, so there's no outside proof of the audit log | Your choice |
-| I21 | PaperQA2's refusals in other words aren't recognised as refusals, so `cannot_answer` is wrong | Open |
-| I22 | The check fails a correct "Six" on q5 because it looks for "6", so `cairnward check` can report a false failure | Open |
+| I21 | PaperQA2's refusals in other words weren't recognised. Wider detection now finds them, but can also mark a partial answer as a refusal | Fixed, with that risk |
+| I22 | The check failed a correct "Six" on q5 because it looked for "6" | Fixed |
 
 ### Performance
 | # | Issue | State |
@@ -85,6 +93,8 @@ for use, so all their real-world checks below apply.
       8, PaperQA2 6 of 8 (I20 to I22), and the coding and review evals passed. Chat clients were
       skipped because none has made a model call yet
 - [ ] Real papers: accuracy, and how many relevant papers screening loses
+- [x] Research evals on a real model through the plugin, 2026-11-05: answers, review and injection
+      all ran, with the failures explained in the research repository's `docs/bench`
 - [ ] Research workflows on a real model, then on real papers
 - [ ] Aider's full task with the home folder hidden
 - [ ] Qwen Code, opencode and Goose with the home folder hidden
@@ -103,7 +113,9 @@ for use, so all their real-world checks below apply.
 ### Project-level
 - [ ] Clean install from the README on a fresh Debian VM
 - [ ] Release workflow on GitHub (needs A8 for signing)
-- [ ] Injection test corpus (A9)
+- [x] Injection test corpus: written and run on the real model (I23). Six cases, so it shows that an attack works, not that the others are safe
+- [ ] `deploy/systemd/cairnward.service` under real systemd (only `systemd-analyze verify` so far)
+- [ ] A plugin other than research and a test plugin running the contract
 - [ ] Outside review (A10)
 - [ ] Manual accessibility: keyboard only, a screen reader, 200% zoom
 
@@ -135,9 +147,11 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
+- **ADR-0017 accepted:** research moved to a plugin, with a plugin contract in the core (not merged)
+- Operations guide, security policy, changelog and a systemd unit added (not merged)
+- Real-model evals and the injection corpus run through the plugin; a rule against following paper
+  text added to every prompt over papers (not merged)
+- PaperQA2's prompts changed, and its refusal detection and the q5 check fixed (not merged)
+- **PRs 19 to 21:** WSL2 support and the review fixes (merged)
 - **PR 18:** home folder hidden from agent runs (merged)
-- **PR 17:** replication through a shared folder (merged)
-- **PR 16:** default backup folder, and a choice of folder and permissions (merged)
-- **PR 15:** research workflows (merged)
-- First backup taken on the desktop
-- Full check run on `main`, and PaperQA2's two failures rerun
+- Full check run on `main` on 2026-11-04

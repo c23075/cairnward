@@ -123,6 +123,7 @@ class GatewayDeps:
     profile: BenchProfile | None = None
     mcp: Any = None  # McpHub: the MCP proxy (spec §4.2), when configured
     provenance: ProvenanceTracker = field(default_factory=ProvenanceTracker)
+    plugins: Any = None  # plugins.services.PluginSessions: the plugin services (ADR-0017)
     client_usage: ClientUsage | None = None
     reasoning_leaks: ReasoningLeaks | None = None
 
@@ -167,6 +168,11 @@ def create_app(deps: GatewayDeps) -> FastAPI:
     )
 
     app.state.deps = deps
+    if deps.plugins is not None:
+        from cairnward.plugins.services import plugin_router
+
+        app.include_router(plugin_router(cfg, deps.engine, deps.backends, deps.plugins,
+                                         vault=deps.vault))  # fmt: skip
 
     @app.middleware("http")
     async def loopback_host_only(
@@ -719,7 +725,13 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             c = cfg.clients.clients.get(client)
             return (c.default_environment if c else None) or cfg.main.defaults.environment
 
-        add_mcp_routes(app, deps.mcp, identity, default_environment=default_environment,
+        def not_a_plugin(request: Request) -> tuple[str, str | None] | None:
+            """A plugin's key is for its services: other plugins' tools would be capabilities it
+            wasn't given, and its own output would look like a client's."""
+            ident = identity(request)
+            return None if ident and ident[1] and ident[1].startswith("plugin-") else ident
+
+        add_mcp_routes(app, deps.mcp, not_a_plugin, default_environment=default_environment,
                        run_environment=deps.run_keys.environment.get)  # fmt: skip
 
     return app

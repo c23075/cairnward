@@ -22,6 +22,6 @@ ADRs are never edited after acceptance except to change their status; a changed 
 | [0014](0014-literature-engine.md) | Literature question-answering engine | Accepted |
 | [0015](0015-mcp-proxy.md) | MCP tool proxy: manifests, pinning (protocol layer moving to the MCP SDK) | Accepted, amended |
 | [0016](0016-dashboard-without-a-build-step.md) | Dashboard as plain ES modules, without a build step | Accepted |
-| [0017](0017-research-as-a-plugin.md) | Research as a separate plugin, under a standard plugin contract | Proposed |
+| [0017](0017-research-as-a-plugin.md) | Research as a separate plugin, under a standard plugin contract | Accepted |
 
 Template: copy [`template.md`](template.md).

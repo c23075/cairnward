@@ -44,6 +44,11 @@ class RunIn(BaseModel):
     max_minutes: float | None = Field(default=None, gt=0)
 
 
+class PluginSessionIn(BaseModel):
+    plugin: str = Field(max_length=31)
+    environment: str = Field(max_length=63)
+
+
 class RunEnd(BaseModel):
     exit_code: int
     duration_s: float
@@ -77,44 +82,6 @@ class AskIn(BaseModel):
     provenance: list[str] = Field(default_factory=list, max_length=50)
     rememberable: bool = True
     run_id: str | None = None
-
-
-class JobIn(BaseModel):
-    kind: Literal["ask", "review", "workflow"]
-    library: str
-    workflow: str | None = Field(default=None, max_length=64 * 1024, description="YAML text")
-    question: str | None = Field(default=None, max_length=4000)
-    questions: list[str] = Field(default_factory=list, max_length=500)
-    style: Literal["apa", "ieee"] = "apa"
-    not_before: str | None = Field(default=None, description="ISO time (UTC) to start after")
-    engine: Literal["lean", "paperqa"] = "lean"
-    evidence_k: int = Field(default=10, ge=1, le=50)
-    skip_summary: bool = False
-    files: list[str] | None = Field(
-        default=None, max_length=2000, description="review only these PDFs (in the library folder)"
-    )
-    criteria: str | None = Field(default=None, max_length=4000, description="for screening")
-    screen: bool = Field(default=True, description="screen titles/abstracts with the fast model")
-
-
-class OnlineSearchIn(BaseModel):
-    query: str = Field(min_length=3, max_length=500)
-    environment: str | None = None
-    library: str | None = Field(default=None, description="use this library's environment")
-    sources: list[str] | None = Field(default=None, max_length=10)
-    limit: int = Field(default=10, ge=1, le=50)
-
-
-class OnlineFetchIn(BaseModel):
-    library: str
-    ids: list[str] = Field(min_length=1, max_length=50)
-
-
-class AskQuestionIn(BaseModel):
-    library: str
-    question: str = Field(min_length=3, max_length=4000)
-    k: int = Field(default=8, ge=1, le=30)
-    effort: str | None = None
 
 
 class EgressSessionIn(BaseModel):
@@ -161,9 +128,7 @@ def management_app(
     mcp: Any = None,
     vault: Any = None,
     dashboard: Any = None,
-    research_ask: Any = None,
-    jobs: Any = None,
-    online: Any = None,
+    plugins: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward management", docs_url=None, redoc_url=None)
     runs: dict[str, _Run] = {}
@@ -179,6 +144,28 @@ def management_app(
             "egress_port": server.egress_port if egress else None,
             "active_runs": len(runs),
         }
+
+    @app.post("/v1/plugins/session")
+    def plugin_session(body: PluginSessionIn) -> dict[str, str]:
+        """A key for one `cairnward plugin run` or `verify`, from this owner-only socket."""
+        spec = cfg.mcp.servers.get(body.plugin)
+        env = cfg.environments.get(body.environment)
+        if plugins is None or spec is None or spec.kind != "plugin":
+            raise HTTPException(404, f"no plugin called '{body.plugin}'")
+        if env is None or body.plugin not in env.mcp_servers:
+            raise HTTPException(400, f"{body.plugin} isn't on in '{body.environment}'")
+        key, run_id = plugins.issue(cfg, body.plugin, body.environment)
+        if audit:
+            audit.append("plugin.session", actor="user", target=body.plugin, run_id=run_id,
+                         environment=body.environment)  # fmt: skip
+        return {"key": key, "run_id": run_id,
+                "gateway": f"http://127.0.0.1:{server.gateway_port}/v1"}  # fmt: skip
+
+    @app.post("/v1/plugins/session/{run_id}/end")
+    def plugin_session_end(run_id: str) -> dict[str, bool]:
+        if plugins is not None:
+            plugins.revoke(run_id)
+        return {"ok": True}
 
     @app.post("/v1/runs")
     def start_run(body: RunIn) -> dict[str, Any]:
@@ -410,149 +397,6 @@ def management_app(
         if egress is not None:
             egress.revoke_run(body.session)
         return {"ok": True}
-
-    @app.post("/v1/research/ask")
-    async def research_ask_endpoint(body: AskQuestionIn) -> dict[str, Any]:
-        from cairnward.research import EmbeddingDenied, LibraryError
-        from cairnward.research.llm import ModelDenied
-
-        if research_ask is None:
-            raise HTTPException(503, "research isn't available in this process")
-        try:
-            answer = await research_ask(body.library, body.question, k=body.k,
-                                        effort=body.effort, actor="user")  # fmt: skip
-        except (LibraryError, EmbeddingDenied, ModelDenied) as exc:
-            raise HTTPException(400, str(exc)) from None
-        result: dict[str, Any] = answer.as_dict()
-        return result
-
-    def online_env(library: str | None, environment: str | None) -> str:
-        from cairnward.research import LibraryError, Research
-
-        if environment:
-            return environment
-        if library:
-            try:
-                with Research.open(cfg.paths) as research:
-                    return str(research.get(library).environment)
-            except LibraryError as exc:
-                raise HTTPException(404, str(exc)) from None
-        return "litreview-online"
-
-    @app.post("/v1/research/search")
-    async def online_search(body: OnlineSearchIn) -> dict[str, Any]:
-        from cairnward.research.online import OnlineError
-
-        if online is None:
-            raise HTTPException(503, "online sources aren't available in this process")
-        env = online_env(body.library, body.environment)
-        try:
-            result: dict[str, Any] = await online.search(env, body.query, sources=body.sources,
-                                                         limit=body.limit)  # fmt: skip
-        except OnlineError as exc:
-            raise HTTPException(400, str(exc)) from None
-        return {**result, "environment": env}
-
-    @app.post("/v1/research/fetch")
-    async def online_fetch(body: OnlineFetchIn) -> dict[str, Any]:
-        from cairnward.research.online import OnlineError
-
-        if online is None:
-            raise HTTPException(503, "online sources aren't available in this process")
-        env = online_env(body.library, None)
-        try:
-            items = await online.fetch(env, body.ids)
-        except OnlineError as exc:
-            raise HTTPException(400, str(exc)) from None
-        return {"items": items, "environment": env}
-
-    # ------------------------------------------------------------------ research jobs
-
-    def need_jobs() -> Any:
-        if jobs is None:
-            raise HTTPException(503, "research jobs aren't available in this process")
-        return jobs
-
-    @app.post("/v1/jobs")
-    def submit_job(body: JobIn) -> dict[str, Any]:
-        from cairnward.research import LibraryError, Research
-        from cairnward.research.jobs import ask_job, library_files, review_job, workflow_job
-
-        runner = need_jobs()
-        try:
-            with Research.open(cfg.paths) as research:
-                lib = research.get(body.library)
-        except LibraryError as exc:
-            raise HTTPException(404, str(exc)) from None
-        not_found: list[str] = []
-        if body.kind == "workflow":
-            from cairnward.research.workflow import WorkflowError, parse_workflow
-
-            try:
-                spec = parse_workflow(body.workflow or "")
-            except WorkflowError as exc:
-                raise HTTPException(400, f"workflow: {exc}") from None
-            for step in spec.steps:
-                if step.effort and step.effort not in cfg.effort:
-                    raise HTTPException(400, f"workflow: step '{step.id}': no effort level "
-                                        f"'{step.effort}'")  # fmt: skip
-            job = workflow_job(body.library, spec.model_dump(), body.question,
-                               not_before=body.not_before)  # fmt: skip
-        elif body.kind == "ask":
-            if not body.questions:
-                raise HTTPException(400, "an ask job needs questions")
-            if body.engine == "paperqa":
-                from cairnward.research.engines import paperqa
-
-                if paperqa.python(cfg.paths) is None:
-                    raise HTTPException(400, "PaperQA2 isn't installed: cairnward research "
-                                        "engine install paperqa")  # fmt: skip
-            job = ask_job(body.library, body.questions, not_before=body.not_before,
-                          engine=body.engine, evidence_k=body.evidence_k,
-                          skip_summary=body.skip_summary)  # fmt: skip
-            if not job.steps:
-                raise HTTPException(400, "nothing to do: no questions")
-        else:
-            if not body.question:
-                raise HTTPException(400, "a review job needs a review question")
-            files = None
-            if body.files is not None:
-                try:
-                    files = library_files(lib.folder, body.files)
-                except ValueError as exc:
-                    raise HTTPException(400, str(exc)) from None
-                not_found = [f for f in files if not (lib.folder / f).is_file()]
-            job = review_job(body.library, body.question, body.style, files=files,
-                             criteria=body.criteria, screen=body.screen,
-                             not_before=body.not_before)  # fmt: skip
-        runner.submit(job)
-        return job.summary() | {"not_found": not_found}
-
-    @app.get("/v1/jobs")
-    def list_jobs() -> list[dict[str, Any]]:
-        return [j.summary() for j in need_jobs().store.all()]
-
-    @app.get("/v1/jobs/{job_id}")
-    def show_job(job_id: str) -> dict[str, Any]:
-        try:
-            job = need_jobs().store.load(job_id)
-        except (KeyError, OSError):
-            raise HTTPException(404, "no such job") from None
-        steps = [
-            {"name": s.name, "label": s.params.get("title") or s.params.get("question"),
-             "status": s.status, "seconds": s.seconds, "error": s.error}
-            for s in job.steps
-        ]  # fmt: skip
-        result = need_jobs().store.result_path(job_id)
-        return {**job.summary(), "steps": steps,
-                "result": str(result) if result.exists() else None}  # fmt: skip
-
-    @app.post("/v1/jobs/{job_id}/cancel")
-    def cancel_job(job_id: str) -> dict[str, bool]:
-        try:
-            return {"cancelled": need_jobs().cancel(job_id)}
-        except (KeyError, OSError):
-            raise HTTPException(404, "no such job") from None
 
     @app.post("/v1/dashboard/link")
     def dashboard_link() -> dict[str, Any]:

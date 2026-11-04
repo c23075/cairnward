@@ -83,7 +83,7 @@ class Finding:
 class Scanner:
     custom: list[tuple[str, Category, re.Pattern[str]]] = field(default_factory=list)
     ignore: list[re.Pattern[str]] = field(default_factory=list)
-    presidio: Any = None  # research.engines.presidio.Presidio (optional, FR-RED-2)
+    presidio: Any = None  # redaction_engines.presidio.Presidio (optional, FR-RED-2)
     presidio_entities: list[str] = field(default_factory=list)
     presidio_min_score: float = 0.6
     unavailable: list[str] = field(default_factory=list)  # optional detectors that failed
@@ -92,7 +92,7 @@ class Scanner:
     def from_config(cls, redaction: Any, paths: Any = None) -> Scanner:
         presidio = None
         if getattr(redaction, "presidio", False) and paths is not None:
-            from cairnward.research.engines import presidio as presidio_engine
+            from cairnward.redaction_engines import presidio as presidio_engine
 
             presidio = presidio_engine.shared(paths)
         return cls(
@@ -106,7 +106,7 @@ class Scanner:
     def _presidio(self, text: str) -> Iterator[Finding]:
         if self.presidio is None or not text.strip():
             return
-        from cairnward.research.engines.presidio import PresidioError
+        from cairnward.redaction_engines.presidio import PresidioError
 
         try:
             found = self.presidio.analyze(text, self.presidio_entities, self.presidio_min_score)

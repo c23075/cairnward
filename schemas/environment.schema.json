@@ -324,7 +324,6 @@
   "$id": "https://github.com/c23075/cairnward/schemas/environment.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "environments/<name>.toml (the file name is the environment's name)",
   "properties": {
     "backend": {
       "anyOf": [
@@ -422,21 +421,6 @@
         "training_backends": null,
         "vault": null
       }
-    },
-    "research_sources": {
-      "description": "online academic sources this environment may search (opt-in; each request is still checked against its network setting)",
-      "items": {
-        "enum": [
-          "openalex",
-          "semantic-scholar",
-          "arxiv",
-          "crossref",
-          "pubmed"
-        ],
-        "type": "string"
-      },
-      "title": "Research Sources",
-      "type": "array"
     },
     "run_budget": {
       "$ref": "#/$defs/RunBudget",

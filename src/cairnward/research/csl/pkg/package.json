@@ -1,9 +1,0 @@
-{
-  "name": "cairnward-citeproc-js",
-  "private": true,
-  "description": "citeproc-js, pinned, for Cairnward's reference formatting",
-  "license": "Apache-2.0",
-  "dependencies": {
-    "citeproc": "2.4.63"
-  }
-}

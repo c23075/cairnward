@@ -12,8 +12,7 @@ import contextlib
 import os
 import re
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -62,10 +61,8 @@ class McpHub:
     audit: AuditLog | None = None
     provenance: ProvenanceTracker | None = None
     vault: Any = None  # for Cairnward's own tools
-    backends: Any = None  # for research tools (embeddings through the gateway's drivers)
-    research_ask: Any = None  # async (library, question, **kw) -> research.ask.Answer
-    jobs: Any = None  # research.jobs.JobRunner
-    online: Any = None  # research.online.Online (academic APIs, through egress)
+    backends: Any = None  # the proxy for remote MCP servers
+    plugins: Any = None  # plugins.services.PluginSessions
     _servers: dict[tuple[str, str], _Server] = field(default_factory=dict)
     _locks: dict[tuple[str, str], asyncio.Lock] = field(default_factory=dict)
     _reported: set[tuple[str, str, str]] = field(default_factory=set)
@@ -91,9 +88,12 @@ class McpHub:
                 remote = await self._remote(server, environment)
                 self._servers[key] = remote
                 return remote
+            extra_env, plugin_run = self._plugin_env(server, environment)
             try:
-                started = await self.launcher.start(server, environment)
+                started = await self.launcher.start(server, environment, extra_env)
             except (LaunchError, OSError) as exc:
+                if plugin_run:
+                    self.plugins.revoke(plugin_run)
                 self._audit("mcp.start", actor="cairnward", target=server, outcome="error",
                             environment=environment, details={"error": str(exc)[:300]})  # fmt: skip
                 raise McpError(f"{server}: {exc}") from None
@@ -102,6 +102,8 @@ class McpHub:
                 if method == "notifications/tools/list_changed" and key in self._servers:
                     self._servers[key].tools = None
 
+            if plugin_run:
+                started = self._revoking(started, plugin_run)
             conn = Connection(started.reader, started.writer, on_notification=on_note)
             try:
                 await conn.initialize(timeout=min(spec.call_timeout_s, 120))
@@ -122,6 +124,30 @@ class McpHub:
             entry = _Server(started, conn)
             self._servers[key] = entry
             return entry
+
+    def _plugin_env(self, server: str,
+                    environment: str) -> tuple[dict[str, str] | None, str | None]:  # fmt: skip
+        """A plugin's per-launch key and where its services are; (None, None) for other servers."""
+        if self.cfg.mcp.servers[server].kind != "plugin":
+            return None, None
+        if self.plugins is None:
+            raise McpError(f"{server}: plugins aren't available in this process")
+        from cairnward.plugins import contract
+
+        key, run_id = self.plugins.issue(self.cfg, server, environment)
+        port = self.cfg.main.server.gateway_port
+        return {contract.ENV_KEY: key, contract.ENV_GATEWAY: f"http://127.0.0.1:{port}/v1",
+                contract.ENV_ENVIRONMENT: environment,
+                contract.ENV_CONTRACT: str(contract.CONTRACT_VERSION)}, run_id  # fmt: skip
+
+    def _revoking(self, started: Started, run_id: str) -> Started:
+        stop = started.stop
+
+        async def stop_and_revoke() -> None:
+            self.plugins.revoke(run_id)
+            await stop()
+
+        return replace(started, stop=stop_and_revoke)
 
     async def _remote(self, server: str, environment: str) -> _Server:
         """A remote MCP server: its host is checked like any connection in the
@@ -244,6 +270,9 @@ class McpHub:
         if entry.tools is None:
             entry.tools = await entry.conn.list_tools(timeout=60)
         pinning = self.cfg.privacy(environment).value("mcp_pinning") == "on"
+        spec = self.cfg.mcp.servers.get(server)
+        if spec is not None and spec.kind == "plugin":  # only its own audited switch turns it off
+            pinning = not spec.unpinned_tools
         views = []
         for tool in entry.tools:
             state = self.pins.state(server, tool, entry.conn.raw_tools.get(tool["name"]))
@@ -293,6 +322,13 @@ class McpHub:
                     out.append({**v.definition, "name": exposed_name(server, v.definition["name"])})
         return out, problems
 
+    def _plugin_output(self, client: str, run_id: str | None, server: str) -> tuple[str, ...]:
+        """Plugins whose output came before this call (rule 6). A plugin's own next tool
+        gains nothing it didn't have, so it isn't counted."""
+        if self.provenance is None:
+            return ()
+        return tuple(p for p in self.provenance.plugins(client, run_id) if p != server)
+
     async def call(
         self,
         environment: str,
@@ -317,6 +353,7 @@ class McpHub:
             kind="tool.call", target=f"{server}/{tool}", environment=environment,
             client=client, run_id=run_id,
             actor=f"agent:{client}" if run_id else f"client:{client}",
+            plugin_output=self._plugin_output(client, run_id, server),
             details={"tool_hash": view.state.hash[:16]},
         )  # fmt: skip
         if not view.offered:
@@ -356,6 +393,8 @@ class McpHub:
             return _tool_error(f"{name} failed: {exc}")
         if self.provenance is not None:
             self.provenance.note_tool(client, run_id, f"{server}/{tool}")
+            if spec.kind == "plugin":
+                self.provenance.note_plugin(client, run_id, server)
         text = canonical(result)
         await asyncio.to_thread(
             self.engine.audit_post, action, pre,
@@ -367,84 +406,9 @@ class McpHub:
 
     # ------------------------------------------------------------------ Cairnward's own tools
 
-    def _libraries(self, environment: str) -> list[str]:
-        from cairnward.research import Research
-
-        with contextlib.closing(Research.open(self.cfg.paths)) as research:
-            return [lib.name for lib, _docs, _chunks in research.list_libraries()
-                    if lib.environment == environment and lib.embedding_dim
-                    and not lib.locked]  # fmt: skip
-
     def _builtin_tools(self, environment: str) -> list[dict[str, Any]]:
         env = self.cfg.environments[environment]
         tools: list[dict[str, Any]] = []
-        if "research" in env.tools and self.backends is not None:
-            libraries = self._libraries(environment)
-            if libraries:
-                tools.append({
-                    "name": exposed_name(BUILTIN, "lit_search"),
-                    "description": (
-                        "Search the user's literature library for passages relevant to a "
-                        "question (vector + keyword search). Returns passages with document "
-                        "titles and page numbers; cite them as [title, p. N]."
-                    ),
-                    "inputSchema": {"type": "object", "required": ["query"], "properties": {
-                        "query": {"type": "string", "description": "what to look for"},
-                        "library": {"type": "string", "enum": libraries},
-                        "k": {"type": "integer", "minimum": 1, "maximum": 20, "default": 8},
-                    }},
-                    "annotations": {"readOnlyHint": True},
-                })  # fmt: skip
-                if self.jobs is not None:
-                    tools.append({
-                        "name": exposed_name(BUILTIN, "lit_review_start"),
-                        "description": (
-                            "Start a literature review job: notes per paper (aim, method, "
-                            "sample, findings, limitations, with pages) and a comparison "
-                            "table with references. Runs in the background for minutes to "
-                            "hours; returns a job id the user can follow in Cairnward."
-                        ),
-                        "inputSchema": {"type": "object", "required": ["question"], "properties": {
-                            "question": {"type": "string", "description": "the review question"},
-                            "library": {"type": "string", "enum": libraries},
-                            "style": {"type": "string", "enum": ["apa", "ieee"], "default": "apa"},
-                            "criteria": {"type": "string",
-                                         "description": "inclusion/exclusion criteria"},
-                        }},
-                    })  # fmt: skip
-                if self.research_ask is not None:
-                    tools.append({
-                        "name": exposed_name(BUILTIN, "lit_ask"),
-                        "description": (
-                            "Answer a question from the user's literature library with page "
-                            "citations, using only passages from the papers. Slow on a CPU "
-                            "(minutes). Returns the answer and its sources; an answer the papers "
-                            "don't support says so."
-                        ),
-                        "inputSchema": {"type": "object", "required": ["question"], "properties": {
-                            "question": {"type": "string"},
-                            "library": {"type": "string", "enum": libraries},
-                        }},
-                        "annotations": {"readOnlyHint": True},
-                    })  # fmt: skip
-        if _finds_online(env) and self.online is not None:
-            tools.append({
-                "name": exposed_name(BUILTIN, "lit_find"),
-                "description": (
-                    "Search academic databases online (" + ", ".join(env.research_sources)
-                    + ") for papers: titles, authors, year, venue, DOI, abstract and whether "
-                    "an open-access PDF exists. The query leaves this computer, so keep it to "
-                    "the topic: no names or private details. The user adds papers to a "
-                    "library themselves (`cairnward research add`)."
-                ),
-                "inputSchema": {"type": "object", "required": ["query"], "properties": {
-                    "query": {"type": "string", "description": "topic keywords"},
-                    "sources": {"type": "array", "items": {
-                        "type": "string", "enum": list(env.research_sources)}},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 25, "default": 10},
-                }},
-                "annotations": {"readOnlyHint": True, "openWorldHint": True},
-            })  # fmt: skip
         if "artifacts" in env.tools:
             tools += [
                 {"name": exposed_name(BUILTIN, "artifact_write"),
@@ -482,14 +446,6 @@ class McpHub:
         seen, conversation = (
             self.provenance.current(client, run_id) if self.provenance else ((), None)
         )
-        if tool == "lit_search":
-            return await self._lit_search(environment, arguments, client=client, run_id=run_id)
-        if tool == "lit_find":
-            return await self._lit_find(environment, arguments, client=client, run_id=run_id)
-        if tool == "lit_ask":
-            return await self._lit_ask(environment, arguments, client=client, run_id=run_id)
-        if tool == "lit_review_start":
-            return await self._lit_review(environment, arguments, client=client, run_id=run_id)
         if tool.startswith("artifact_"):
             return await self._artifact(environment, tool, arguments, client=client,
                                         run_id=run_id, conversation=conversation)  # fmt: skip
@@ -518,154 +474,6 @@ class McpHub:
             "sent to hosted models, and new messages are stored only while it's unlocked."
         )}]}  # fmt: skip
 
-    async def _lit_search(self, environment: str, arguments: dict[str, Any], *, client: str,
-                          run_id: str | None) -> dict[str, Any]:  # fmt: skip
-        from cairnward.research import InProcessEmbedder, Research
-
-        libraries = self._libraries(environment)
-        name = arguments.get("library") or (libraries[0] if len(libraries) == 1 else None)
-        query = str(arguments.get("query", "")).strip()
-        if name not in libraries or not query:
-            return _tool_error(f"give a query and one of the libraries: {', '.join(libraries)}")
-        k = max(1, min(int(arguments.get("k", 8) or 8), 20))
-        action = Action(
-            kind="tool.call", target=f"{BUILTIN}/lit_search", environment=environment,
-            client=client, run_id=run_id,
-            actor=f"agent:{client}" if run_id else f"client:{client}",
-            details={"library": name, "k": k},
-        )  # fmt: skip
-        decision = await asyncio.to_thread(self.engine.check, action)
-        if not decision.allowed:
-            await asyncio.to_thread(self.engine.audit_deny, decision)
-            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
-        pre = await asyncio.to_thread(self.engine.audit_pre, decision, query)
-        embedder = InProcessEmbedder(self.cfg, self.engine, self.backends, environment=environment)
-        research = Research.open(self.cfg.paths)
-        try:
-            hits = await research.search(name, query, embedder, k=k)
-        except Exception as exc:  # library and embedding backend errors alike
-            await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
-                                    details={"error": str(exc)[:300]})  # fmt: skip
-            return _tool_error(f"search failed: {exc}")
-        finally:
-            research.close()
-        if self.provenance is not None:  # document text is untrusted content
-            self.provenance.note_tool(client, run_id, f"lit_search in {name}")
-        await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok",
-                                details={"hits": len(hits)})  # fmt: skip
-        lines = [f"[{h.title or Path(h.path).name}, {h.pages}] {h.text}" for h in hits]
-        return {
-            "content": [{"type": "text", "text": "\n\n".join(lines) or "No passages found."}],
-            "structuredContent": {"hits": [{
-                "title": h.title, "file": Path(h.path).name, "pages": h.pages, "text": h.text,
-                "score": round(h.score, 4)} for h in hits]},
-        }  # fmt: skip
-
-    async def _lit_find(self, environment: str, arguments: dict[str, Any], *, client: str,
-                        run_id: str | None) -> dict[str, Any]:  # fmt: skip
-        from cairnward.research.online import OnlineError
-
-        env = self.cfg.environments[environment]
-        if self.online is None or not _finds_online(env):
-            return _tool_error(f"online search is off in '{environment}'")
-        query = str(arguments.get("query", "")).strip()
-        raw = arguments.get("sources")
-        sources = [str(x) for x in raw] if isinstance(raw, list) and raw else None
-        try:
-            limit = max(1, min(int(arguments.get("limit", 10) or 10), 25))
-        except (TypeError, ValueError):
-            return _tool_error("limit must be a number from 1 to 25")
-        actor = f"agent:{client}" if run_id else f"client:{client}"
-        action = Action(
-            kind="tool.call", target=f"{BUILTIN}/lit_find", environment=environment,
-            client=client, run_id=run_id, actor=actor, initiated_by="model",
-            details={"sources": sources or list(env.research_sources), "limit": limit},
-        )  # fmt: skip
-        decision = await asyncio.to_thread(self.engine.check, action)
-        if not decision.allowed:
-            await asyncio.to_thread(self.engine.audit_deny, decision)
-            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
-        pre = await asyncio.to_thread(self.engine.audit_pre, decision, query)
-        try:
-            out = await self.online.search(environment, query, sources=sources, limit=limit,
-                                           client=client, actor=actor,
-                                           initiated_by="model")  # fmt: skip
-        except OnlineError as exc:
-            await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
-                                    details={"error": str(exc)[:300]})  # fmt: skip
-            return _tool_error(f"search failed: {exc}")
-        if self.provenance is not None:  # titles and abstracts are untrusted content
-            self.provenance.note_tool(client, run_id, "lit_find (online)")
-        records = out["records"][:limit]
-        await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok",
-                                details={"results": len(records)})  # fmt: skip
-        lines = []
-        for r in records:
-            ident = (
-                f"doi:{r['doi']}"
-                if r.get("doi")
-                else (f"arxiv:{r['arxiv']}" if r.get("arxiv") else r.get("url") or r["id"])
-            )
-            who = ", ".join(r.get("authors", [])[:3]) + (
-                " et al." if len(r.get("authors", [])) > 3 else ""
-            )
-            lines.append(f"- {r['title']} ({who}, {r.get('year') or 'n.d.'}"
-                         f"{', ' + r['venue'] if r.get('venue') else ''}) {ident}"
-                         f"{' [open-access PDF]' if r.get('pdf_url') else ''}")  # fmt: skip
-        failed = [f"{k}: {v['error']}" for k, v in out["sources"].items() if "error" in v]
-        text = "\n".join(lines) or "No papers found."
-        if failed:
-            text += "\n\nSources that failed: " + "; ".join(failed)
-        if out.get("warning"):
-            text += f"\n\nNote: {out['warning']}"
-        keep = (
-            "title",
-            "authors",
-            "year",
-            "venue",
-            "doi",
-            "arxiv",
-            "pmid",
-            "abstract",
-            "url",
-            "pdf_url",
-            "cited_by",
-            "source",
-        )
-        return {"content": [{"type": "text", "text": text}],
-                "structuredContent": {"records": [{k: r.get(k) for k in keep} for r in records],
-                                      "sources": out["sources"]}}  # fmt: skip
-
-    async def _lit_ask(self, environment: str, arguments: dict[str, Any], *, client: str,
-                       run_id: str | None) -> dict[str, Any]:  # fmt: skip
-        libraries = self._libraries(environment)
-        name = arguments.get("library") or (libraries[0] if len(libraries) == 1 else None)
-        question = str(arguments.get("question", "")).strip()
-        if name not in libraries or len(question) < 3:
-            return _tool_error(f"give a question and one of the libraries: {', '.join(libraries)}")
-        action = Action(
-            kind="tool.call", target=f"{BUILTIN}/lit_ask", environment=environment,
-            client=client, run_id=run_id,
-            actor=f"agent:{client}" if run_id else f"client:{client}", details={"library": name},
-        )  # fmt: skip
-        decision = await asyncio.to_thread(self.engine.check, action)
-        if not decision.allowed:
-            await asyncio.to_thread(self.engine.audit_deny, decision)
-            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
-        pre = await asyncio.to_thread(self.engine.audit_pre, decision, question)
-        try:
-            answer = await self.research_ask(name, question, actor=f"client:{client}")
-        except Exception as exc:  # library, policy and backend errors alike
-            await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="error",
-                                    details={"error": str(exc)[:300]})  # fmt: skip
-            return _tool_error(f"lit_ask failed: {exc}")
-        if self.provenance is not None:
-            self.provenance.note_tool(client, run_id, f"lit_ask in {name}")
-        await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok",
-                                details={"sources": len(answer.sources)})  # fmt: skip
-        return {"content": [{"type": "text", "text": answer.render()}],
-                "structuredContent": answer.as_dict()}  # fmt: skip
-
     async def _artifact(self, environment: str, tool: str, arguments: dict[str, Any], *,
                         client: str, run_id: str | None,
                         conversation: str | None) -> dict[str, Any]:  # fmt: skip
@@ -677,6 +485,7 @@ class McpHub:
         action = Action(kind="tool.call", target=f"{BUILTIN}/{tool}", environment=environment,
                         client=client, run_id=run_id, conversation_id=conversation,
                         actor=f"agent:{client}" if run_id else f"client:{client}",
+                        plugin_output=self._plugin_output(client, run_id, BUILTIN),
                         details={"path": str(arguments.get("path", ""))[:200]})  # fmt: skip
         decision = await asyncio.to_thread(self.engine.check, action)
         if not decision.allowed:
@@ -704,36 +513,6 @@ class McpHub:
             return _tool_error(str(exc))
         await asyncio.to_thread(self.engine.audit_post, action, pre, outcome="ok")
         return {"content": [{"type": "text", "text": text}]}
-
-    async def _lit_review(self, environment: str, arguments: dict[str, Any], *, client: str,
-                          run_id: str | None) -> dict[str, Any]:  # fmt: skip
-        from cairnward.research.jobs import review_job
-
-        libraries = self._libraries(environment)
-        name = arguments.get("library") or (libraries[0] if len(libraries) == 1 else None)
-        question = str(arguments.get("question", "")).strip()
-        style = str(arguments.get("style") or "apa")
-        style = style if style in ("apa", "ieee") else "apa"
-        if name not in libraries or len(question) < 3:
-            return _tool_error(f"give a question and one of the libraries: {', '.join(libraries)}")
-        action = Action(kind="tool.call", target=f"{BUILTIN}/lit_review_start",
-                        environment=environment, client=client, run_id=run_id,
-                        actor=f"agent:{client}" if run_id else f"client:{client}",
-                        details={"library": name})  # fmt: skip
-        decision = await asyncio.to_thread(self.engine.check, action)
-        if not decision.allowed:
-            await asyncio.to_thread(self.engine.audit_deny, decision)
-            return _tool_error(f"Cairnward refused this tool call: {decision.reason}")
-        criteria = str(arguments.get("criteria") or "").strip()[:4000] or None
-        job = review_job(name, question, style, criteria=criteria, actor=f"client:{client}")
-        self.jobs.submit(job)
-        text = (f"Review job {job.id} queued: it indexes the library, screens every paper's "
-                "title and abstract, reads the included ones and writes a synthesis. Follow it "
-                "with "
-                f"`cairnward jobs show {job.id}`; the result will be in `cairnward jobs result "
-                f"{job.id}`.")  # fmt: skip
-        return {"content": [{"type": "text", "text": text}],
-                "structuredContent": job.summary()}  # fmt: skip
 
     # ------------------------------------------------------------------ skills (prompts)
 
@@ -807,11 +586,6 @@ _ENV_REF = re.compile(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
 def resolve_headers(headers: dict[str, str]) -> dict[str, str]:
     """`${env:NAME}` in header values from Cairnward's environment (KeyError if unset)."""
     return {k: _ENV_REF.sub(lambda m: os.environ[m.group(1)], v) for k, v in headers.items()}
-
-
-def _finds_online(env: Any) -> bool:
-    """lit_find: the environment has online sources and the "research" (or "scholar") tool."""
-    return bool(env.research_sources) and bool({"research", "scholar"} & set(env.tools))
 
 
 def _tool_error(text: str) -> dict[str, Any]:

@@ -38,8 +38,8 @@ from typing import Any, Literal, Protocol
 
 from cairnward.store import crypto
 
-Scope = Literal["conversation", "job", "run"]
-SCOPES: tuple[Scope, ...] = ("conversation", "job", "run")
+Scope = Literal["conversation", "job", "run", "plugin"]
+SCOPES: tuple[Scope, ...] = ("conversation", "job", "run", "plugin")
 MAX_BYTES = 2 * 1024 * 1024
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 SEALED = "sealed.age"

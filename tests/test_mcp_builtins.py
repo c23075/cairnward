@@ -1,5 +1,4 @@
-"""Skills served as MCP prompts/resources (FR-MCP-4) and research search as an MCP tool
-(FR-RES-10, lit.search part)."""
+"""Skills served as MCP prompts/resources (FR-MCP-4) and Cairnward's own artifact tools."""
 
 import shutil
 import sys
@@ -21,9 +20,7 @@ from cairnward.mcp.launch import LocalLauncher
 from cairnward.mcp.pins import PinStore
 from cairnward.policy import PolicyEngine
 from cairnward.policy.provenance import ProvenanceTracker
-from cairnward.research import InProcessEmbedder, Research
 from tests.fakes.backends import FakeOllama
-from tests.fakes.pdf import make_pdf
 
 SKILL = """---
 name: apa-review
@@ -68,32 +65,12 @@ async def setup(paths: Paths) -> tuple[httpx.AsyncClient, McpHub, AuditLog, Prov
     audit = AuditLog.open(paths)
     engine = PolicyEngine(cfg, audit=audit)
     tracker = ProvenanceTracker()
-    fake.reply = "Longer sleep went with better working memory [1]."
-
-    async def research_ask(library: str, question: str, **kw: Any) -> Any:
-        from cairnward.research.ask import run_ask
-
-        return await run_ask(cfg, engine, backends, library, question, **kw)
-
     hub = McpHub(cfg, engine, LocalLauncher(cfg, srt=None), PinStore.at(paths.data_dir), audit,
-                 provenance=tracker, backends=backends, research_ask=research_ask)  # fmt: skip
-    from cairnward.research.jobs import JobRunner, JobStore
-
-    hub.jobs = JobRunner(JobStore(paths.data_dir), research=lambda: Research.open(paths),
-                         ask=research_ask, chat_for=lambda lib: None)  # fmt: skip
+                 provenance=tracker, backends=backends)  # fmt: skip
     app = FastAPI()
     add_mcp_routes(app, hub, lambda r: ("jan", None), default_environment=lambda c: "lit",
                    run_environment=lambda r: None)  # fmt: skip
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
-    # an indexed library in this environment
-    papers = paths.config_dir.parent / "papers"
-    papers.mkdir()
-    (papers / "sleep.pdf").write_bytes(make_pdf(
-        [[f"Sleep line {i}: longer sleep improved working memory." for i in range(30)]] * 2,
-        title="Sleep and Memory"))  # fmt: skip
-    with Research.open(paths) as r:
-        r.create("thesis", papers, "lit")
-        await r.index("thesis", InProcessEmbedder(cfg, engine, backends, environment="lit"))
     return client, hub, audit, tracker
 
 
@@ -103,8 +80,8 @@ async def rpc(c: httpx.AsyncClient, method: str, params: dict[str, Any] | None =
     return resp.json()
 
 
-async def test_prompts_resources_and_lit_search(paths: Paths) -> None:
-    c, hub, audit, tracker = await setup(paths)
+async def test_prompts_and_resources(paths: Paths) -> None:
+    c, hub, audit, _ = await setup(paths)
     try:
         init = await rpc(
             c,
@@ -129,65 +106,14 @@ async def test_prompts_resources_and_lit_search(paths: Paths) -> None:
         bad = await rpc(c, "resources/read", {"uri": "skill://apa-review/escape.txt"})
         assert bad["error"]["code"] == -32002
 
-        tools = (await rpc(c, "tools/list"))["result"]["tools"]
-        assert [t["name"] for t in tools] == [
-            "cairnward__lit_search",
-            "cairnward__lit_review_start",
-            "cairnward__lit_ask",
-        ]
-        lit = tools[0]
-        queued = await rpc(
-            c,
-            "tools/call",
-            {"name": "cairnward__lit_review_start", "arguments": {"question": "Does sleep help?"}},
-        )
-        job_id = queued["result"]["structuredContent"]["id"]
-        assert hub.jobs.store.load(job_id).status == "queued"
-        assert "cairnward jobs show" in queued["result"]["content"][0]["text"]
-        answer = await rpc(
-            c,
-            "tools/call",
-            {"name": "cairnward__lit_ask", "arguments": {"question": "Does sleep help?"}},
-        )
-        assert answer["result"]["structuredContent"]["sources"][0]["title"] == "Sleep and Memory"
-        assert "Sources:" in answer["result"]["content"][0]["text"]
-        assert lit["inputSchema"]["properties"]["library"]["enum"] == ["thesis"]
-        hit = (
-            await rpc(
-                c,
-                "tools/call",
-                {"name": "cairnward__lit_search", "arguments": {"query": "working memory"}},
-            )
-        )["result"]
-        assert not hit.get("isError")
-        assert hit["structuredContent"]["hits"][0]["title"] == "Sleep and Memory"
-        assert "[Sleep and Memory, p. " in hit["content"][0]["text"]
-        assert tracker.current("jan", None)[0] == ("output of lit_ask in thesis",
-                                                   "output of lit_search in thesis")  # fmt: skip
     finally:
         await c.aclose()
         await hub.aclose()
     actions = [(r.action, r.phase, r.target) for r in audit.records()]
     assert ("skill.use", "event", "apa-review") in actions
-    assert ("tool.call", "post", "cairnward/lit_search") in actions
     audit.close()
 
 
-async def test_research_tool_needs_opt_in(paths: Paths) -> None:
-    (paths.config_dir / "environments" / "lit.toml").write_text('[privacy]\nisolation = "off"\n')
-    c, hub, audit, _ = await setup(paths)
-    try:
-        assert (await rpc(c, "tools/list"))["result"]["tools"] == []
-        res = await rpc(c, "tools/call", {"name": "cairnward__lit_search",
-                                          "arguments": {"query": "x"}})  # fmt: skip
-        assert "error" in res
-    finally:
-        await c.aclose()
-        await hub.aclose()
-        audit.close()
-
-
-@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 async def test_artifact_tools(paths: Paths) -> None:
     (paths.config_dir / "environments" / "lit.toml").write_text(
         'tools = ["artifacts"]\n[privacy]\nisolation = "off"\n'

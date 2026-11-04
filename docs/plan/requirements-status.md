@@ -87,22 +87,17 @@ real tests are named here.
 | FR-ENC-2 passphrase never leaks | ✅ | `security/test_lock.py`, `security/test_recovery_key.py` |
 | FR-ENC-5 crypto-shredding on purge | ✅ | `test_store.py` |
 
-### Research
+### Plugins
 | ID | Status | Notes |
 |---|---|---|
-| FR-RES-1 PDF library | ✅ | `test_research_library.py`, `test_parsing.py`; pypdfium2 real; **Docling only stand-in-tested** |
-| FR-RES-2 `lit.ask` with page citations | ✅ | real eval through the isolated server: 8/8, nothing invented (report on the `dev` branch); synthetic papers only |
-| FR-RES-3 jobs: queue, resume, schedule | ✅ | `test_jobs_resume.py` |
-| FR-RES-4 review pipeline | ✅ | `evals/litreview_table` with real models through the isolated server: 12/12, on synthetic papers; an earlier run 9/12 led to the two-try rule for excluding; `test_jobs_resume.py` |
-| FR-RES-5 citation check | ✅ | `test_citation_check.py`; `evals/citation_existence` tests the checker, `evals/pdf_qa` real answers; DOIs are only checked for form |
-| FR-RES-6 CSL formatting, APA/IEEE | ✅ | `test_csl.py`, `test_cite.py`; real citeproc-js and pandoc in CI |
-| FR-RES-7 Zotero | 🧪 | `test_zotero.py` (fake local API) |
-| FR-RES-8 arXiv | 🧪 | `test_sources.py`, `test_online.py` (synthetic responses) |
-| FR-RES-9 Semantic Scholar, OpenAlex, PubMed, Crossref | 🧪 | as above |
-| FR-RES-10 research tools over MCP | ✅ | `test_mcp_builtins.py`, `test_online.py` (`lit_find`) |
-| FR-RES-11 multi-agent YAML workflows | 🧪 | `test_workflow.py` (real jobs, audit and policy; scripted model); not yet run with a real model |
-| FR-RES-12 PaperQA2 spike | ✅ | ADR-0014 |
-| FR-RES-13 PaperQA2 deep engine | ✅ | `test_paperqa_guard.py`, `test_deep_engine.py`; real eval through the isolated server: 8/8 |
+| FR-PLUG-1 sandbox required, no network | ✅ | `isolation/test_plugin_contract.py` in all three server modes |
+| FR-PLUG-2 fetch service | ✅ | real egress and local origin; a real outside host only in the owner-side checks |
+| FR-PLUG-3 per-launch key | ✅ | `test_plugin_contract.py` |
+| FR-PLUG-4 pinned code | ✅ | `isolation/test_plugin_contract.py` |
+| FR-PLUG-5 approval after plugin output | ✅ | `test_plugin_contract.py`, with a scripted approver; not seen in a chat client. An agent's own network requests aren't covered |
+| FR-PLUG-6 conformance suite | ✅ | `isolation/test_plugin_contract.py`; only the research plugin and a test plugin have run it |
+
+Research requirements (FR-RES-*) are tracked in the `literature-review-agent-plugin` repository.
 
 ### Artifacts, audit, redaction
 | ID | Status | Notes |

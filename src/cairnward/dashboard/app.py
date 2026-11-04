@@ -40,6 +40,7 @@ from cairnward import __version__
 from cairnward.audit.log import AuditLog
 from cairnward.config.loader import Config
 from cairnward.config.models import LOOPBACK_HOSTS
+from cairnward.plugins.contract import weakenings as plugin_weakenings
 
 STATIC = Path(__file__).with_name("static")
 SESSION_COOKIE = "cw_session"
@@ -162,7 +163,6 @@ def dashboard_app(
     inbox: Any = None,
     mcp: Any = None,
     isolated: bool = False,
-    jobs: Any = None,
     backup_now: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward dashboard", docs_url=None, redoc_url=None, openapi_url=None)
@@ -249,7 +249,8 @@ def dashboard_app(
         return {
             "csrf": auth.session(request.cookies.get(SESSION_COOKIE)),
             "version": __version__, "isolated": isolated, "privacy": eff.label,
-            "weakened": eff.weaker_than_strict, "warnings": eff.warnings,
+            "weakened": eff.weaker_than_strict,
+            "warnings": [*eff.warnings, *plugin_weakenings(cfg.mcp)],
             "pending": len(inbox.pending()) if inbox else 0,
         }  # fmt: skip
 
@@ -506,7 +507,7 @@ def dashboard_app(
             "includes": [
                 n
                 for n, on in (
-                    ("research library", b.include_research),
+                    ("plugins' data", b.include_plugins),
                     ("artifacts", b.include_artifacts),
                     ("configuration", b.include_config),
                 )
@@ -608,36 +609,6 @@ def dashboard_app(
         if op in ("delete", "restore", "purge", "lock", "unlock"):
             user_event(f"vault.{op}", conv_id)
         return {"ok": True}
-
-    # ------------------------------------------------------------------ research jobs
-
-    def need_jobs() -> Any:
-        if jobs is None:
-            raise HTTPException(503, "research jobs aren't available in this process")
-        return jobs
-
-    @app.get("/api/jobs")
-    def jobs_list() -> list[dict[str, Any]]:
-        return [j.summary() for j in reversed(need_jobs().store.all())]
-
-    @app.get("/api/jobs/{job_id}")
-    def job_show(job_id: str) -> dict[str, Any]:
-        try:
-            job = need_jobs().store.load(job_id)
-        except (KeyError, OSError):
-            raise HTTPException(404, "no such job") from None
-        result = need_jobs().store.result_path(job_id)
-        return {**job.summary(), "steps": [
-            {"name": st.name, "label": st.params.get("title") or st.params.get("question"),
-             "status": st.status, "seconds": st.seconds, "error": st.error} for st in job.steps],
-            "result": result.read_text(encoding="utf-8") if result.exists() else None}  # fmt: skip
-
-    @app.post("/api/jobs/{job_id}/cancel")
-    def job_cancel(job_id: str) -> dict[str, bool]:
-        try:
-            return {"cancelled": need_jobs().cancel(job_id)}
-        except (KeyError, OSError):
-            raise HTTPException(404, "no such job") from None
 
     # ------------------------------------------------------------------ artifacts
 

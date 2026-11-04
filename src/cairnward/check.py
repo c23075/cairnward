@@ -3,17 +3,16 @@
 
 Runs, against the running `cairnward serve`:
 1. `doctor` (prerequisites, memory, isolation self-test in the real sandbox);
-2. the lit.ask eval (`evals/pdf_qa`) with the lean engine, and PaperQA2 too when it's
-   installed: the M1 exit criteria (page-cited answers, zero invented citations);
-3. the coding eval (`evals/coding`) with each installed agent (Aider, Qwen Code, opencode,
+2. the coding eval (`evals/coding`) with each installed agent (Aider, Qwen Code, opencode,
    Goose);
-4. what the audit log shows for each chat client (calls, errors, last use), so the
+3. what the audit log shows for each chat client (calls, errors, last use), so the
    manual client checklist can be filled in next to it.
 
 Writes Markdown and JSON (default `docs/bench/check-<date>.md` in a repository checkout,
 else `<data>/reports/`). The report holds no prompts, answers or host name: the machine
 is described by CPU, memory and OS only. Evals need a repository checkout (they live in
-`evals/`); without one they are reported as skipped.
+`evals/`); without one they are reported as skipped. Research evals are in the plugin's
+repository (`literature-review-agent-plugin`).
 """
 
 from __future__ import annotations
@@ -25,7 +24,6 @@ import platform
 import shutil
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -136,49 +134,6 @@ def models_section(paths: Paths) -> Section:
     return sec
 
 
-def pdf_qa_section(env: str, engines: list[str], log: Callable[[str], None]) -> Section:
-    sec = Section(f"lit.ask eval ({', '.join(engines)}; environment {env})")
-    mod = _module(REPO / "evals" / "pdf_qa" / "run_eval.py", "cw_eval_pdf_qa")
-    if mod is None:
-        sec.lines.append("skipped: needs a repository checkout (evals/pdf_qa)")
-        return sec
-    started = time.monotonic()
-    try:
-        out = mod.run(env, engines, emit=lambda line: log(f"  {line}"))
-    except mod.EvalError as exc:
-        sec.status = "fail"
-        sec.lines.append(f"could not run: {exc}")
-        return sec
-    sec.seconds = round(time.monotonic() - started, 1)
-    sec.data = out
-    sec.lines += ["| Engine | Passed | Invented citations | Total seconds |", "|---|---|---|---|"]
-    for engine, s in out["summaries"].items():
-        sec.lines.append(f"| {engine} | {s['passed']}/{s['questions']} | "
-                         f"{s['invented_citations']} | {s['seconds_total']} |")  # fmt: skip
-    for engine, s in out["summaries"].items():
-        if s.get("failed"):
-            sec.lines.append(f"\n{engine} stopped at {s['failed']}")
-    sec.lines += ["", "| Question | Engine | Pass | Cited page | Content | Honest | Seconds |",
-                  "|---|---|---|---|---|---|---|"]  # fmt: skip
-    for r in out["results"]:
-
-        def mark(key: str, r: dict[str, Any] = r) -> str:
-            return "" if key not in r else ("yes" if r[key] else "no")
-
-        sec.lines.append(f"| {r['id']} | {r['engine']} | {mark('pass')} | {mark('cited')} | "
-                         f"{mark('content')} | {mark('honest')} | {r['seconds']} |")  # fmt: skip
-    lean = out["summaries"].get("lean")
-    exit_ok = (
-        bool(lean)
-        and lean["passed"] == lean["questions"]
-        and not any(s["invented_citations"] or s.get("failed") for s in out["summaries"].values())
-    )
-    sec.status = "pass" if exit_ok else "fail"
-    sec.lines += ["", "M1 exit criteria (lean engine passes every question, zero invented "
-                  f"citations): **{'met' if exit_ok else 'not met'}**"]  # fmt: skip
-    return sec
-
-
 def coding_section(agents: list[str], log: Callable[[str], None]) -> Section:
     sec = Section("Coding eval (fix a failing test through `cairnward run`)")
     mod = _module(REPO / "evals" / "coding" / "run_eval.py", "cw_eval_coding")
@@ -206,32 +161,6 @@ def coding_section(agents: list[str], log: Callable[[str], None]) -> Section:
         sec.lines.append(f"\nNot installed, not run: {', '.join(missing)}")
     sec.data = results
     sec.status = "pass" if all(r["passed"] for r in results) else "fail"
-    return sec
-
-
-def review_section(env: str) -> Section:
-    sec = Section(f"Review pipeline eval (environment {env})")
-    script = REPO / "evals" / "litreview_table" / "run_eval.py"
-    if not script.exists():
-        sec.lines.append("skipped: needs a repository checkout (evals/litreview_table)")
-        return sec
-    started = time.monotonic()
-    res = subprocess.run([sys.executable, str(script), "--env", env], capture_output=True,  # noqa: S603
-                         text=True, check=False, cwd=REPO)  # fmt: skip
-    sec.seconds = round(time.monotonic() - started, 1)
-    rows = []
-    for line in res.stdout.splitlines():
-        with contextlib.suppress(ValueError):
-            rows.append(json.loads(line))
-    checks = [r for r in rows if "check" in r]
-    if not checks:
-        sec.status = "fail"
-        sec.lines.append(f"could not run: {(res.stdout + res.stderr).strip()[-400:]}")
-        return sec
-    sec.data = rows
-    sec.lines += ["| Check | Result |", "|---|---|"]
-    sec.lines += [f"| {c['check']} | {'pass' if c['pass'] else 'FAIL'} |" for c in checks]
-    sec.status = "pass" if all(c["pass"] for c in checks) else "fail"
     return sec
 
 
@@ -309,8 +238,7 @@ def _guarded(title: str, build: Callable[[], Section]) -> Section:
         return sec
 
 
-def run(paths: Paths, *, env: str = "litreview-offline", paperqa: bool = True,
-        coding: bool = True, review: bool = False, out: Path | None = None,
+def run(paths: Paths, *, coding: bool = True, out: Path | None = None,
         log: Callable[[str], None] = print) -> int:  # fmt: skip
     started = datetime.now(UTC).isoformat(timespec="seconds")
     info = machine()
@@ -321,24 +249,8 @@ def run(paths: Paths, *, env: str = "litreview-offline", paperqa: bool = True,
     sections.append(server)
     if up:
         sections.append(models_section(paths))
-        from cairnward.research.engines import paperqa as pqa
-
-        engines = ["lean"] + (["paperqa"] if paperqa and pqa.python(paths) else [])
-        log(f"lit.ask eval ({', '.join(engines)}); on a CPU this takes a while ...")
-        sections.append(
-            _guarded(
-                f"lit.ask eval ({', '.join(engines)}; environment {env})",
-                lambda: pdf_qa_section(env, engines, log),
-            )
-        )
-        if paperqa and "paperqa" not in engines:
-            sections[-1].lines.append("\nPaperQA2 isn't installed, so it wasn't compared "
-                                      "(`cairnward research engine install paperqa`).")  # fmt: skip
         if coding:
             sections.append(_guarded("Coding eval", lambda: coding_section(list(AGENTS), log)))
-        if review:
-            log("review pipeline eval (screening, notes, synthesis); on a CPU ~30 min ...")
-            sections.append(_guarded("Review pipeline eval", lambda: review_section(env)))
         sections.append(_guarded("Chat clients", clients_section))
     text = render(sections, info, started)
     target = out or default_out(paths, started[:10])

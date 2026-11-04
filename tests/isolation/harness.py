@@ -18,7 +18,6 @@ import os
 import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -128,14 +127,3 @@ class Cairnward:
     def audit(self, last: int = 300) -> list[dict[str, Any]]:
         out = self.cw("audit", "log", "--json", "--last", str(last), check=True).stdout
         return [json.loads(x) for x in out.splitlines()]
-
-    def wait_job(self, job_id: str, timeout: float = 600) -> str:
-        """`jobs show` once the job has finished (the runner wakes at least every minute)."""
-        deadline = time.monotonic() + timeout
-        shown = ""
-        while time.monotonic() < deadline:
-            shown = self.cw("jobs", "show", job_id).stdout
-            if " done " in shown or " failed " in shown:
-                return shown
-            time.sleep(2)
-        raise AssertionError(f"job {job_id} didn't finish in {self.mode} mode:\n{shown}")

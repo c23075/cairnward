@@ -71,8 +71,9 @@ out.previewSandbox = await page.getAttribute("iframe.preview", "sandbox");
 out.pwned2 = await page.evaluate(() => window.pwned2 === 1);
 out.previewText = await page.frameLocator("iframe.preview").locator("h1").textContent();
 
-for (const view of ["activity", "audit", "egress", "jobs", "artifacts", "backups", "mcp", "settings"]) {
+for (const view of ["activity", "audit", "egress", "artifacts", "backups", "mcp", "settings"]) {
   out[`h1_${view}`] = await go(view);
+  if (view === "settings") out.settingsText = await page.locator("main").innerText();
   if (view === "backups") {
     await page.waitForSelector("text=Other devices");
     out.otherDevices = await page.textContent("main");
@@ -94,7 +95,7 @@ out.savedBanner = await page.textContent("main .warnbox");
 out.axe = {};
 for (const scheme of ["light", "dark"]) {
   await page.emulateMedia({ colorScheme: scheme });
-  for (const view of ["approvals", "activity", "audit", "egress", "vault", "jobs", "artifacts", "backups", "mcp", "settings"]) {
+  for (const view of ["approvals", "activity", "audit", "egress", "vault", "artifacts", "backups", "mcp", "settings"]) {
     await go(view);
     await page.evaluate(() => { for (const d of document.querySelectorAll("main details")) d.open = true; });
     if (!(await page.evaluate(() => typeof window.axe === "object"))) await page.evaluate(axeSource);
