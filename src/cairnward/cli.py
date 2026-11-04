@@ -11,7 +11,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from cairnward import __version__
 from cairnward.config import SETTINGS, Config, ConfigError, default_paths, load_config
@@ -124,6 +124,25 @@ def build_parser() -> argparse.ArgumentParser:
     bk_res.add_argument("--snapshot", help="snapshot ID (default: the latest)")
     bk_res.add_argument("--at", help="the latest backup from this date or earlier (YYYY-MM-DD)")
     bk_res.add_argument("--to", type=Path, help="only extract the backup into this folder")
+    rp = sub.add_parser("replicate", help="the same chats and artifacts on several devices")
+    rp_sub = rp.add_subparsers(dest="replicate_command", metavar="ACTION", required=True)
+    for name, text in (
+        ("init", "start sharing through a new folder (shows the sync key once)"),
+        ("join", "join a folder another device set up (asks for the sync key)"),
+    ):
+        rp_start = rp_sub.add_parser(name, help=text)
+        rp_start.add_argument("folder", type=Path, help="Syncthing, NAS or synced-drive folder")
+        rp_start.add_argument("--name", help="what other devices call this one")
+        rp_start.add_argument("--mode", choices=["auto", "on_demand"], default="auto",
+                              help="auto: serve syncs every few minutes")  # fmt: skip
+    rp_sub.add_parser("sync", help="read the other devices and publish what's new here")
+    rp_st = rp_sub.add_parser("status", help="devices, last sync, problems")
+    rp_st.add_argument("--json", action="store_true", help="machine-readable output")
+    rp_ok = rp_sub.add_parser("approve", help="accept a new device's changes")
+    rp_ok.add_argument("device", help="its id, or the start of it")
+    rp_no = rp_sub.add_parser("block", help="stop accepting a device's changes")
+    rp_no.add_argument("device", help="its id, or the start of it")
+    rp_sub.add_parser("leave", help="stop replicating on this device (its chats stay here)")
     chk = sub.add_parser("check", help="doctor + evals + client checks on this machine, one report")
     chk.add_argument("--env", default="litreview-offline", help="environment for the lit.ask eval")
     chk.add_argument("--no-paperqa", action="store_true", help="don't compare with PaperQA2")
@@ -1502,6 +1521,87 @@ def _cmd_backup(args: argparse.Namespace) -> int:
         return 1
 
 
+def _cmd_replicate(args: argparse.Namespace) -> int:
+    from cairnward import replication
+    from cairnward.config.edit import EditError
+
+    try:
+        return _replicate_action(_load(args), args, args.replicate_command)
+    except (replication.ReplicationError, EditError) as exc:
+        print(f"cairnward replicate: {exc}", file=sys.stderr)
+        return 1
+
+
+def _replicate_action(cfg: Config, args: argparse.Namespace, action: str) -> int:
+    import getpass
+
+    from cairnward import replication
+
+    if action == "init":
+        folder = args.folder.expanduser().resolve()
+        key = replication.init(cfg, folder, name=args.name, mode=args.mode)
+        print(f"Sharing through {folder}. Every conversation here will be published to it at the "
+              "next sync.\nThe sync key, for joining from your other devices. It is shown once "
+              "and opens everything in the folder, so keep it like a password:")  # fmt: skip
+        print(f"  {key}")
+        warning = replication.cloud_warning(folder)
+        if warning:
+            print(f"Note: {warning}.")
+        return 0
+    if action == "join":
+        folder = args.folder.expanduser().resolve()
+        key = getpass.getpass("Sync key (not shown): ")
+        me = replication.join(cfg, folder, key, name=args.name, mode=args.mode)
+        print(f"Joined {folder} as {me.device[:10]}. On a device already there, run:\n"
+              f"  cairnward replicate approve {me.device[:10]}\n"
+              "Until then it can read the folder, but its changes aren't accepted.")  # fmt: skip
+        warning = replication.cloud_warning(folder)
+        if warning:
+            print(f"Note: {warning}.")
+        return 0
+    if action == "sync":
+        r = replication.sync(cfg, print)
+        print(f"sent {r['sent']}, received {r['received']} messages, {r['purged']} purged, "
+              f"{r['seconds']:.1f}s")  # fmt: skip
+        for d in r["pending_devices"]:
+            print(f"device {d[:10]} is waiting: cairnward replicate approve {d[:10]}")
+        for item in r["waiting"]:
+            print(f"waiting for more files from the folder: {item}")
+        for problem in r["problems"]:
+            print(f"problem: {problem}", file=sys.stderr)
+        return 1 if r["problems"] else 0
+    if action == "status":
+        st = replication.status(cfg)
+        if args.json:
+            print(json.dumps(st, indent=2))
+            return 0
+        if not st["configured"]:
+            print("not replicating (cairnward replicate init <folder>, or join)")
+            return 0
+        print(f"mode: {st['mode']}\nfolder: {st['folder']}\nthis device: {st['name']} "
+              f"({st['device'][:10]})")  # fmt: skip
+        for d in st["devices"]:
+            mark = " (this device)" if d["this"] else ""
+            print(f"  {d['id'][:10]}  {d['status']:9} {d['name']}{mark}")
+        last = st["last"]
+        print(f"last sync: {last['time'] if last else 'never'}")
+        for problem in [st["problem"], st["cloud_warning"], *(last["problems"] if last else [])]:
+            if problem:
+                print(f"note: {problem}")
+        return 0
+    if action in ("approve", "block"):
+        status: Literal["approved", "blocked"] = "approved" if action == "approve" else "blocked"
+        device = replication.set_device(cfg, args.device, status)
+        print(f"{device[:10]} is {status}.")
+        if action == "block":
+            print("It can still read the folder with the sync key it holds. To shut it out, "
+                  "start a new folder: replicate leave, then init on each device.")  # fmt: skip
+        return 0
+    replication.leave(cfg)
+    print("This device no longer replicates. Its chats stay here.")
+    return 0
+
+
 def _backup_action(cfg: Config, args: argparse.Namespace, action: str) -> int:
     import tempfile
 
@@ -2284,6 +2384,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_doctor(args)
         if args.command == "backup":
             return _cmd_backup(args)
+        if args.command == "replicate":
+            return _cmd_replicate(args)
         if args.command == "redaction":
             return _cmd_redaction(args)
         if args.command == "backend":

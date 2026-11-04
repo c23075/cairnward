@@ -112,6 +112,27 @@ def change_backup(cfg: Config, mode: str, repository: str | None,
     return new, [k for k, v in wanted.items() if getattr(b, k) != v]
 
 
+def change_replication(cfg: Config, mode: str, folder: str | None) -> tuple[Config, list[str]]:
+    """Set the replication mode and shared folder (by `cairnward replicate`)."""
+    if mode not in ("none", "on_demand", "auto"):
+        raise EditError("mode must be none, on_demand or auto")
+    path = cfg.paths.main_config
+    before = path.read_text(encoding="utf-8") if path.exists() else None
+    r = cfg.main.replication
+    wanted: dict[str, str | None] = {"mode": mode, "folder": folder}
+    try:
+        for key, value in wanted.items():
+            set_key(path, "replication", key, value)
+        new = load_config(cfg.paths)
+    except (ConfigError, OSError) as exc:
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(before, encoding="utf-8")
+        raise EditError(f"not saved: {exc}") from None
+    return new, [k for k, v in wanted.items() if getattr(r, k) != v]
+
+
 def _environment_file(cfg: Config, name: str) -> Path:
     """The environment's file; a built-in one is first written out with its settings,
     since a file of the same name replaces the built-in."""

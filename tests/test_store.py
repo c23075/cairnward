@@ -247,4 +247,4 @@ def test_cli_store_info(
     monkeypatch.setenv("CAIRNWARD_DATA_DIR", str(paths.data_dir))
     assert main(["--config-dir", str(paths.config_dir), "store", "info"]) == 0
     out = capsys.readouterr().out
-    assert "vault_0001 (up to date)" in out and "keys_0002 (up to date)" in out
+    assert "vault_0002 (up to date)" in out and "keys_0002 (up to date)" in out

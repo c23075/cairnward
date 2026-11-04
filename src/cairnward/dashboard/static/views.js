@@ -167,7 +167,7 @@ function messageView(m) {
   if (typeof body.content === "string") text = body.content;
   else if (Array.isArray(body.content)) text = body.content.map(p => p.text || `[${p.type}]`).join("\n");
   if (body.tool_calls) text += (text ? "\n" : "") + body.tool_calls.map(c => `→ ${c.function?.name}(${c.function?.arguments || ""})`).join("\n");
-  return h("div", { class: `message ${m.role}` }, h("span", { class: "role" }, m.role + (m.model ? ` · ${m.model}` : "")), text);
+  return h("div", { class: `message ${m.role}` }, h("span", { class: "role" }, m.role + (m.model ? ` · ${m.model}` : "") + (m.forked ? " · a fork: continues from an earlier message" : "")), text);
 }
 
 export async function vault(main, params) {
@@ -494,7 +494,23 @@ export async function backups(main) {
     b.pending.length
       ? table([{ label: "Conversation", key: "conversation", mono: true }, { label: "Purged", render: r => when(r.since) },
                { label: "Tries", key: "tries", num: true }, { label: "Last error", render: r => r.error || "-" }], b.pending)
-      : h("p", {}, "None: every purge has been removed from every backup."));
+      : h("p", {}, "None: every purge has been removed from every backup."),
+    await replicationSection());
+}
+
+async function replicationSection() {
+  const r = await api("/api/replication");
+  const heading = h("h2", {}, "Other devices");
+  if (!r.configured) return h("div", {}, heading, h("p", {}, "Not replicating. To keep the same chats and artifacts on another device through a shared folder: `cairnward replicate init <folder>`."));
+  const last = r.last;
+  const notes = [r.problem, r.cloud_warning, ...(last ? last.problems : [])].filter(Boolean);
+  const waiting = r.devices.filter(d => d.status === "pending");
+  return h("div", {}, heading,
+    h("dl", {}, [["Mode", r.mode], ["Folder", r.folder || "-"], ["Last sync", last ? when(last.time) : "never"]]
+      .flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
+    waiting.length ? h("div", { class: "warnbox", role: "status" }, `Waiting for approval: ${waiting.map(d => d.id.slice(0, 10)).join(", ")}. Run \`cairnward replicate approve <id>\` if you recognise it.`) : null,
+    notes.map(n => h("div", { class: "warnbox", role: "status" }, n)),
+    table([{ label: "Device", render: d => d.name + (d.this ? " (this device)" : "") }, { label: "Id", render: d => d.id.slice(0, 10), mono: true }, { label: "Status", key: "status" }], r.devices));
 }
 
 // ------------------------------------------------------------------ artifacts

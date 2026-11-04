@@ -97,6 +97,27 @@ def core_background(cfg: Config, vault: Vault, hub: McpHub, log: Log) -> list[An
     return [retention_loop(cfg, vault, log), hub.jobs.run_forever(), hub.idle_loop()]
 
 
+async def replication_loop(cfg: Config, log: Log) -> None:
+    """Replication (FR-SYNC-4) with mode = "auto". Run by the process that can reach the
+    shared folder (not the isolated core)."""
+    r = cfg.main.replication
+    if r.mode != "auto" or not r.folder:
+        return
+    from cairnward import replication
+
+    await asyncio.sleep(30)  # let startup settle
+    while True:
+        try:
+            done = await asyncio.to_thread(replication.sync, cfg, log)
+            for problem in done["problems"]:
+                log(f"replicate: {problem}")
+        except replication.ReplicationError as exc:
+            log(f"replicate: {exc}")
+        except Exception as exc:  # a failed sync must not stop the server
+            log(f"replicate: unexpected error: {exc}")
+        await asyncio.sleep(r.interval_minutes * 60)
+
+
 async def backup_loop(cfg: Config, log: Log) -> None:
     """Backups (spec §4.8): with mode = "auto", a snapshot every interval_hours; in any
     mode with a repository, purged conversations are removed from old snapshots within
@@ -401,6 +422,7 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 _serve_uds(mgmt, socks["management"]),
                 anchor_loop(cfg, audit, log),
                 backup_loop(cfg, log),
+                replication_loop(cfg, log),
                 otel_loop(cfg, audit, log),
                 *core_background(cfg, vault, hub, log),
             ]
@@ -629,6 +651,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                 serve_task = asyncio.create_task(proxy.serve_forever())
                 anchors = asyncio.create_task(anchor_loop(cfg, audit, log))
                 backups = asyncio.create_task(backup_loop(cfg, log))
+                replicas = asyncio.create_task(replication_loop(cfg, log))
                 telemetry = asyncio.create_task(otel_loop(cfg, audit, log))
                 try:
                     return await core.wait()
@@ -645,6 +668,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                     serve_task.cancel()
                     anchors.cancel()
                     backups.cancel()
+                    replicas.cancel()
                     telemetry.cancel()
                     await bridge.aclose()
                     await proxy.close()

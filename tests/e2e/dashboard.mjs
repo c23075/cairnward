@@ -73,6 +73,10 @@ out.previewText = await page.frameLocator("iframe.preview").locator("h1").textCo
 
 for (const view of ["activity", "audit", "egress", "jobs", "artifacts", "backups", "mcp", "settings"]) {
   out[`h1_${view}`] = await go(view);
+  if (view === "backups") {
+    await page.waitForSelector("text=Other devices");
+    out.otherDevices = await page.textContent("main");
+  }
 }
 
 // change settings in the page: a stricter value saves at once; a weaker one asks first

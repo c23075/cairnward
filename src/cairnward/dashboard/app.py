@@ -473,6 +473,13 @@ def dashboard_app(
                              details={"changed": changed, "mode": body.mode})  # fmt: skip
         return {"changed": changed, "restart_needed": bool(changed)}
 
+    @app.get("/api/replication")
+    def replication_state() -> dict[str, Any]:
+        """Devices and the last sync (FR-SYNC-4). Changes are made with `cairnward replicate`."""
+        from cairnward import replication
+
+        return replication.status(cfg, check_folder=not isolated)
+
     @app.get("/api/backup")
     def backup_state() -> dict[str, Any]:
         """Mode and purged conversations still to remove from old backups (FR-SYNC-8)."""
@@ -532,8 +539,11 @@ def dashboard_app(
         v = need_vault()
         conv = vault_call(lambda: v.conversation(conv_id))
         msgs = vault_call(lambda: v.messages(conv_id))
+        previous = [None, *(m.id for m in msgs)]
         return {"conversation": conv_dict(conv),
-                "messages": [dataclasses.asdict(m) for m in msgs]}  # fmt: skip
+                "messages": [{**dataclasses.asdict(m),
+                              "forked": bool(m.parent_id and p and m.parent_id != p)}
+                             for m, p in zip(msgs, previous, strict=False)]}  # fmt: skip
 
     @app.get("/api/vault/{conv_id}/export")
     def vault_export(conv_id: str, format: str = "md") -> Response:
