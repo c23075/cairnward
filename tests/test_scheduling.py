@@ -150,11 +150,10 @@ def test_run_usage() -> None:
     assert u.exceeded() is None
     u.requests = 2
     assert "2 requests" in (u.exceeded() or "")
-    u2 = RunUsage(Budget(max_minutes=0.0001))
-    import time
-
-    time.sleep(0.01)
-    assert "minutes" in (u2.exceeded() or "")
+    u2 = RunUsage(Budget(max_minutes=1))
+    assert u2.exceeded() is None
+    u2.started -= 61  # no sleeping: Windows' clock can read the same across a short sleep
+    assert "1 minutes elapsed" in (u2.exceeded() or "")
 
 
 # ------------------------------------------------------------------ in the gateway

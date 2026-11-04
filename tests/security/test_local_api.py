@@ -171,7 +171,7 @@ async def test_artifact_preview_is_sandboxed(env: Any) -> None:
         assert pv.headers["content-type"].startswith("text/html")
         assert (await c.get("/api/preview/nope/abc123", params={"path": "x"})).status_code == 404
         listed = (await c.get("/api/artifacts")).json()
-        assert listed == [{"scope": "job", "owner": "abc123", "files": 1}]
+        assert listed == [{"scope": "job", "owner": "abc123", "files": 1, "locked": False}]
     finally:
         await c.aclose()
 

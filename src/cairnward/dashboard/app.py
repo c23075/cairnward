@@ -615,9 +615,9 @@ def dashboard_app(
 
     # ------------------------------------------------------------------ artifacts
 
-    from cairnward.artifacts import SCOPES, ArtifactError, ArtifactStore, Scope
+    from cairnward.artifacts import LOCKED_FILES, SCOPES, ArtifactError, ArtifactStore, Scope
 
-    artifacts = ArtifactStore(cfg.paths.data_dir)
+    artifacts = ArtifactStore(cfg.paths.data_dir, keys=vault)
 
     def scope_of(value: str) -> Scope:
         if value not in SCOPES:
@@ -632,7 +632,8 @@ def dashboard_app(
 
     @app.get("/api/artifacts")
     def artifact_repos() -> list[dict[str, Any]]:
-        return [{"scope": s, "owner": o, "files": n} for s, o, n in artifacts.repos()]
+        return [{"scope": s, "owner": o, "files": None if n == LOCKED_FILES else n,
+                 "locked": n == LOCKED_FILES} for s, o, n in artifacts.repos()]  # fmt: skip
 
     @app.get("/api/artifacts/{scope}/{owner}")
     def artifact_files(scope: str, owner: str) -> dict[str, Any]:

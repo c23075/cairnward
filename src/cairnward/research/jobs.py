@@ -111,7 +111,7 @@ class Job:
         return {"id": self.id, "kind": self.kind, "status": self.status, "done": done,
                 "total": total, "created": self.created, "not_before": self.not_before,
                 "finished": self.finished, "eta_s": eta, "error": self.error,
-                "library": self.params.get("library"),
+                "library": self.params.get("library"), "locked": bool(self.params.get("locked")),
                 "engine": self.params.get("engine", "lean")}  # fmt: skip
 
 

@@ -508,7 +508,7 @@ export async function artifacts(main, params) {
     put(main, repos.length ? table([
       { label: "Kind", key: "scope" },
       { label: "Owner", render: r => h("a", { href: `#/artifacts?scope=${encodeURIComponent(r.scope)}&owner=${encodeURIComponent(r.owner)}` }, r.owner) },
-      { label: "Files", key: "files", num: true },
+      { label: "Files", render: r => r.locked ? "locked" : String(r.files), num: true },
     ], repos) : h("p", {}, "No artifacts yet."));
     return;
   }

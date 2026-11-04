@@ -184,6 +184,7 @@ class Vault:
             raise PurgedError(f"no key for conversation {conversation_id}")
         if key_row.kind == "wrapped":
             raise VaultError("already locked")
+        self._artifacts_seal(conversation_id, bytes(key_row.key))  # before the key is wrapped
         wrapped = crypto.wrap_key(bytes(key_row.key), secret)
         recipient = self.recovery_recipient()
         recovery = crypto.wrap_for_recipient(bytes(key_row.key), recipient) if recipient else None
@@ -214,9 +215,64 @@ class Vault:
                     .values(kind="plain", key=key, recovery=None)
                 )
             self._unlocked.pop(conversation_id, None)
+            if self._data_dir is not None:
+                from cairnward.artifacts import ArtifactStore
+
+                ArtifactStore(self._data_dir).unseal(conversation_id, key)
             return
         self._cover(conversation_id, key)
+        self._artifacts_seal(conversation_id, key)  # locked before artifacts could be
         self._unlocked[conversation_id] = (key, time.monotonic() + minutes * 60)
+
+    # ------------------------------------------------------------------ jobs and runs
+
+    def lock_item(self, item_id: str, secret: str) -> bytes:
+        """A new key, stored only wrapped, for a job's or a run's files (FR-ENC-1). It sits
+        with the conversations' keys, so the recovery key covers it the same way."""
+        if len(secret) < 8:
+            raise VaultError("use a passphrase of at least 8 characters")
+        if self._key_row(item_id) is not None:
+            raise VaultError("already locked")
+        key = crypto.new_key()
+        recipient = self.recovery_recipient()
+        recovery = crypto.wrap_for_recipient(key, recipient) if recipient else None
+        with self._keys.begin() as kconn:
+            kconn.execute(
+                insert(conversation_keys).values(
+                    conversation_id=item_id, kind="wrapped", key=crypto.wrap_key(key, secret),
+                    created_at=_now(), recovery=recovery,
+                )
+            )  # fmt: skip
+        return key
+
+    def open_item(self, item_id: str, secret: str) -> bytes:
+        row = self._key_row(item_id)
+        if row is None:
+            raise VaultError("not locked")
+        try:
+            return crypto.unwrap_key(bytes(row.key), secret)
+        except crypto.DecryptionError:
+            raise LockedError("wrong passphrase") from None
+
+    def remove_item(self, item_id: str) -> None:
+        with self._keys.begin() as kconn:
+            kconn.execute(
+                delete(conversation_keys).where(conversation_keys.c.conversation_id == item_id)
+            )
+        checkpoint(self._keys)
+
+    def _artifacts_seal(self, conversation_id: str, key: bytes) -> None:
+        if self._data_dir is not None:
+            from cairnward.artifacts import ArtifactStore
+
+            ArtifactStore(self._data_dir).seal(conversation_id, key)
+
+    def artifact_key(self, conversation_id: str) -> bytes | None:
+        """The key for this conversation's sealed artifacts; None while it's locked."""
+        try:
+            return self._key(conversation_id)
+        except (LockedError, PurgedError):
+            return None
 
     # ------------------------------------------------------------------ recovery key
 
