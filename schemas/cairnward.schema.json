@@ -64,6 +64,16 @@
       "additionalProperties": false,
       "description": "Encrypted backups with restic (spec \u00a74.8, FR-SYNC-1/3/8).",
       "properties": {
+        "access": {
+          "default": "owner",
+          "description": "who can read a folder repository: only you, or also your group (for example to let another account copy it). Contents stay encrypted either way",
+          "enum": [
+            "owner",
+            "group"
+          ],
+          "title": "Access",
+          "type": "string"
+        },
         "environment": {
           "anyOf": [
             {
@@ -157,7 +167,7 @@
             }
           ],
           "default": null,
-          "description": "a folder for the restic repository: a second disk, NAS mount or synced folder (contents are encrypted by restic)",
+          "description": "a folder for the restic repository: a second disk, NAS mount or synced folder (contents are encrypted by restic). Default: ~/cairnward-backups",
           "title": "Repository"
         }
       },
@@ -682,6 +692,7 @@
     "backup": {
       "$ref": "#/$defs/BackupConfig",
       "default": {
+        "access": "owner",
         "environment": null,
         "include_artifacts": true,
         "include_config": true,

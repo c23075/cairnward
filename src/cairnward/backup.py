@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import time
@@ -93,11 +94,15 @@ def remote_kind(cfg: Config) -> str | None:
     return m.group(1)
 
 
+def default_folder() -> Path:
+    """Where backups go unless you choose: visible, and outside Cairnward's own folders."""
+    return Path.home() / "cairnward-backups"
+
+
 def repository(cfg: Config) -> Path | str:
     repo = cfg.main.backup.repository
     if not repo:
-        raise BackupError('no backup repository: set [backup] repository = "/path/to/folder" '
-                          "(or a remote such as s3:... or rest:...) in cairnward.toml")  # fmt: skip
+        return default_folder()
     kind = remote_kind(cfg)
     if kind is None:
         return Path(repo).expanduser()
@@ -243,6 +248,7 @@ def init(cfg: Config, log: Log = print) -> str | None:
     if isinstance(repo, Path):
         repo.parent.mkdir(parents=True, exist_ok=True)
     run_restic(cfg, "init")
+    apply_access(cfg)
     _audit(cfg, "backup.init", repository=str(repo))
     if warning := (cloud_warning(repo) if isinstance(repo, Path) else
                    f"{repo} is a remote repository: its contents are encrypted by restic, "
@@ -391,6 +397,7 @@ def run(cfg: Config, log: Log = print) -> dict[str, Any]:
         run_restic(cfg, "forget", "--prune", "--host", HOST, "--tag", TAG,
                    "--keep-daily", str(b.keep_daily), "--keep-weekly", str(b.keep_weekly),
                    "--keep-monthly", str(b.keep_monthly), "--keep-last", "1")  # fmt: skip
+        apply_access(cfg)
         from cairnward.artifacts import remove_tree
 
         remove_tree(staging)  # the export is plain files; don't leave it lying around
@@ -408,8 +415,8 @@ def run(cfg: Config, log: Log = print) -> dict[str, Any]:
 def run_now(cfg: Config, log: Log = lambda _m: None) -> dict[str, Any]:
     """A backup asked for by hand (the dashboard): sets up the repository the first time."""
     b = cfg.main.backup
-    if b.mode == "none" or not b.repository:
-        raise BackupError("backups are off: set a mode and a repository first")
+    if b.mode == "none":
+        raise BackupError("backups are off: cairnward backup use")
     with remote_access(cfg):
         if not initialised(cfg):
             init(cfg, log)
@@ -467,8 +474,8 @@ def _process_purges(cfg: Config, log: Log) -> int:
     items = pending(cfg)
     if not items:
         return 0
-    if not cfg.main.backup.repository or not initialised(cfg):
-        if cfg.main.backup.mode == "none" and not cfg.main.backup.repository:
+    if not initialised(cfg):
+        if cfg.main.backup.mode == "none":
             _write_pending(pending_file(cfg), [])  # no backups, so nothing to remove
         return 0
     ids = [i["id"] for i in items]
@@ -600,9 +607,41 @@ def _insert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> None:
 # ------------------------------------------------------------------ status
 
 
+def apply_access(cfg: Config) -> None:
+    """Set who can read a folder repository ([backup] access). restic's own files are
+    read-only, so this keeps each file's owner bits and only adds or removes the group's."""
+    repo = repository(cfg)
+    if not isinstance(repo, Path) or os.name == "nt" or not repo.is_dir():
+        return
+    group = cfg.main.backup.access == "group"
+    for path in [repo, *repo.rglob("*")]:
+        mode = stat.S_IMODE(path.lstat().st_mode) & 0o700
+        if group:
+            mode |= (mode & 0o500) >> 3
+        path.chmod(mode)
+
+
+def same_disk_warning(cfg: Config) -> str | None:
+    """A backup on the same disk as the data survives mistakes, not a failed disk."""
+    repo = repository(cfg)
+    if not isinstance(repo, Path):
+        return None
+    probe = repo
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    data = cfg.paths.data_dir if cfg.paths.data_dir.exists() else Path.home()
+    if probe.stat().st_dev != data.stat().st_dev:
+        return None
+    return (
+        f"{repo} is on the same disk as your data: it protects against mistakes, but not a "
+        "failed or lost disk. Choose a folder on another disk if you can"
+    )
+
+
 def status(cfg: Config) -> dict[str, Any]:
     b = cfg.main.backup
-    out: dict[str, Any] = {"mode": b.mode, "repository": b.repository, "restic": restic(),
+    out: dict[str, Any] = {"mode": b.mode, "repository": str(repository_or_problem(cfg)),
+                           "restic": restic(),
                            "pending_purges": len(pending(cfg)), "last": last_run(cfg)}  # fmt: skip
     try:
         out["initialised"] = initialised(cfg)
@@ -610,6 +649,15 @@ def status(cfg: Config) -> dict[str, Any]:
             out["snapshots"] = len(snapshots(cfg))
     except BackupError as exc:
         out["problem"] = str(exc)
-    if b.repository:
-        out["cloud_warning"] = cloud_warning(Path(b.repository).expanduser())
+    repo = repository_or_problem(cfg)
+    if isinstance(repo, Path):
+        out["cloud_warning"] = cloud_warning(repo)
+        out["same_disk_warning"] = same_disk_warning(cfg)
     return out
+
+
+def repository_or_problem(cfg: Config) -> Path | str:
+    try:
+        return repository(cfg)
+    except BackupError as exc:
+        return str(exc)
