@@ -4,7 +4,8 @@ A local privacy gateway (model gateway, egress proxy, policy engine, audit log, 
 vault, MCP proxy, research/literature-review workflows) for one person's machine.
 Python 3.12+, uv, Apache-2.0. Design: `docs/spec.md` (decisions D1–D71), ADRs in
 `docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. The current
-state and next steps are in the newest `docs/plan/handoff-*.md`.
+state and next steps are in the newest `docs/plan/handoff-*.md`; requirement status is in
+`docs/plan/requirements-status.md`, so a new handoff doesn't copy it.
 
 ## Commands
 ```bash

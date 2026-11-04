@@ -163,18 +163,22 @@ isolated server, on [synthetic test papers](docs/bench/):
 | Check | Result |
 |---|---|
 | Page-cited answers (`lit.ask`) | 8/8, nothing invented, on both engines, about 4 to 6 minutes per question |
-| Fixing a failing test with Aider | Passed, but took 99 minutes |
+| Fixing a failing test with Aider | Passed 3 of 3, in about 3 to 7 minutes |
 | Literature review pipeline | 12/12 through the isolated server, about 23 minutes for 4 papers. An earlier isolated run scored 9/12 when screening excluded a borderline paper; excluding now takes two tries that agree, which lowers that risk without removing it |
-| Gateway overhead | 6 to 7 ms with protections off (meets target); about 59 ms under Strict, without the sandbox hop (misses the 50 ms target) |
+| Gateway overhead | 7 ms with protections off (meets target); 105 ms under Strict with isolation (misses the 50 ms target) |
+| Core memory and start | 122 MB (meets target); starts in 5.3 s with isolation (misses the 3 s target) |
+| First token, model loaded | 11 to 14 s fast model, 22 s main model (meets targets) |
 
 **Not yet tried against the real thing,** only against stand-ins: academic APIs, Zotero, Drive
-mirror, remote backups, hosted providers, a real remote MCP server, and the chat apps' manual
-checklist.
+mirror, remote backups, hosted providers, a real remote MCP server or OAuth provider, and the
+chat apps' manual checklist. Everything above used short synthetic papers, not real ones.
 
-**Known gaps:** OAuth for remote MCP servers, locking artifacts with a passphrase, and release
-tooling (SBOM, signed releases). It's meant for Linux; CI also runs the unit tests on Windows.
+**Known gaps:** the research library can't be locked, the release workflow has never run, and no
+one but the assistant that wrote the code has reviewed its security. It's meant for Linux; CI
+also runs the unit tests on Windows.
 
-The current state and next steps are in the newest [handoff](docs/plan/).
+The current state and next steps are in the newest [handoff](docs/plan/), and each requirement's
+status in [requirements-status.md](docs/plan/requirements-status.md).
 
 **What this doesn't protect against:** it controls traffic and tools that pass through it. It
 can't see what a chat app does outside its own sandbox if you run the app unconfined, and
