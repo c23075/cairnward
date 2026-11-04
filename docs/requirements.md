@@ -93,7 +93,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-VLT-2 | Reconstruct conversations from stateless requests by prefix hashing; branches for divergence | M | M1 | Hypothesis property test |
 | FR-VLT-3 | Vault browser: search, folders, pin, export, delete with confirm/undo; shortcuts (`d`, `f`, `/`, `j/k`, `L`, `x`, `l`, `?`); single-key shortcuts can be turned off | M | M2 | Playwright e2e |
 | FR-VLT-4 | Per-environment retention and `vault = "off"` (digests only) | M | M2 | unit |
-| FR-ENC-1 | Lock conversation / artifacts with passphrase (age, key wrapping, recovery key optional) | M | M2 | `test_lock.py`, `test_recovery_key.py`, `test_artifact_lock.py`, `test_item_lock.py`; run snapshots not covered |
+| FR-ENC-1 | Lock conversation / artifacts with passphrase (age, key wrapping, recovery key optional) | M | M2 | `test_lock.py`, `test_recovery_key.py`, `test_artifact_lock.py`, `test_item_lock.py`, `test_library_lock.py`; run snapshots not covered |
 | FR-ENC-2 | Passphrase never in model context, tool args, logs or audit | M | M2 | `tests/security/test_lock.py`, `tests/security/test_recovery_key.py` |
 | FR-ENC-5 | Crypto-shredding on purge | M | M1 | `test_store.py` |
 
@@ -166,7 +166,7 @@ All security requirements below describe what each protection does **when it is 
 | NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | `scripts/bench_gateway.py`, `test_bench_gateway.py`; Strict 105 ms isolated, 59 ms not (misses), all off 7 ms (meets) |
 | NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | `bench_backend.py --cache-test` through the gateway: 19.6× |
 | NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | `bench_backend.py` through the gateway: 11 to 14 s fast, 22 s main |
-| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | `docs/bench/results-2026-11-03-measurements.md`: 122 MB meets; start 5.3 s isolated misses, 2.7 s not isolated |
+| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | `docs/bench/results-2026-11-03-measurements.md`: 122 MB meets; start about 2.8 s isolated on empty data, not yet tried on a large data folder |
 | NFR-R1 | No data loss on crash; research jobs resumable | M | kill tests |
 | NFR-R2 | Audit record before every effect | M | FR-AUD-1 |
 | NFR-S1 | Strict: zero outbound connections unless allowlisted; Balanced: none without approval | M | isolation suite per preset |

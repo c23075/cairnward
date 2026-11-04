@@ -5,12 +5,14 @@ hash hasn't changed are skipped. Search combines vector similarity (sqlite-vec) 
 keyword ranking (FTS5 BM25) by reciprocal rank fusion, so exact terms (gene names,
 acronyms) are found even when embeddings miss them.
 
-Privacy: chunk text is stored as plain text in research.db (data folder, owner-only);
-locking a library with a passphrase arrives with the M2 encryption work.
+Privacy: chunk text is stored as plain text in research.db (data folder, owner-only), unless
+the library is locked with a passphrase (research/lock.py).
 """
 
 from __future__ import annotations
 
+import base64
+import dataclasses
 import hashlib
 import re
 import time
@@ -38,6 +40,10 @@ class LibraryError(Exception):
     pass
 
 
+class LibraryLockedError(LibraryError):
+    pass
+
+
 @dataclass(frozen=True)
 class Library:
     id: int
@@ -46,6 +52,7 @@ class Library:
     environment: str
     embedding_model: str | None
     embedding_dim: int | None
+    locked: bool = False
 
 
 @dataclass
@@ -103,8 +110,9 @@ def fts_query(query: str) -> str | None:
 
 
 class Research:
-    def __init__(self, engine: Engine):
+    def __init__(self, engine: Engine, data_dir: Path | None = None):
         self._db = engine
+        self.data_dir = data_dir
 
     @classmethod
     def open(cls, paths: Paths) -> Self:
@@ -112,7 +120,7 @@ class Research:
         paths.data_dir.chmod(0o700)
         engine = make_engine(paths.data_dir / "research.db", vectors=True)
         upgrade(engine, "research")
-        return cls(engine)
+        return cls(engine, paths.data_dir)
 
     def close(self) -> None:
         self._db.dispose()
@@ -151,12 +159,27 @@ class Research:
             )
         return self.get(name)
 
-    def get(self, name: str) -> Library:
+    def locked_path(self, name: str) -> Path:
+        if self.data_dir is None:
+            raise LibraryError("this store has no data folder")
+        return self.data_dir / "library-locks" / f"{name}.age"
+
+    def _is_locked(self, name: str) -> bool:
+        return self.data_dir is not None and self.locked_path(name).exists()
+
+    def find(self, name: str) -> Library:
+        """A library, locked or not; `get` is for anything that reads its contents."""
         with self._db.connect() as conn:
             row = conn.execute(select(libraries).where(libraries.c.name == name)).first()
         if row is None:
             raise LibraryError(f"no library named '{name}'")
-        return self._lib(row)
+        return dataclasses.replace(self._lib(row), locked=self._is_locked(name))
+
+    def get(self, name: str) -> Library:
+        lib = self.find(name)
+        if lib.locked:
+            raise LibraryLockedError(f"library '{name}' is locked: cairnward library unlock {name}")
+        return lib
 
     def list_libraries(self) -> list[tuple[Library, int, int]]:
         """(library, documents, chunks)"""
@@ -170,16 +193,84 @@ class Research:
                     text("SELECT coalesce(sum(chunks), 0) FROM documents WHERE library_id = :l"),
                     {"l": row.id},
                 ).scalar_one()
-                out.append((self._lib(row), int(n_docs), int(n_chunks)))
+                lib = dataclasses.replace(self._lib(row), locked=self._is_locked(row.name))
+                out.append((lib, int(n_docs), int(n_chunks)))
         return out
 
     def remove(self, name: str) -> None:
-        lib = self.get(name)
+        lib = self.find(name)
         with self._db.begin() as conn:
             conn.execute(text(f"DROP TABLE IF EXISTS {self._vec_table(lib)}"))
             conn.execute(delete(libraries).where(libraries.c.id == lib.id))
+        if lib.locked:
+            self.locked_path(name).unlink()
         with self._db.connect() as conn:
             conn.execute(text("VACUUM"))
+
+    # ------------------------------------------------------------------ locking
+
+    def export_rows(self, lib: Library) -> dict[str, Any]:
+        """Everything research.db holds about a library's contents, for research/lock.py."""
+        with self._db.connect() as conn:
+            docs = conn.execute(select(documents).where(documents.c.library_id == lib.id)).all()
+            ids = [d.id for d in docs]
+            rows = conn.execute(select(chunks).where(chunks.c.document_id.in_(ids))).all()
+            vectors = []
+            if lib.embedding_dim:
+                wanted = {r.id for r in rows}
+                vectors = [
+                    [r.chunk_id, base64.b64encode(bytes(r.embedding)).decode()]
+                    for r in conn.execute(
+                        text(f"SELECT chunk_id, embedding FROM {self._vec_table(lib)}")
+                    )
+                    if r.chunk_id in wanted
+                ]
+        return {
+            "documents": [dict(d._mapping) for d in docs],
+            "chunks": [dict(r._mapping) for r in rows],
+            "vectors": vectors,
+        }
+
+    def wipe_rows(self, lib: Library) -> None:
+        """Delete a library's contents, including from the keyword index and the file itself:
+        external-content FTS5 keeps its tokens in its own tables until rebuilt."""
+        with self._db.begin() as conn:
+            conn.execute(text(f"DROP TABLE IF EXISTS {self._vec_table(lib)}"))
+            conn.execute(delete(documents).where(documents.c.library_id == lib.id))
+            conn.execute(text("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')"))
+        with self._db.connect() as conn:
+            conn.execute(text("VACUUM"))
+            conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+
+    def import_rows(self, lib: Library, data: dict[str, Any]) -> None:
+        """Put back what `export_rows` saved, with new ids: another library may have taken
+        the old ones. Replaces anything left by a crash while locking."""
+        with self._db.begin() as conn:
+            conn.execute(text(f"DROP TABLE IF EXISTS {self._vec_table(lib)}"))
+            conn.execute(delete(documents).where(documents.c.library_id == lib.id))
+            if lib.embedding_dim:
+                conn.execute(text(
+                    f"CREATE VIRTUAL TABLE {self._vec_table(lib)} USING vec0(chunk_id integer "
+                    f"primary key, embedding float[{int(lib.embedding_dim)}] "
+                    "distance_metric=cosine)"
+                ))  # fmt: skip
+            new_doc: dict[int, int] = {}
+            for d in data["documents"]:
+                old = d.pop("id")
+                new_doc[old] = int(conn.execute(insert(documents).values(**d))
+                                   .inserted_primary_key[0])  # type: ignore[index]  # fmt: skip
+            new_chunk: dict[int, int] = {}
+            for c in data["chunks"]:
+                old = c.pop("id")
+                c["document_id"] = new_doc[c["document_id"]]
+                new_chunk[old] = int(conn.execute(insert(chunks).values(**c))
+                                     .inserted_primary_key[0])  # type: ignore[index]  # fmt: skip
+            for chunk_id, vector in data["vectors"]:
+                conn.execute(
+                    text(f"INSERT INTO {self._vec_table(lib)}(chunk_id, embedding) "
+                         "VALUES (:c, :e)"),
+                    {"c": new_chunk[chunk_id], "e": base64.b64decode(vector)},
+                )  # fmt: skip
 
     def documents(self, name: str) -> list[Any]:
         lib = self.get(name)

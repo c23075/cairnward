@@ -80,4 +80,6 @@ def setup(
         preset = choose(ask, say)
     set_preset(paths.main_config, preset)
     say(f"Saved preset '{preset}' in {paths.main_config}")
+    say("If you turn on backups: `cairnward backup init` creates a password on this disk. Keep a "
+        "copy somewhere else, or losing this disk also makes the backups unreadable.")  # fmt: skip
     return preset

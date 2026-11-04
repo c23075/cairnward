@@ -166,14 +166,14 @@ isolated server, on [synthetic test papers](docs/bench/):
 | Fixing a failing test with Aider | Passed 3 of 3, in about 3 to 7 minutes |
 | Literature review pipeline | 12/12 through the isolated server, about 23 minutes for 4 papers. An earlier isolated run scored 9/12 when screening excluded a borderline paper; excluding now takes two tries that agree, which lowers that risk without removing it |
 | Gateway overhead | 7 ms with protections off (meets target); 105 ms under Strict with isolation (misses the 50 ms target) |
-| Core memory and start | 122 MB (meets target); starts in 5.3 s with isolation (misses the 3 s target) |
+| Core memory and start | 122 MB (meets target); starts in about 2.8 s with isolation on empty data (target 3 s) |
 | First token, model loaded | 11 to 14 s fast model, 22 s main model (meets targets) |
 
 **Not yet tried against the real thing,** only against stand-ins: academic APIs, Zotero, Drive
 mirror, remote backups, hosted providers, a real remote MCP server or OAuth provider, and the
 chat apps' manual checklist. Everything above used short synthetic papers, not real ones.
 
-**Known gaps:** the research library can't be locked, the release workflow has never run, and no
+**Known gaps:** locking a research library doesn't cover its source PDFs, the release workflow has never run, and no
 one but the assistant that wrote the code has reviewed its security. It's meant for Linux; CI
 also runs the unit tests on Windows.
 

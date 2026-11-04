@@ -21,31 +21,24 @@ import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
 
 from cairnward.audit import AuditLog, enabled_for, record_settings
-from cairnward.backends import Backends
 from cairnward.config.loader import Config
-from cairnward.core.management import management_app
-from cairnward.dashboard import DashboardAuth, dashboard_app
 from cairnward.egress import EgressProxy, Session, Sessions
 from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, control_app
-from cairnward.gateway import ClientKeys, GatewayDeps, create_app
-from cairnward.gateway.clients import RunKeys
-from cairnward.gateway.scheduling import BenchProfile, Scheduler
-from cairnward.mcp.hub import McpHub
-from cairnward.mcp.launch import BridgeLauncher, Launcher, LocalLauncher, RemoteLauncher
-from cairnward.mcp.pins import PinStore
 from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
-from cairnward.policy.provenance import ProvenanceTracker
-from cairnward.research.engines.deep import RemoteExecutor, run_worker
-from cairnward.research.online import Online
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
+
+if TYPE_CHECKING:
+    from cairnward.backends import Backends
+    from cairnward.mcp.hub import McpHub
+    from cairnward.mcp.launch import Launcher
 
 Log = Callable[[str], None]
 GRACE_S = 3  # in-flight requests (e.g. an approval still waiting) don't hold up a stop
@@ -234,6 +227,16 @@ def _core_parts(
     docling_runner: Any = None,
     backup_now: Any = None,
 ) -> tuple[Any, Any, McpHub, Any]:
+    from cairnward.core.management import management_app
+    from cairnward.dashboard import DashboardAuth, dashboard_app
+    from cairnward.gateway import ClientKeys, GatewayDeps, create_app
+    from cairnward.gateway.clients import RunKeys
+    from cairnward.gateway.scheduling import BenchProfile, Scheduler
+    from cairnward.mcp.hub import McpHub
+    from cairnward.mcp.pins import PinStore
+    from cairnward.policy.provenance import ProvenanceTracker
+    from cairnward.research.online import Online
+
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     run_keys = RunKeys()
     tracker = ProvenanceTracker()
@@ -327,6 +330,9 @@ def _core_parts(
 
 
 def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
+    from cairnward.backends import Backends
+    from cairnward.mcp.launch import LocalLauncher
+
     server = cfg.main.server
     socks = sockets(cfg)
     with AuditLog.open(cfg.paths, enabled_for(cfg)) as audit, Vault.open(cfg.paths) as vault:
@@ -526,6 +532,9 @@ def core_sandbox(cfg: Config) -> SandboxSpec:
 
 
 def serve_isolated(cfg: Config, *, log: Log) -> int:
+    from cairnward.mcp.launch import BridgeLauncher, LocalLauncher
+    from cairnward.research.engines.deep import run_worker
+
     srt = require(cfg.paths)  # raises SandboxUnavailable
     server = cfg.main.server
     socks = sockets(cfg)
@@ -672,6 +681,10 @@ def remote_backup(control_socket: str) -> Any:
 
 def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     """Inside the sandbox: gateway and management on Unix sockets."""
+    from cairnward.backends import Backends
+    from cairnward.mcp.launch import RemoteLauncher
+    from cairnward.research.engines.deep import RemoteExecutor
+
     socks = sockets(cfg)
     srt_proxy = os.environ.get("HTTP_PROXY", "")
     if srt_proxy and "://" not in srt_proxy:

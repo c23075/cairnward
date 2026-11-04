@@ -21,6 +21,14 @@ First-token times use a 512-token prompt with the model already loaded; loading 
 adds about 70 s. One of three fast-model runs through the gateway generated far more slowly than the
 others (19 tokens in 30 s); its first token still met the target, and the cause wasn't looked into.
 
+**Start time, later on 2026-11-04.** Python starts twice with isolation on, and the outer process was
+importing everything the core needs. Those imports now happen only in the core. On the same machine
+and script, with empty data folders, time until `/health` answers went from about 3.6 s to a median
+of **2.8 s** (2.6 to 3.0, five runs). That meets the 3 s target, but this script read 3.6 s where the
+table's method read 5.3 s, so the two aren't directly comparable, and a large existing data folder
+wasn't tried. What's left is mostly the core's own imports (about 1.3 s) and Python starting twice;
+opening the databases and checking migrations takes under 150 ms, and the sandbox itself about 0.3 s.
+
 ## Where Strict's overhead goes
 
 Time for a chat request, with a stand-in that answers in under 1 ms:

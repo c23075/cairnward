@@ -62,10 +62,10 @@ The model is **not** a trusted component: anything it decides passes through the
 | T-21 | Elevation of privilege | A sandboxed agent asks for a host that is really this machine (`localhost`, `127.1`, a metadata address) to reach local services (Ollama, other apps) around egress, since the sandbox connects to loopback directly | The core applies egress's address guard to sandbox asks: such addresses are refused unasked unless listed exactly; names that resolve to them later still go through egress and its DNS check | §3.2, §5.3 | FR-NET-1 |
 | T-22 | Tampering / Info disclosure | A remote MCP server returns poisoned tools, or receives data it shouldn't | Reached through egress under the environment's host rules; tools pinned like a local server's; bearer token from an environment variable. OAuth tokens stored and refreshed by Cairnward. Tested against a local SDK server and a fake authorization server only | §4.2 | FR-MCP-1, FR-MCP-3 |
 | T-23 | Info disclosure | A steered model puts private text in an academic search query (`lit_find`) | Sources opt-in per environment; allow-listed hosts; audited as digests. Residual: the query leaves the machine, and egress can't read it | §4.6 | FR-RES-8, FR-RES-9 |
-| T-24 | Info disclosure | The research library is plain text in `research.db` and can't be locked; locking a conversation doesn't cover a library it used | Owner-only data folder; encrypted in backups; full-disk encryption recommended. Accepted for now | §4.6 | FR-RES-1 |
+| T-24 | Info disclosure | The research library is plain text in `research.db` unless locked; locking a conversation doesn't cover a library it used | Owner-only data folder; encrypted in backups; `cairnward library lock` seals its text, embeddings and metadata. Residual: the source PDFs stay in your folder, a library is plain while unlocked, and older backups hold it | §4.6 | FR-RES-1 |
 | T-25 | Elevation of privilege | A crafted PDF exploits a third-party engine, or PaperQA2's `pickle` cache is altered | PaperQA2 and Docling workers run in the sandbox with isolation on and have their own environment; PaperQA2 refuses settings that don't point at the gateway; Presidio runs inside the core's sandbox with no network; cache folder is owner-only and outside what agents can write | §4.6 | FR-RES-13, FR-RED-2 |
-| T-26 | Tampering (output) | Reasoning that the model writes into its visible reply reaches a client as the answer, so a client can act on a draft the model discarded; it's also stored in the vault, and wastes hours on a CPU | `medium` and `high` efforts ask for reasoning, which then comes back separately; research calls strip any that leaks. Residual: `low` or a custom level with thinking off, on a model that ignores it ([review](reviews/threat-model-2026-11-03.md)) | §4.1 | — |
-| T-27 | Denial of service | The only copy of the backup password is on the disk that failed, so backups can't be restored | Password in the state folder by default; `password_command` for your own store. Residual: setup doesn't yet warn | §4.8 | FR-SYNC-3 |
+| T-26 | Tampering (output) | Reasoning that the model writes into its visible reply reaches a client as the answer, so a client can act on a draft the model discarded; it's also stored in the vault, and wastes hours on a CPU | `medium` and `high` efforts ask for reasoning, which then comes back separately; the gateway moves reasoning written into a reply out of the answer, audits it and asks that model for reasoning from then on. Residual: the first streamed reply from a model not yet known to leak, which can't be taken back ([review](reviews/threat-model-2026-11-03.md)) | §4.1 | — |
+| T-27 | Denial of service | The only copy of the backup password is on the disk that failed, so backups can't be restored | Password in the state folder by default; `password_command` for your own store. `cairnward setup`, `backup init` and `doctor` all say to keep a copy elsewhere | §4.8 | FR-SYNC-3 |
 
 ## 4. LINDDUN privacy threats
 
@@ -90,7 +90,7 @@ The model is **not** a trusted component: anything it decides passes through the
 | LLM05 | Improper Output Handling | Model output never executed directly: diffs and commands go through approval + sandbox; artifact previews sandboxed. Open: reasoning reaching clients as the answer | T-11, T-12, T-26 |
 | LLM06 | Excessive Agency | Least-privilege tool grants per environment; approvals; user-only actions | T-14 |
 | LLM07 | System Prompt Leakage | No secrets in prompts (keys stay in keychain, tools hold credentials); prompts treated as non-secret | T-08 |
-| LLM08 | Vector and Embedding Weaknesses | Libraries scoped to an environment; retrieved chunks carry their source, and their text is noted as untrusted in approvals. Embeddings are stored unencrypted | T-07, T-24 |
+| LLM08 | Vector and Embedding Weaknesses | Libraries scoped to an environment; retrieved chunks carry their source, and their text is noted as untrusted in approvals. Embeddings are stored unencrypted unless the library is locked | T-07, T-24 |
 | LLM09 | Misinformation | Quotation and reference checks; page-cited answers for PDFs; evals for invented citations | — |
 | LLM10 | Unbounded Consumption | Budgets per client, run and environment; time limits; context warnings | T-13 |
 
@@ -99,7 +99,7 @@ The model is **not** a trusted component: anything it decides passes through the
 - A compromised OS account or root user can read everything that's unlocked and capture passphrases as they're typed.
 - Prompt injection can't be fully prevented by any known method; Cairnward limits its impact instead (approvals, network off, user-only actions).
 - Unlocked chats' search index is plaintext in SQLite; deleting it is best effort on SSDs.
-- The research library is plain text and can't be locked (T-24).
+- A research library is plain text unless locked, and locking doesn't cover its source PDFs (T-24).
 - A recovery key opens every locked conversation it covers; it's shown once and never stored, so keeping it safe is up to the user.
 - Content of third-party tools' own HTTPS traffic to allowed hosts can't be inspected (T-17).
 - Copies of conversations inside clients' own databases (T-18).

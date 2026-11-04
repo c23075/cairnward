@@ -83,7 +83,7 @@ real tests are named here.
 | FR-VLT-2 rebuild conversations from stateless requests | ✅ | `test_vault_reconstruction.py` (property-based) |
 | FR-VLT-3 vault browser with shortcuts | ✅ | browser test |
 | FR-VLT-4 retention, `vault = "off"`/digests | ✅ | `test_vault_cli.py` |
-| FR-ENC-1 lock with passphrase, recovery key | ◐ | conversations, their artifacts, finished jobs, run artifact repositories and the recovery key (`security/test_lock.py`, `test_recovery_key.py`, `test_artifact_lock.py`, `test_item_lock.py`); **run snapshots not covered** |
+| FR-ENC-1 lock with passphrase, recovery key | ◐ | conversations, their artifacts, finished jobs, run artifact repositories, research libraries and the recovery key (`security/test_lock.py`, `test_recovery_key.py`, `test_artifact_lock.py`, `test_item_lock.py`, `test_library_lock.py`); **run snapshots not covered** |
 | FR-ENC-2 passphrase never leaks | ✅ | `security/test_lock.py`, `security/test_recovery_key.py` |
 | FR-ENC-5 crypto-shredding on purge | ✅ | `test_store.py` |
 
@@ -141,7 +141,7 @@ real tests are named here.
 |---|---|---|
 | NFR-P2 gateway overhead ≤ 50 ms | ◐ | `scripts/bench_gateway.py`: **Strict 105 ms isolated, 59 ms not: misses**; all off 7 ms, meets. Proposed: change the target (owner decision) |
 | NFR-P3 cache reuse ≥ 10× | ✅ | measured through the gateway: 19.6× |
-| NFR-P5 core ≤ 500 MB, starts ≤ 3 s | ◐ | measured: 122 MB meets; **start 5.3 s isolated, misses** (2.7 s not isolated) |
+| NFR-P5 core ≤ 500 MB, starts ≤ 3 s | ◐ | measured: 122 MB meets; start about 2.8 s isolated on empty data, down from about 3.6 s by the same script; **a large data folder not tried** |
 | NFR-P6 first token within 15 s / 30 s | ✅ | measured through the gateway, model loaded: 11 to 14 s fast, 22 s main; loading the main model first adds about 70 s |
 | NFR-R1 no data loss, jobs resumable | ✅ | `test_jobs_resume.py`, atomic writes |
 | NFR-R2 audit before every effect | ✅ | as FR-AUD-1 |

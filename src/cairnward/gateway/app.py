@@ -36,10 +36,12 @@ from cairnward.gateway.scheduling import (
     SLOW_SECONDS,
     BenchProfile,
     ClientUsage,
+    ReasoningLeaks,
     Scheduler,
     conversation_key,
     estimate_tokens,
     memory_warning,
+    split_leaked_reasoning,
 )
 from cairnward.policy.engine import Action, Decision, PolicyEngine
 from cairnward.policy.provenance import ProvenanceTracker
@@ -122,6 +124,7 @@ class GatewayDeps:
     mcp: Any = None  # McpHub: the MCP proxy (spec §4.2), when configured
     provenance: ProvenanceTracker = field(default_factory=ProvenanceTracker)
     client_usage: ClientUsage | None = None
+    reasoning_leaks: ReasoningLeaks | None = None
 
 
 def _options(resolved: Resolved, req: ChatCompletionRequest) -> GenerationOptions:
@@ -191,6 +194,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         return ident[0] if ident else None
 
     client_usage = deps.client_usage or ClientUsage.at(deps.config.paths.state_dir)
+    reasoning_leaks = deps.reasoning_leaks or ReasoningLeaks.at(deps.config.paths.state_dir)
 
     async def client_over_budget(
         client: str, run_id: str | None, environment: str | None
@@ -453,10 +457,15 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             return blocked
 
         extra = {k: v for k, v in (body.model_extra or {}).items() if k in PASSTHROUGH}
+        options = _options(resolved, body)
+        if options.thinking is False and resolved.model in await asyncio.to_thread(
+            reasoning_leaks.models
+        ):
+            options = dataclasses.replace(options, thinking=True)
         chat_req = ChatRequest(
             model=resolved.model,
             messages=body.messages,
-            options=_options(resolved, body),
+            options=options,
             tools=body.tools,
             tool_choice=body.tool_choice,
             extra=extra,
@@ -535,6 +544,15 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         if warnings:
             headers["X-Cairnward-Warning"] = " | ".join(warnings)
 
+        def separate_reasoning(reply: dict[str, Any]) -> None:
+            """Move reasoning a model wrote into its answer to where it belongs (T-26)."""
+            split = split_leaked_reasoning(reply.get("content") or "")
+            if split is not None:
+                reply["reasoning_content"] = f"{reply.get('reasoning_content') or ''}{split[0]}"
+                reply["content"] = split[1] or None
+                slot_info["reasoning_leak"] = True
+                reasoning_leaks.note(resolved.model)
+
         async def finish(
             reply: dict[str, Any] | None, usage: dict[str, Any], error: str | None
         ) -> str | None:
@@ -600,6 +618,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                 )
             result["model"] = body.model
             reply = result["choices"][0]["message"]
+            separate_reasoning(reply)
             await finish(reply, result.get("usage") or {}, None)
             return JSONResponse(result, headers=headers)
 
@@ -653,6 +672,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                         reply["tool_calls"] = [calls[i] for i in sorted(calls)]
                     if reasoning:
                         reply["reasoning_content"] = "".join(reasoning)
+                    separate_reasoning(reply)  # too late for this client: the next call is clean
                 await asyncio.shield(finish(reply, usage, error))
 
         return StreamingResponse(events(), media_type="text/event-stream", headers=headers)

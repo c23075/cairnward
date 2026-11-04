@@ -363,3 +363,44 @@ async def test_embeddings(gw: Callable[..., Any]) -> None:
     assert bad.status_code == 404
     ids = [m["id"] for m in (await g.client.get("/v1/models", headers=g.auth)).json()["data"]]
     assert "cw/coding:embed" in ids
+
+
+LEAK = "We are given a question. Maybe 3? No, 4.\n</think>\n\nThe answer is 4."
+
+
+async def test_reasoning_written_into_the_answer_is_separated(gw: Any) -> None:
+    """T-26, in the shape of a real reply (qwen3:30b with think=false): a client gets only the
+    answer, the audit log notes it, and the model is asked for reasoning from then on."""
+    g = await gw({"quiet": '[privacy]\nvault = "full"\n'})
+    g.ollama.reply = LEAK
+    first = (await g.chat("cw/coding:low", USER)).json()["choices"][0]["message"]
+    assert first["content"] == "The answer is 4."
+    assert first["reasoning_content"] == "We are given a question. Maybe 3? No, 4."
+    assert g.ollama.requests[-1]["think"] is False
+    post = [r for r in g.audit.records() if r.action == "model.call" and r.phase == "post"][-1]
+    assert post.details["reasoning_leak"] is True
+    g.ollama.reply = "The answer is 4."
+    await g.chat("cw/coding:low", USER)
+    assert g.ollama.requests[-1]["think"] is True  # remembered, so it comes back separately
+
+
+async def test_streamed_leak_is_remembered_for_the_next_call(gw: Any) -> None:
+    g = await gw()
+    g.ollama.reply = LEAK
+    resp = await g.chat("cw/coding:low", USER, stream=True)
+    assert resp.status_code == 200 and "4." in resp.text  # a stream can't be taken back
+    assert g.ollama.requests[-1]["think"] is False
+    conv = g.vault.list_conversations()[0]
+    stored = g.vault.messages(conv.id)[-1].body
+    assert stored["content"] == "The answer is 4." and "Maybe 3" in stored["reasoning_content"]
+    await g.chat("cw/coding:low", USER)
+    assert g.ollama.requests[-1]["think"] is True
+
+
+async def test_a_normal_answer_is_left_alone(gw: Any) -> None:
+    g = await gw()
+    g.ollama.reply = "The answer is 4."
+    message = (await g.chat("cw/coding:low", USER)).json()["choices"][0]["message"]
+    assert message["content"] == "The answer is 4." and "reasoning_content" not in message
+    await g.chat("cw/coding:low", USER)
+    assert g.ollama.requests[-1]["think"] is False

@@ -372,7 +372,8 @@ class McpHub:
 
         with contextlib.closing(Research.open(self.cfg.paths)) as research:
             return [lib.name for lib, _docs, _chunks in research.list_libraries()
-                    if lib.environment == environment and lib.embedding_dim]  # fmt: skip
+                    if lib.environment == environment and lib.embedding_dim
+                    and not lib.locked]  # fmt: skip
 
     def _builtin_tools(self, environment: str) -> list[dict[str, Any]]:
         env = self.cfg.environments[environment]

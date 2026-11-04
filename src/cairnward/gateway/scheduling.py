@@ -267,6 +267,44 @@ class RunUsage:
         return None
 
 
+THINK_END = "</think>"
+
+
+def split_leaked_reasoning(content: str) -> tuple[str, str] | None:
+    """(reasoning, answer) if a model wrote its reasoning into the answer, ending in a stray
+    `</think>`, as some do with thinking off (T-26); otherwise None."""
+    if THINK_END not in content:
+        return None
+    reasoning, answer = content.rsplit(THINK_END, 1)
+    return reasoning.removeprefix("<think>").strip(), answer.strip()
+
+
+class ReasoningLeaks:
+    """Models seen reasoning in their answer with thinking off. They're asked for reasoning
+    from then on, which keeps it separate from the answer and costs no more, as they reason
+    either way (docs/bench/results-2026-11-03-measurements.md)."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    @classmethod
+    def at(cls, state_dir: Path) -> ReasoningLeaks:
+        return cls(state_dir / "reasoning_leaks.json")
+
+    def models(self) -> list[str]:
+        try:
+            data: list[str] = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return data
+
+    def note(self, model: str) -> None:
+        known = self.models()
+        if model not in known:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(sorted([*known, model])), encoding="utf-8")
+
+
 class ClientUsage:
     """Each client's requests and tokens today, for its daily budget (FR-GW-4). Kept in
     <state_dir>/client_usage.json so a restart doesn't reset the count; holds counts only."""

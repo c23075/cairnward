@@ -152,3 +152,36 @@ def test_cli(cfg_paths: Paths, capsys: pytest.CaptureFixture[str],
     assert "conversations" in capsys.readouterr().out
     assert main([*base, "status"]) == 0
     assert "snapshots: 1" in capsys.readouterr().out
+
+
+def test_locked_items_can_still_be_opened_after_a_restore(cfg_paths: Paths, tmp_path: Path) -> None:
+    """A locked job's or library's file is useless without its wrapped key, which isn't with the
+    conversations' keys in an export. Real restic, a fresh machine's data folder at the end."""
+    from dataclasses import replace
+
+    from cairnward.store import crypto
+
+    cfg = load_config(cfg_paths)
+    secret = "correct horse battery staple"
+    with Vault.open(cfg_paths) as v:
+        v.create_conversation(environment="coding", client="aider", title="Any")
+        key = v.lock_item("library:thesis", secret)
+    locks = cfg_paths.data_dir / "library-locks"
+    locks.mkdir()
+    (locks / "thesis.age").write_bytes(crypto.seal(key, b"the-sealed-index"))
+    (cfg_paths.data_dir / "research.db").touch()
+    backup.init(cfg, log=lambda m: None)
+    backup.run(cfg, log=lambda m: None)
+    _snap, export = backup.restore(cfg, tmp_path / "restored")
+    assert "library:thesis" in (export / "locked-items" / "keys.json").read_text()
+    sealed = (export / "research" / "library-locks" / "thesis.age").read_bytes()
+    assert b"the-sealed-index" not in sealed
+
+    fresh = replace(cfg_paths, data_dir=tmp_path / "new-data", state_dir=tmp_path / "new-state")
+    new_cfg = load_config(fresh)
+    for _ in range(2):  # importing twice changes nothing
+        backup.import_conversations(new_cfg, export)
+    with Vault.open(fresh) as v:
+        assert crypto.open_sealed(v.open_item("library:thesis", secret), sealed) == (
+            b"the-sealed-index"
+        )

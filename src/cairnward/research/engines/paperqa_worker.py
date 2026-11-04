@@ -27,7 +27,8 @@ from typing import Any
 
 PREFIX = "openai/cw/"
 # Per model call. The library's default is 60 s with retries, but a single answer takes
-# minutes on a CPU and may first wait in the gateway's queue.
+# minutes on a CPU and may first wait in the gateway's queue. No retries: after a timeout, the
+# same call would wait in the queue all over again.
 CALL_TIMEOUT_S = 3600.0
 
 
@@ -79,7 +80,8 @@ def guard(settings: dict[str, Any], gateway: str) -> list[str]:
 
 
 def llm_config(model: str, gateway: str, key: str) -> dict[str, Any]:
-    params = {"model": model, "api_base": gateway, "api_key": key, "timeout": CALL_TIMEOUT_S}
+    params = {"model": model, "api_base": gateway, "api_key": key, "timeout": CALL_TIMEOUT_S,
+              "max_retries": 0}  # fmt: skip
     return {"model_list": [{"model_name": model, "litellm_params": params}]}
 
 

@@ -8,6 +8,7 @@ the tests and `--config-dir` use.
 from __future__ import annotations
 
 import os
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +52,35 @@ class Paths:
     @property
     def environments_dir(self) -> Path:
         return self.config_dir / "environments"
+
+
+def private_by_default() -> None:
+    """New files are owner-only in this process and what it starts (SQLite's included)."""
+    if os.name != "nt":
+        os.umask(0o077)
+
+
+def wider_than_owner(paths: Paths) -> list[Path]:
+    """Files and folders in Cairnward's folders that others could read."""
+    out = []
+    for root in (paths.config_dir, paths.data_dir, paths.state_dir):
+        if not root.is_dir() or os.name == "nt":
+            continue
+        for folder, dirs, files in os.walk(root):
+            for entry in [Path(folder), *(Path(folder) / n for n in [*dirs, *files])]:
+                mode = entry.lstat().st_mode
+                if mode & 0o077 and (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+                    out.append(entry)
+    return sorted(set(out))
+
+
+def make_owner_only(paths: Paths) -> int:
+    """Remove others' access from files made before `private_by_default`; returns how many.
+    Owner access is kept as it was, so programs in the engines' folders still run."""
+    wide = wider_than_owner(paths)
+    for path in wide:
+        path.chmod(stat.S_IMODE(os.lstat(path).st_mode) & 0o700)
+    return len(wide)
 
 
 def default_paths(config_dir: Path | None = None) -> Paths:
