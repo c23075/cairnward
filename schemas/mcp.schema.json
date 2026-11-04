@@ -76,6 +76,20 @@
           "title": "Command",
           "type": "array"
         },
+        "contract_max": {
+          "default": 1,
+          "description": "plugin: newest contract it supports",
+          "minimum": 1,
+          "title": "Contract Max",
+          "type": "integer"
+        },
+        "contract_min": {
+          "default": 1,
+          "description": "plugin: oldest contract it supports",
+          "minimum": 1,
+          "title": "Contract Min",
+          "type": "integer"
+        },
         "cwd": {
           "default": "{data}",
           "description": "working folder: {data} or {workspace}",
@@ -113,6 +127,29 @@
           "title": "Env",
           "type": "object"
         },
+        "environments": {
+          "description": "plugin: environments it's turned on in",
+          "items": {
+            "type": "string"
+          },
+          "title": "Environments",
+          "type": "array"
+        },
+        "fetch_hosts": {
+          "description": "plugin: hosts it may reach through the fetch service",
+          "items": {
+            "type": "string"
+          },
+          "title": "Fetch Hosts",
+          "type": "array"
+        },
+        "fetch_rate_per_minute": {
+          "default": 120,
+          "maximum": 6000,
+          "minimum": 1,
+          "title": "Fetch Rate Per Minute",
+          "type": "integer"
+        },
         "headers": {
           "additionalProperties": {
             "type": "string"
@@ -128,6 +165,16 @@
           "minimum": 0,
           "title": "Idle Stop Minutes",
           "type": "integer"
+        },
+        "kind": {
+          "default": "server",
+          "description": "plugin: runs under the plugin contract (ADR-0017): sandbox required, no network of its own, and core services for models, outside requests and saved output",
+          "enum": [
+            "server",
+            "plugin"
+          ],
+          "title": "Kind",
+          "type": "string"
         },
         "oauth_scope": {
           "anyOf": [
@@ -150,6 +197,20 @@
             "read": null,
             "write": []
           }
+        },
+        "pin_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "plugin: its installed code; the folder's SHA-256 must match `sha256`",
+          "title": "Pin Dir"
         },
         "pin_file": {
           "anyOf": [
@@ -190,6 +251,18 @@
           "description": "per-tool policy",
           "title": "Tools",
           "type": "object"
+        },
+        "unpinned_tools": {
+          "default": false,
+          "description": "plugin: don't hold changed tool definitions for review (a weakening: warned about and audited)",
+          "title": "Unpinned Tools",
+          "type": "boolean"
+        },
+        "unsandboxed": {
+          "default": false,
+          "description": "plugin: run it outside the sandbox and without pinned code (a weakening: warned about and audited)",
+          "title": "Unsandboxed",
+          "type": "boolean"
         },
         "url": {
           "anyOf": [

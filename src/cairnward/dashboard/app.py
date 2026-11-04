@@ -40,6 +40,7 @@ from cairnward import __version__
 from cairnward.audit.log import AuditLog
 from cairnward.config.loader import Config
 from cairnward.config.models import LOOPBACK_HOSTS
+from cairnward.plugins.contract import weakenings as plugin_weakenings
 
 STATIC = Path(__file__).with_name("static")
 SESSION_COOKIE = "cw_session"
@@ -249,7 +250,8 @@ def dashboard_app(
         return {
             "csrf": auth.session(request.cookies.get(SESSION_COOKIE)),
             "version": __version__, "isolated": isolated, "privacy": eff.label,
-            "weakened": eff.weaker_than_strict, "warnings": eff.warnings,
+            "weakened": eff.weaker_than_strict,
+            "warnings": [*eff.warnings, *plugin_weakenings(cfg.mcp)],
             "pending": len(inbox.pending()) if inbox else 0,
         }  # fmt: skip
 

@@ -69,8 +69,11 @@ def inbox_for(cfg: Config, log: Log) -> ApprovalInbox:
 
 
 def _srt_if_wanted(cfg: Config) -> list[str] | None:
-    """The sandbox command when any environment wants isolation and it's installed."""
-    if not any(cfg.privacy(e).value("isolation") == "on" for e in [None, *cfg.environments]):
+    """The sandbox command when any environment wants isolation, or a plugin (which always
+    runs in it) is configured, and it's installed."""
+    plugin = any(s.kind == "plugin" and not s.unsandboxed for s in cfg.mcp.servers.values())
+    wanted = any(cfg.privacy(e).value("isolation") == "on" for e in [None, *cfg.environments])
+    if not (plugin or wanted):
         return None
     try:
         return require(cfg.paths)
@@ -256,11 +259,13 @@ def _core_parts(
     from cairnward.gateway.scheduling import BenchProfile, Scheduler
     from cairnward.mcp.hub import McpHub
     from cairnward.mcp.pins import PinStore
+    from cairnward.plugins.services import PluginSessions
     from cairnward.policy.provenance import ProvenanceTracker
     from cairnward.research.online import Online
 
     engine = PolicyEngine(cfg, approver=inbox, audit=audit)
     run_keys = RunKeys()
+    plugins = PluginSessions(run_keys)
     tracker = ProvenanceTracker()
     scheduler = Scheduler({n: b.max_parallel for n, b in cfg.backends.backends.items()})
 
@@ -313,7 +318,8 @@ def _core_parts(
     online = Online(cfg, engine, backends)
     hub = McpHub(cfg, engine, launcher, PinStore.at(cfg.paths.data_dir), audit,
                  provenance=tracker, vault=vault, backends=backends,
-                 research_ask=research_ask, jobs=jobs, online=online)  # fmt: skip
+                 research_ask=research_ask, jobs=jobs, online=online,
+                 plugins=plugins)  # fmt: skip
     gateway = create_app(
         GatewayDeps(
             cfg,
@@ -326,6 +332,7 @@ def _core_parts(
             mcp=hub,
             provenance=tracker,
             scheduler=scheduler,
+            plugins=plugins,
         )
     )
     auth = DashboardAuth()
@@ -345,6 +352,7 @@ def _core_parts(
         research_ask=research_ask,
         jobs=jobs,
         online=online,
+        plugins=plugins,
     )
     return gateway, management, hub, dashboard
 
@@ -546,6 +554,8 @@ def core_sandbox(cfg: Config) -> SandboxSpec:
         port = u.port or (443 if u.scheme == "https" else 80)
         host = u.hostname or ""
         hosts.append(f"[{host}]:{port}" if ":" in host else f"{host}:{port}")
+    for spec in cfg.mcp.servers.values():  # the fetch service; each request is still checked
+        hosts += spec.fetch_hosts
     p = cfg.paths
     return SandboxSpec(
         allowed_hosts=srt_hosts(hosts),

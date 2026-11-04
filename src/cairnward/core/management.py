@@ -44,6 +44,11 @@ class RunIn(BaseModel):
     max_minutes: float | None = Field(default=None, gt=0)
 
 
+class PluginSessionIn(BaseModel):
+    plugin: str = Field(max_length=31)
+    environment: str = Field(max_length=63)
+
+
 class RunEnd(BaseModel):
     exit_code: int
     duration_s: float
@@ -164,6 +169,7 @@ def management_app(
     research_ask: Any = None,
     jobs: Any = None,
     online: Any = None,
+    plugins: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward management", docs_url=None, redoc_url=None)
     runs: dict[str, _Run] = {}
@@ -179,6 +185,28 @@ def management_app(
             "egress_port": server.egress_port if egress else None,
             "active_runs": len(runs),
         }
+
+    @app.post("/v1/plugins/session")
+    def plugin_session(body: PluginSessionIn) -> dict[str, str]:
+        """A key for one `cairnward plugin run` or `verify`, from this owner-only socket."""
+        spec = cfg.mcp.servers.get(body.plugin)
+        env = cfg.environments.get(body.environment)
+        if plugins is None or spec is None or spec.kind != "plugin":
+            raise HTTPException(404, f"no plugin called '{body.plugin}'")
+        if env is None or body.plugin not in env.mcp_servers:
+            raise HTTPException(400, f"{body.plugin} isn't on in '{body.environment}'")
+        key, run_id = plugins.issue(cfg, body.plugin, body.environment)
+        if audit:
+            audit.append("plugin.session", actor="user", target=body.plugin, run_id=run_id,
+                         environment=body.environment)  # fmt: skip
+        return {"key": key, "run_id": run_id,
+                "gateway": f"http://127.0.0.1:{server.gateway_port}/v1"}  # fmt: skip
+
+    @app.post("/v1/plugins/session/{run_id}/end")
+    def plugin_session_end(run_id: str) -> dict[str, bool]:
+        if plugins is not None:
+            plugins.revoke(run_id)
+        return {"ok": True}
 
     @app.post("/v1/runs")
     def start_run(body: RunIn) -> dict[str, Any]:

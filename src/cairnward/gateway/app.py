@@ -123,6 +123,7 @@ class GatewayDeps:
     profile: BenchProfile | None = None
     mcp: Any = None  # McpHub: the MCP proxy (spec §4.2), when configured
     provenance: ProvenanceTracker = field(default_factory=ProvenanceTracker)
+    plugins: Any = None  # plugins.services.PluginSessions: the plugin services (ADR-0017)
     client_usage: ClientUsage | None = None
     reasoning_leaks: ReasoningLeaks | None = None
 
@@ -167,6 +168,10 @@ def create_app(deps: GatewayDeps) -> FastAPI:
     )
 
     app.state.deps = deps
+    if deps.plugins is not None:
+        from cairnward.plugins.services import plugin_router
+
+        app.include_router(plugin_router(cfg, deps.engine, deps.backends, deps.plugins))
 
     @app.middleware("http")
     async def loopback_host_only(

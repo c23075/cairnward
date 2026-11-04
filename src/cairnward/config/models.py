@@ -591,6 +591,9 @@ def _check_mcp_url(url: str) -> None:
 ToolSetting = Literal["allow", "ask", "deny"]
 
 
+_LOOPBACK_ENTRY = re.compile(r"^(127\.0\.0\.1|\[::1\]):\d{1,5}$")
+
+
 class McpPermissions(_Strict):
     """What a third-party MCP server may do (its manifest), within the environment's
     privacy settings. Paths may use {workspace} (the environment's first workspace) and
@@ -639,6 +642,34 @@ class McpServer(_Strict):
     )
     sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     permissions: McpPermissions = McpPermissions()
+    kind: Literal["server", "plugin"] = Field(
+        default="server",
+        description="plugin: runs under the plugin contract (ADR-0017): sandbox required, no "
+        "network of its own, and core services for models, outside requests and saved output",
+    )
+    fetch_hosts: list[str] = Field(
+        default_factory=list, description="plugin: hosts it may reach through the fetch service"
+    )
+    fetch_rate_per_minute: int = Field(default=120, ge=1, le=6000)
+    environments: list[str] = Field(
+        default_factory=list, description="plugin: environments it's turned on in"
+    )
+    pin_dir: Path | None = Field(
+        default=None,
+        description="plugin: its installed code; the folder's SHA-256 must match `sha256`",
+    )
+    contract_min: int = Field(default=1, ge=1, description="plugin: oldest contract it supports")
+    contract_max: int = Field(default=1, ge=1, description="plugin: newest contract it supports")
+    unsandboxed: bool = Field(
+        default=False,
+        description="plugin: run it outside the sandbox and without pinned code (a weakening: "
+        "warned about and audited)",
+    )
+    unpinned_tools: bool = Field(
+        default=False,
+        description="plugin: don't hold changed tool definitions for review (a weakening: warned "
+        "about and audited)",
+    )
     default_tool: ToolSetting | None = Field(
         default=None,
         description="policy for its tools: allow / ask / deny; unset = by the approvals level",
@@ -650,6 +681,34 @@ class McpServer(_Strict):
         description="stop the server after this long unused (0: keep it running); it "
         "starts again on the next use",
     )  # fmt: skip
+
+    @model_validator(mode="after")
+    def _plugin_rules(self) -> McpServer:
+        if self.kind != "plugin":
+            if (self.fetch_hosts or self.pin_dir or self.unsandboxed or self.unpinned_tools
+                    or self.environments):  # fmt: skip
+                raise ValueError("fetch_hosts, pin_dir, environments, unsandboxed and "
+                                 'unpinned_tools are for kind = "plugin"')  # fmt: skip
+            return self
+        if not self.command:
+            raise ValueError('kind = "plugin" needs a command: a plugin runs on this machine')
+        if self.permissions.read is None:
+            raise ValueError('kind = "plugin" needs permissions.read: the folders it may read')
+        if self.pin_dir is not None and self.sha256 is None:
+            raise ValueError("pin_dir needs sha256 (`cairnward plugin pin`)")
+        if self.contract_min > self.contract_max:
+            raise ValueError("contract_min is above contract_max")
+        for host in self.fetch_hosts:
+            if "/" in host or (host.startswith("*") and "." not in host[1:]):
+                raise ValueError(f"fetch_hosts: '{host}' must be a host name or *.example.org")
+        for entry in self.permissions.network:
+            if not _LOOPBACK_ENTRY.match(entry):
+                raise ValueError(
+                    f"permissions.network: '{entry}': a plugin's outside requests go through "
+                    "fetch_hosts; a direct entry must be an exact local address and port, such "
+                    "as 127.0.0.1:23119"
+                )
+        return self
 
     @model_validator(mode="after")
     def _pin_pair(self) -> McpServer:
@@ -675,8 +734,10 @@ class McpServer(_Strict):
             raise ValueError("headers are for remote servers (url)")
         elif self.auth != "none":
             raise ValueError('auth = "oauth" is for remote servers (url)')
-        if (self.pin_file is None) != (self.sha256 is None):
+        if self.pin_dir is None and (self.pin_file is None) != (self.sha256 is None):
             raise ValueError("pin_file and sha256 go together")
+        if self.pin_dir is not None and self.pin_file is not None:
+            raise ValueError("give pin_file or pin_dir, not both")
         if self.cwd not in ("{data}", "{workspace}"):
             raise ValueError("cwd must be {data} or {workspace}")
         return self

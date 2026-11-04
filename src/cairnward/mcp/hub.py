@@ -12,7 +12,7 @@ import contextlib
 import os
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -66,6 +66,7 @@ class McpHub:
     research_ask: Any = None  # async (library, question, **kw) -> research.ask.Answer
     jobs: Any = None  # research.jobs.JobRunner
     online: Any = None  # research.online.Online (academic APIs, through egress)
+    plugins: Any = None  # plugins.services.PluginSessions
     _servers: dict[tuple[str, str], _Server] = field(default_factory=dict)
     _locks: dict[tuple[str, str], asyncio.Lock] = field(default_factory=dict)
     _reported: set[tuple[str, str, str]] = field(default_factory=set)
@@ -91,9 +92,12 @@ class McpHub:
                 remote = await self._remote(server, environment)
                 self._servers[key] = remote
                 return remote
+            extra_env, plugin_run = self._plugin_env(server, environment)
             try:
-                started = await self.launcher.start(server, environment)
+                started = await self.launcher.start(server, environment, extra_env)
             except (LaunchError, OSError) as exc:
+                if plugin_run:
+                    self.plugins.revoke(plugin_run)
                 self._audit("mcp.start", actor="cairnward", target=server, outcome="error",
                             environment=environment, details={"error": str(exc)[:300]})  # fmt: skip
                 raise McpError(f"{server}: {exc}") from None
@@ -102,6 +106,8 @@ class McpHub:
                 if method == "notifications/tools/list_changed" and key in self._servers:
                     self._servers[key].tools = None
 
+            if plugin_run:
+                started = self._revoking(started, plugin_run)
             conn = Connection(started.reader, started.writer, on_notification=on_note)
             try:
                 await conn.initialize(timeout=min(spec.call_timeout_s, 120))
@@ -122,6 +128,30 @@ class McpHub:
             entry = _Server(started, conn)
             self._servers[key] = entry
             return entry
+
+    def _plugin_env(self, server: str,
+                    environment: str) -> tuple[dict[str, str] | None, str | None]:  # fmt: skip
+        """A plugin's per-launch key and where its services are; (None, None) for other servers."""
+        if self.cfg.mcp.servers[server].kind != "plugin":
+            return None, None
+        if self.plugins is None:
+            raise McpError(f"{server}: plugins aren't available in this process")
+        from cairnward.plugins import contract
+
+        key, run_id = self.plugins.issue(self.cfg, server, environment)
+        port = self.cfg.main.server.gateway_port
+        return {contract.ENV_KEY: key, contract.ENV_GATEWAY: f"http://127.0.0.1:{port}/v1",
+                contract.ENV_ENVIRONMENT: environment,
+                contract.ENV_CONTRACT: str(contract.CONTRACT_VERSION)}, run_id  # fmt: skip
+
+    def _revoking(self, started: Started, run_id: str) -> Started:
+        stop = started.stop
+
+        async def stop_and_revoke() -> None:
+            self.plugins.revoke(run_id)
+            await stop()
+
+        return replace(started, stop=stop_and_revoke)
 
     async def _remote(self, server: str, environment: str) -> _Server:
         """A remote MCP server: its host is checked like any connection in the
@@ -244,6 +274,9 @@ class McpHub:
         if entry.tools is None:
             entry.tools = await entry.conn.list_tools(timeout=60)
         pinning = self.cfg.privacy(environment).value("mcp_pinning") == "on"
+        spec = self.cfg.mcp.servers.get(server)
+        if spec is not None and spec.kind == "plugin":  # only its own audited switch turns it off
+            pinning = not spec.unpinned_tools
         views = []
         for tool in entry.tools:
             state = self.pins.state(server, tool, entry.conn.raw_tools.get(tool["name"]))
@@ -293,6 +326,13 @@ class McpHub:
                     out.append({**v.definition, "name": exposed_name(server, v.definition["name"])})
         return out, problems
 
+    def _plugin_output(self, client: str, run_id: str | None, server: str) -> tuple[str, ...]:
+        """Plugins whose output came before this call (rule 6). A plugin's own next tool
+        gains nothing it didn't have, so it isn't counted."""
+        if self.provenance is None:
+            return ()
+        return tuple(p for p in self.provenance.plugins(client, run_id) if p != server)
+
     async def call(
         self,
         environment: str,
@@ -317,6 +357,7 @@ class McpHub:
             kind="tool.call", target=f"{server}/{tool}", environment=environment,
             client=client, run_id=run_id,
             actor=f"agent:{client}" if run_id else f"client:{client}",
+            plugin_output=self._plugin_output(client, run_id, server),
             details={"tool_hash": view.state.hash[:16]},
         )  # fmt: skip
         if not view.offered:
@@ -356,6 +397,8 @@ class McpHub:
             return _tool_error(f"{name} failed: {exc}")
         if self.provenance is not None:
             self.provenance.note_tool(client, run_id, f"{server}/{tool}")
+            if spec.kind == "plugin":
+                self.provenance.note_plugin(client, run_id, server)
         text = canonical(result)
         await asyncio.to_thread(
             self.engine.audit_post, action, pre,
@@ -677,6 +720,7 @@ class McpHub:
         action = Action(kind="tool.call", target=f"{BUILTIN}/{tool}", environment=environment,
                         client=client, run_id=run_id, conversation_id=conversation,
                         actor=f"agent:{client}" if run_id else f"client:{client}",
+                        plugin_output=self._plugin_output(client, run_id, BUILTIN),
                         details={"path": str(arguments.get("path", ""))[:200]})  # fmt: skip
         decision = await asyncio.to_thread(self.engine.check, action)
         if not decision.allowed:

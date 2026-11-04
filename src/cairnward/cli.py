@@ -172,6 +172,24 @@ def build_parser() -> argparse.ArgumentParser:
     mcp.add_argument("--url", help="MCP endpoint (default: $CAIRNWARD_MCP_URL or the gateway)")
     mcp.add_argument("--key", help="API key (default: $CAIRNWARD_API_KEY)")
     mcp_sub = mcp.add_subparsers(dest="mcp_command", metavar="ACTION")
+    plug = sub.add_parser("plugin", help="plugins: MCP servers under the plugin contract")
+    plug_sub = plug.add_subparsers(dest="plugin_command", metavar="ACTION", required=True)
+    plug_add = plug_sub.add_parser("add", help="add a plugin from its manifest (plugin.toml)")
+    plug_add.add_argument("manifest", type=Path)
+    plug_add.add_argument("--yes", action="store_true", help="don't ask")
+    plug_list = plug_sub.add_parser("list", help="plugins and whether they can start")
+    plug_list.add_argument("--json", action="store_true")
+    plug_pin = plug_sub.add_parser("pin", help="accept a plugin's installed code as it is now")
+    plug_pin.add_argument("name")
+    plug_verify = plug_sub.add_parser("verify", help="run the contract's tests (needs serve)")
+    plug_verify.add_argument("name")
+    plug_verify.add_argument("--env", help="environment to test in")
+    plug_run = plug_sub.add_parser("run", help="run a command in a plugin's sandbox")
+    plug_run.add_argument("name")
+    plug_run.add_argument("--env", help="environment for its key")
+    plug_run.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
+    plug_rm = plug_sub.add_parser("remove", help="take a plugin out of mcp.toml (keeps its data)")
+    plug_rm.add_argument("name")
     mcp_sub.add_parser("list", help="configured MCP servers and their permissions")
     mcp_tools = mcp_sub.add_parser("tools", help="a server's tools, pin state and warnings")
     mcp_tools.add_argument("server")
@@ -507,6 +525,24 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--all", action="store_true", help="one-line summary per environment")
     show.add_argument("--json", action="store_true", help="machine-readable output")
     return parser
+
+
+def _cmd_plugin(args: argparse.Namespace) -> int:
+    from cairnward.plugins import cli as plugin_cli
+
+    cfg = _load(args)
+    action = args.plugin_command
+    if action == "add":
+        return plugin_cli.add(cfg, args.manifest, yes=args.yes)
+    if action == "list":
+        return plugin_cli.list_plugins(cfg, args.json)
+    if action == "pin":
+        return plugin_cli.pin(cfg, args.name)
+    if action == "verify":
+        return plugin_cli.verify(cfg, args.name, args.env)
+    if action == "remove":
+        return plugin_cli.remove(cfg, args.name)
+    return plugin_cli.run(cfg, args.name, args.env, [c for c in args.cmd if c != "--"])
 
 
 def _load(args: argparse.Namespace) -> Config:
@@ -2416,6 +2452,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "mcp":
             return _cmd_mcp(args)
+        if args.command == "plugin":
+            return _cmd_plugin(args)
         if args.command == "vault":
             from cairnward import vault_cli
 

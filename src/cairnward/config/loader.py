@@ -123,6 +123,14 @@ def load_config(paths: Paths | None = None) -> Config:
                 environments[name] = env
 
     mcp = load(McpConfig, paths.mcp_config)
+    for server_name, server in mcp.servers.items():  # a plugin turns itself on where it says
+        for env_name in server.environments:
+            found = environments.get(env_name)
+            if found is None:
+                problems.append(f"{paths.mcp_config}: servers.{server_name}.environments: unknown "
+                                f"environment '{env_name}'")  # fmt: skip
+            elif server_name not in found.mcp_servers:
+                found.mcp_servers.append(server_name)
     cfg = Config(paths, main, backends, clients, effort, environments, loaded, mcp)
     problems.extend(_cross_check(cfg))
     if problems:

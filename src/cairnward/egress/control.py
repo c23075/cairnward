@@ -58,6 +58,7 @@ class ApproveIn(BaseModel):
 class McpStartIn(BaseModel):
     server: str = Field(max_length=31)
     environment: str = Field(max_length=63)
+    extra_env: dict[str, str] = Field(default_factory=dict, repr=False)
 
 
 class DoclingIn(BaseModel):
@@ -110,7 +111,7 @@ def control_app(
         if mcp is None:
             raise HTTPException(404, "MCP servers aren't started here")
         try:
-            result: dict[str, Any] = await mcp.start(body.server, body.environment)
+            result: dict[str, Any] = await mcp.start(body.server, body.environment, body.extra_env)
         except (LaunchError, OSError) as exc:
             raise HTTPException(400, str(exc)) from None
         return result

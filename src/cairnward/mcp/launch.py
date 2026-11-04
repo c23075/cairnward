@@ -41,7 +41,7 @@ from cairnward.egress.proxy import Session
 from cairnward.mcp.jsonrpc import MAX_MESSAGE
 from cairnward.policy.engine import host_matches
 from cairnward.sandbox import SandboxSpec, secret_dirs, srt_hosts, wrap
-from cairnward.sandbox.srt import install_dir
+from cairnward.sandbox.srt import srt_dirs
 
 BASE_ENV = ("PATH", "LANG", "LC_ALL", "TZ", "TERM")
 
@@ -78,11 +78,29 @@ def plan_launch(
     srt: list[str] | None,
     egress_url: str | None,
     tmp_dir: Path,
+    extra_env: dict[str, str] | None = None,
+    command: list[str] | None = None,
+    verifying: bool = False,
+    extra_read: list[Path] | None = None,
 ) -> LaunchPlan:
+    """extra_env: a plugin's key and service addresses. command: instead of the server's own
+    (`cairnward plugin run`, and the conformance suite's probe). verifying: the suite itself,
+    which can't require its own earlier pass."""
     server = cfg.mcp.servers.get(server_name)
     env_cfg = cfg.environments.get(environment)
     if server is None or env_cfg is None or server_name not in env_cfg.mcp_servers:
         raise LaunchError(f"MCP server '{server_name}' isn't enabled in '{environment}'")
+    plugin = server.kind == "plugin"
+    if plugin:
+        from cairnward.plugins import conformance, contract
+
+        problem = contract.contract_problem(server_name, server)
+        if problem is None and not server.unsandboxed:
+            problem = contract.pin_problem(server_name, server)
+        if problem is None and not verifying and not server.unsandboxed:
+            problem = conformance.not_verified(cfg, server_name)
+        if problem:
+            raise LaunchError(problem)
     if server.pin_file is not None:
         try:
             digest = hashlib.sha256(server.pin_file.expanduser().read_bytes()).hexdigest()
@@ -110,6 +128,8 @@ def plan_launch(
     perms = server.permissions
     writes = [expand(w) for w in perms.write]
     for w in writes:
+        if plugin and not _inside(w, [data]):
+            raise LaunchError(f"{server_name}: a plugin may only write inside {{data}}, not {w}")
         if not _inside(w, [*roots, data]):
             raise LaunchError(
                 f"{server_name}: may only write inside the workspace of '{environment}' or "
@@ -121,7 +141,13 @@ def plan_launch(
     warnings: list[str] = []
 
     hosts: list[str] = []
-    if eff.value("network") != "off":
+    if plugin:  # checked in mcp.toml: exact local addresses, approved at install
+        if eff.value("network") != "off":
+            hosts += perms.network
+            warnings += [f"direct network access to {h}" for h in perms.network]
+        elif perms.network:
+            warnings.append(f"network = off in '{environment}': no direct access for {server_name}")
+    elif eff.value("network") != "off":
         for h in perms.network:
             name = h.rsplit(":", 1)[0] if h.count(":") == 1 else h
             ip = literal_address(name.strip("[]"))
@@ -142,33 +168,51 @@ def plan_launch(
     for name in perms.env:
         if name in os.environ:
             run_env[name] = os.environ[name]
-    if egress_url and hosts:
+    run_env.update(extra_env or {})
+    if plugin:
+        from cairnward.plugins.contract import ENV_DATA
+
+        run_env[ENV_DATA] = str(data)
+    if egress_url and hosts and not plugin:
         run_env.update(HTTP_PROXY=egress_url, HTTPS_PROXY=egress_url,
                        http_proxy=egress_url, https_proxy=egress_url)  # fmt: skip
     log = cfg.paths.state_dir / "logs" / f"mcp-{server_name}-{environment}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
 
-    if eff.value("isolation") != "on":
+    program = list(command or server.command)
+    if plugin and server.unsandboxed:
+        warnings.append(f"{server_name} is a plugin running outside the sandbox (unsandboxed)")
+        return LaunchPlan(program, run_env, cwd, log, False, None, hosts, warnings)
+    if eff.value("isolation") != "on" and not plugin:
         warnings.append("isolation = off: the MCP server runs unsandboxed")
-        return LaunchPlan(list(server.command), run_env, cwd, log, False, None, hosts, warnings)
+        return LaunchPlan(program, run_env, cwd, log, False, None, hosts, warnings)
     if srt is None:
         raise LaunchError(
             "isolation = on but the sandbox isn't installed: `cairnward sandbox install`"
         )
     p = cfg.paths
     deny = [*secret_dirs(), p.config_dir, p.data_dir, p.state_dir]
-    allow_read: list[Path] = [install_dir(p), data]
+    allow_read: list[Path] = [*srt_dirs(p, srt), data, *(extra_read or [])]
     if reads is not None:
         deny.append(Path.home())
         allow_read += reads
+    allowed = srt_hosts(hosts)
+    if plugin:
+        allowed.append(f"127.0.0.1:{cfg.main.server.gateway_port}")  # the plugin services
+        if server.pin_dir is not None:
+            allow_read.append(server.pin_dir.expanduser())
+        from cairnward.run.runner import program_reads
+
+        allow_read += program_reads(program, run_env.get("PATH", ""), workspace=cwd,
+                                    home=Path.home())  # fmt: skip
     spec = SandboxSpec(
-        allowed_hosts=srt_hosts(hosts),
+        allowed_hosts=allowed,
         allow_write=[*writes, data, tmp_dir],
         deny_read=deny,
         allow_read=tuple(allow_read),
     )
     settings = spec.write(tmp_dir / "srt.json")
-    argv = wrap(srt, settings, list(server.command), tmp_dir=tmp_dir)
+    argv = wrap(srt, settings, program, tmp_dir=tmp_dir)
     return LaunchPlan(argv, run_env, cwd, log, True, spec, hosts, warnings)
 
 
@@ -185,7 +229,8 @@ class Started:
 
 
 class Launcher(Protocol):
-    async def start(self, server: str, environment: str) -> Started: ...
+    async def start(self, server: str, environment: str,
+                    extra_env: dict[str, str] | None = None) -> Started: ...  # fmt: skip
 
 
 class LocalLauncher:
@@ -203,7 +248,8 @@ class LocalLauncher:
         self.cfg, self.srt = cfg, srt
         self._create, self._revoke, self._port = create_session, revoke_session, egress_port
 
-    async def start(self, server: str, environment: str) -> Started:
+    async def start(self, server: str, environment: str,
+                    extra_env: dict[str, str] | None = None) -> Started:  # fmt: skip
         tmp = Path(tempfile.mkdtemp(prefix=f"cairnward-mcp-{server}-"))
         token = None
         if self._create is not None and self._port:
@@ -212,7 +258,8 @@ class LocalLauncher:
         egress_url = f"http://cw:{token}@127.0.0.1:{self._port}" if token else None
         try:
             plan = plan_launch(self.cfg, server, environment, srt=self.srt,
-                               egress_url=egress_url, tmp_dir=tmp)  # fmt: skip
+                               egress_url=egress_url, tmp_dir=tmp,
+                               extra_env=extra_env)  # fmt: skip
             with plan.log.open("ab") as log:
                 proc = await asyncio.create_subprocess_exec(
                     *plan.argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -252,8 +299,9 @@ class BridgeLauncher:
         self.local, self.sock_dir = local, sock_dir
         self._running: dict[str, Callable[[], Awaitable[None]]] = {}
 
-    async def start(self, server: str, environment: str) -> dict[str, Any]:
-        started = await self.local.start(server, environment)
+    async def start(self, server: str, environment: str,
+                    extra_env: dict[str, str] | None = None) -> dict[str, Any]:  # fmt: skip
+        started = await self.local.start(server, environment, extra_env)
         self.sock_dir.mkdir(parents=True, exist_ok=True)
         self.sock_dir.chmod(0o700)
         path = self.sock_dir / f"mcp-{secrets.token_hex(8)}.sock"
@@ -316,12 +364,14 @@ class RemoteLauncher:
     def __init__(self, control_socket: str):
         self._socket = control_socket
 
-    async def start(self, server: str, environment: str) -> Started:
+    async def start(self, server: str, environment: str,
+                    extra_env: dict[str, str] | None = None) -> Started:  # fmt: skip
         transport = httpx.AsyncHTTPTransport(uds=self._socket)
         async with httpx.AsyncClient(transport=transport, base_url="http://egress",
                                      timeout=120) as c:  # fmt: skip
             resp = await c.post("/v1/mcp/start", json={"server": server,
-                                                       "environment": environment})  # fmt: skip
+                                                       "environment": environment,
+                                                       "extra_env": extra_env or {}})  # fmt: skip
         if resp.status_code != 200:
             raise LaunchError(resp.json().get("detail", resp.text))
         info = resp.json()

@@ -78,6 +78,8 @@ class Action:
     # Untrusted content (web pages, files, tool output) that entered the context since the
     # user's last message, e.g. ("read paper.pdf p.4",). Shown in user-only dialogs.
     provenance: tuple[str, ...] = ()
+    # Plugins whose output came before this action (ADR-0017, rule 6): it needs approval.
+    plugin_output: tuple[str, ...] = ()
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -273,6 +275,10 @@ class PolicyEngine:
         used nor remembered."""
         eff = self.privacy_for(action)
         rule = self.rule_for(action)
+        if action.plugin_output and rule.base != "deny":  # high: never answered from memory
+            rule = Rule("ask", "high", f"{rule.reason}; it follows output from plugin "
+                        f"{', '.join(action.plugin_output)}, which may be trying to steer the "
+                        "model", explicit_ask=True)  # fmt: skip
         advisory = eff.value("isolation") == "off" and action.kind in ("net.connect", "fs.write")
 
         def done(final: Final, **kw: Any) -> Decision:
@@ -295,7 +301,7 @@ class PolicyEngine:
             rememberable=rule.risk != "high" and action.kind not in USER_ONLY,
             needs_secret=action.kind == "encrypt",
         )  # fmt: skip
-        remembered = self.memory.granted(req)
+        remembered = None if action.plugin_output else self.memory.granted(req)
         if remembered:
             return done("allow", reason=f"{rule.reason}; approved earlier for this {remembered}",
                         approved_by="user", scope=remembered)  # fmt: skip
