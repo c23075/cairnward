@@ -235,6 +235,11 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--criteria", help="inclusion/exclusion criteria for screening, or @file")
     rv.add_argument("--no-screen", action="store_true",
                     help="read every paper in full (no title/abstract screening)")  # fmt: skip
+    rw = rs_sub.add_parser("workflow", help="run a YAML workflow over a library")
+    rw.add_argument("library")
+    rw.add_argument("file", type=Path, help="the workflow (see examples/workflows/)")
+    rw.add_argument("--question", help="filled in for {{question}}")
+    rw.add_argument("--at", help="start later: HH:MM (local time) or an ISO date-time")
     eng = rs_sub.add_parser("engine", help="optional engines (PaperQA2, citeproc-js, pandoc)")
     eng.add_argument("action", choices=["install", "status", "export-lock"],
                      help="export-lock: copy the lock recorded on this machine into the "
@@ -1382,7 +1387,10 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
         if args.command == "research":
             start = parse_at(args.at) if args.at else None
             body: dict[str, Any] = {"library": args.library, "not_before": start}
-            if args.research_command == "review":
+            if args.research_command == "workflow":
+                body |= {"kind": "workflow", "question": args.question,
+                         "workflow": args.file.read_text(encoding="utf-8")}  # fmt: skip
+            elif args.research_command == "review":
                 criteria = args.criteria
                 if criteria and criteria.startswith("@"):
                     criteria = Path(criteria[1:]).read_text(encoding="utf-8").strip()

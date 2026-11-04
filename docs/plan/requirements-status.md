@@ -100,7 +100,7 @@ real tests are named here.
 | FR-RES-8 arXiv | 🧪 | `test_sources.py`, `test_online.py` (synthetic responses) |
 | FR-RES-9 Semantic Scholar, OpenAlex, PubMed, Crossref | 🧪 | as above |
 | FR-RES-10 research tools over MCP | ✅ | `test_mcp_builtins.py`, `test_online.py` (`lit_find`) |
-| FR-RES-11 multi-agent YAML workflows | ⏸ | deferred (D71) |
+| FR-RES-11 multi-agent YAML workflows | 🧪 | `test_workflow.py` (real jobs, audit and policy; scripted model); not yet run with a real model |
 | FR-RES-12 PaperQA2 spike | ✅ | ADR-0014 |
 | FR-RES-13 PaperQA2 deep engine | ✅ | `test_paperqa_guard.py`, `test_deep_engine.py`; real eval through the isolated server: 8/8 |
 
