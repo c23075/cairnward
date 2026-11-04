@@ -2,10 +2,11 @@
 
 A local privacy gateway (model gateway, egress proxy, policy engine, audit log, transcript
 vault, MCP proxy, research/literature-review workflows) for one person's machine.
-Python 3.12+, uv, Apache-2.0. Design: `docs/spec.md` (decisions D1–D73), ADRs in
+Python 3.12+, uv, Apache-2.0. Design: `docs/spec.md` (decisions D1–D74), ADRs in
 `docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. The current
 state and next steps are in the newest `docs/plan/handoff-*.md`; requirement status is in
-`docs/plan/requirements-status.md`, so a new handoff doesn't copy it.
+`docs/plan/requirements-status.md`, so a new handoff doesn't copy it. `docs/status.md` is the
+owner's view of the project: keep it current when issues or test results change.
 
 ## Commands
 ```bash

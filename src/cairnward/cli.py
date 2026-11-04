@@ -525,6 +525,9 @@ def _cmd_config_check(args: argparse.Namespace) -> int:
     files = ", ".join(str(f) for f in cfg.files_loaded) or "none (built-in defaults)"
     print(f"Configuration OK. Files read: {files}")
     print(f"Backends:     {', '.join(cfg.backends.backends)}")
+    for name, backend in cfg.backends.backends.items():
+        if warning := backend.unencrypted_warning(name):
+            print(f"  warning: {warning}")
     roles = ", ".join(f"{r}={m.model}@{m.backend}" for r, m in cfg.backends.roles.items())
     print(f"Models:       {roles}")
     print(f"Effort:       {', '.join(cfg.effort_levels_ordered())}")

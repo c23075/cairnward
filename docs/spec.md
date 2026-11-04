@@ -43,7 +43,7 @@ All of these protections are **optional** (§5.0). With everything switched off,
 - Building a chat app or a coding agent (use existing ones through the gateway).
 - Multi-user/team server, remote access, cloud hosting.
 - Training or fine-tuning.
-- Native Windows in the first releases (Linux first; Windows via WSL2 later).
+- Native Windows (Linux first; Windows through WSL2, D74).
 
 ---
 
@@ -63,7 +63,7 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D49 | Audit anchoring | Checkpoint hashes committed periodically to a **private git repo** the user owns | [0008](adr/0008-hash-chained-audit-log.md) (amended) |
 | D50 | Backup purge | Purging a conversation also **rewrites restic snapshots** to remove it, then prunes | [0007](adr/0007-sync-restic-backup-and-event-log-replication.md) (amended) |
 | D51 | Name, license | **Cairnward** (`cairnward`, alias `cw`), **Apache-2.0** | — |
-| D52 | Platforms | **Linux (Debian family) first**; Windows via WSL2 in a later milestone; CI keeps unit tests on Windows | — |
+| D52 | Platforms | **Linux (Debian family) first**; Windows via WSL2 (D74); CI keeps unit tests on Windows | — |
 | D53 | Heavy dependencies | Lean core; Docling, Presidio and other heavy libraries run as **optional workers**; pypdfium2 is the default PDF parser | — |
 | D54 | Approvals | Risk-tiered, batched approvals with an approvals inbox, to avoid approval fatigue | — |
 | D55 | Optional protections | **Every** privacy/security feature can be switched off, including isolation, network blocking, approvals, redaction, vault, audit log, anchoring, crypto-shredding, backup purge rewrite and MCP pinning | [0012](adr/0012-optional-privacy-controls-and-presets.md) |
@@ -85,6 +85,7 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D71 | M3 scope and order (2026-11-02) | Hardening first (server-mode test matrix, fuzzing, one-command eval/checklist runner, OpenShell review), then MCP SDK + citeproc-py, restic backups, Zotero + academic APIs, full review pipeline, Docling/GROBID, hosted providers, Drive mirror. Presidio and OpenTelemetry export included. **Deferred:** multi-device replication, multi-agent YAML workflows | [plan/m3.md](plan/m3.md) |
 | D72 | Replication (2026-11-04, FR-SYNC-4) | Through a **shared folder** (Syncthing, NAS, synced drive), one append-only signed and encrypted log per device and conversation; a device's file is deleted when the conversation is purged, so a purge reaches the folder. Concurrent turns fork inside the conversation's existing message tree rather than making a second conversation. New devices need approval. No git remote or rclone transport | [0007](adr/0007-sync-restic-backup-and-event-log-replication.md) (amended) |
 | D73 | What agent runs can read (2026-11-04) | `home_access`: with `hidden`, the default in Balanced and Strict, a run sees only the parts of the home folder it needs, because a list of secret folders can't cover documents and other projects; `readable` is the opt-out, shown as a weakening. A run key is also pinned to its environment, because the environment selects the privacy level | — |
+| D74 | Windows (2026-11-04, NFR-PORT-2) | The owner uses a Windows laptop, so WSL2 moves from Won't to Should. Cairnward runs inside WSL2 with the Linux sandbox; WSL1 is refused. Under WSL every sandbox hides the Windows drives (from the mount table) and `/init` and `/run/WSL`, because a Windows program would run outside the sandbox. Cairnward's own folders may not be on a Windows drive. No native Windows isolation | — |
 | D5, D19 | Model backends | Pluggable: Ollama (default), llama.cpp, any OpenAI-compatible server; per role / environment / effort | [0004](adr/0004-pluggable-backends.md) |
 | D29 | Hosted providers | Denied by default; tested first: Alibaba Model Studio, DeepSeek API, OpenRouter; Claude API later (separate API key) | 0004 |
 | D7, D25 | Literature sources, citations | Local PDFs, Zotero, arXiv/Semantic Scholar/OpenAlex/PubMed/Crossref; CSL styles (APA, IEEE default) | — |
@@ -402,7 +403,7 @@ As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Sc
 - Consequences: 8K default context (D60); first turns of long prompts take minutes, follow-ups seconds (D62); heavy coding agents are slow (D64); research runs as overnight batch jobs (D63).
 - **Upgrade paths** (documented for users, not required): an 8-core AM4 CPU (e.g. Ryzen 7 5700X, if the motherboard BIOS supports it) for roughly 2–3× faster prompt reading; a GPU with ≥ 12 GB VRAM for many times faster reading using llama.cpp's MoE offload (experts on CPU, rest on GPU); 64 GB RAM for larger contexts and keeping more models loaded (not faster).
 - Performance targets are fixed from `scripts/bench_backend.py` results (§8).
-- **Linux first** (Debian 12+, Ubuntu 22.04+, Mint, Pop!_OS). **Windows later via WSL2** (Cairnward and sandboxed agents run inside WSL2; Windows-native clients connect to it over loopback). CI runs unit tests on Windows throughout so nothing becomes harder to port.
+- **Linux first** (Debian 12+, Ubuntu 22.04+, Mint, Pop!_OS). **Windows via WSL2** (D74, [guide](wsl2.md): Cairnward and sandboxed agents run inside WSL2; Windows-native clients connect to it over loopback). CI runs unit tests on Windows throughout so nothing becomes harder to port.
 
 ---
 
@@ -422,7 +423,7 @@ Full list in [requirements.md](requirements.md).
 | Privacy | Strict preset: zero outbound connections unless allowlisted; Balanced: none without approval; Open: as configured |
 | Optionality | Every protection can be switched off independently and Cairnward still works; with all off, gateway overhead ≤ 10 ms per request |
 | Accessibility | Dashboard WCAG 2.2 AA; single-key shortcuts can be turned off |
-| Portability | Linux first; Windows via WSL2 later; Python 3.12+ |
+| Portability | Linux first; Windows via WSL2 (not yet run on a real machine); Python 3.12+ |
 
 ## 9. Delivery plan (summary)
 Details in [plan/phase0.md](plan/phase0.md).
@@ -430,7 +431,7 @@ Details in [plan/phase0.md](plan/phase0.md).
 - **M1 — Research core:** PDF library, `lit.ask` with page citations, citation check, CSL formatting, research job queue; PaperQA2 spike.
 - **M2 — Security features and dashboard:** approvals inbox, risk tiers, provenance dialog, redaction, egress report, vault browser, locking, audit anchoring, MCP proxy with pinning, all four coding agents and 2–3 clients tested.
 - **M3 — Sync, connectors, orchestration:** hardening, MCP SDK and CSL formatting, backup with purge rewrite, Zotero, academic APIs, full review pipeline, Docling/GROBID, hosted backends, Drive mirror ([plan/m3.md](plan/m3.md)). Multi-device replication (D72) and multi-agent workflows, deferred by D71, since built.
-- **Later:** Windows via WSL2, Ollama-compatible endpoint, Rust egress proxy, Merkle checkpoints.
+- **Later:** Ollama-compatible endpoint, Rust egress proxy, Merkle checkpoints.
 
 ## 10. Testing strategy
 As v0.5 §9, plus: **isolation tests** (every sandbox type tries direct DNS/TCP/UDP and must fail), **client compatibility tests** (scripted sessions for each tested client and coding agent against a fake model server), **vault reconstruction tests** (property-based: any sequence of stateless requests rebuilds the same conversation tree), **anchor tests** (tampering older than the last anchor is detected), **backup purge tests** (purged content absent from all restic snapshots afterwards), and **research evals** (zero invented references; quotations match PDFs).

@@ -174,7 +174,7 @@ All security requirements below describe what each protection does **when it is 
 | NFR-S4 | With isolation on, isolation holds for every sandbox type (direct network attempts fail) | M | isolation suite in CI (Linux) |
 | NFR-A1 | Dashboard WCAG 2.2 AA | S | axe-core |
 | NFR-PORT-1 | Linux (Debian 12+, Ubuntu 22.04+); Python 3.12+; unit tests also pass on Windows | M | CI |
-| NFR-PORT-2 | Windows via WSL2 | W | L |
+| NFR-PORT-2 | Windows via WSL2 | S | `tests/test_wsl.py`, `tests/isolation/test_wsl_sandbox.py`; real machine: checklist in `docs/wsl2.md` |
 | NFR-SUP-1 | Hash-locked deps; pip-audit; license check; pinned CI actions | M | CI |
 | NFR-SUP-2 | SBOM + Sigstore-signed releases | S | `.github/workflows/release.yml`, `test_release.py`; never run on GitHub yet |
 | NFR-MAINT-1 | ruff + mypy strict; ≥ 80% coverage in every package (a short list is left out by name, each with a reason, in `scripts/check_coverage.py`) | M | CI (Linux) |

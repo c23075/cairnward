@@ -22,13 +22,19 @@ import httpx
 from cairnward.config.loader import Config, ConfigError, load_config
 from cairnward.config.paths import Paths
 from cairnward.sandbox import MIN_NODE_TEXT, SandboxSpec, locate, node_version, wrap
-from cairnward.sysinfo import meminfo
+from cairnward.sandbox.srt import windows_paths
+from cairnward.sysinfo import meminfo, on_windows_drive, wsl_interop_on, wsl_version
 
 Status = Literal["ok", "warn", "fail", "skip"]
 GB = 1024**3
 # Rough KV-cache cost per context token for the default main model (Qwen3-30B-A3B, fp16),
 # from the reference-machine benchmark (docs/bench/). Used only for the memory estimate.
 KV_BYTES_PER_TOKEN = 100 * 1024
+WSL_BACKEND_HINT = (
+    "; under WSL2, run it inside WSL too: 127.0.0.1 here isn't Windows' own unless "
+    "networkingMode=mirrored is set"
+)
+WSL_MEMORY_HINT = "; WSL2 gets half of Windows' memory by default: raise memory= in .wslconfig"
 
 
 @dataclass(frozen=True)
@@ -113,6 +119,9 @@ def check_backends(cfg: Config) -> list[Check]:
     out: list[Check] = []
     sizes: dict[str, int] = {}
     for name, b in cfg.backends.backends.items():
+        if warning := b.unencrypted_warning(name):
+            out.append(Check(f"backend {name}", "warn", "not encrypted, not contacted", warning))
+            continue
         if b.location != "local":
             out.append(Check(f"backend {name}", "skip", f"{b.location} backend: not contacted"))
             continue
@@ -129,7 +138,8 @@ def check_backends(cfg: Config) -> list[Check]:
                     f"backend {name}",
                     "fail",
                     f"not reachable at {b.url} ({type(exc).__name__})",
-                    "start the model server (e.g. `systemctl start ollama`)",
+                    "start the model server (e.g. `systemctl start ollama`)"
+                    + (WSL_BACKEND_HINT if wsl_version() else ""),
                 )
             )
             continue
@@ -171,7 +181,8 @@ def _memory_check(cfg: Config, sizes: dict[str, int]) -> Check:
         f"~{need_both / GB:.1f} GB; {total / GB:.1f} GB total, {avail / GB:.1f} GB available"
     )
     if need_main + 3 * GB > total:
-        return Check("memory", "fail", detail, "use a smaller model or context; or add RAM")
+        hint = WSL_MEMORY_HINT if wsl_version() else ""
+        return Check("memory", "fail", detail, f"use a smaller model or context; or add RAM{hint}")
     if need_both > avail:
         return Check(
             "memory",
@@ -254,18 +265,39 @@ def check_isolation(cfg: Config) -> list[Check]:
 
 
 PROBE = r"""
-import json, socket, sys
+import json, os, socket, subprocess, sys
 def blocked(fn):
     try:
         fn(); return False
     except Exception:
         return True
-print(json.dumps({
+def empty(path):  # a hidden folder is an empty one, a hidden file an empty one
+    try:
+        return not (os.listdir(path) if os.path.isdir(path) else os.path.getsize(path))
+    except OSError:
+        return True
+def windows_program_refused():  # "MZ" is what the kernel hands to /init as a Windows program
+    with open("probe.exe", "wb") as f:
+        f.write(b"MZ" + bytes(62))
+    os.chmod("probe.exe", 0o755)
+    try:
+        subprocess.run(["./probe.exe"], capture_output=True, timeout=10)
+    except OSError:
+        return True
+    except subprocess.SubprocessError:
+        pass
+    return False
+got = {
     "direct_tcp": blocked(lambda: socket.create_connection(("1.1.1.1", 443), timeout=3)),
     "dns": blocked(lambda: socket.getaddrinfo("example.com", 443)),
     "hidden_folder": blocked(lambda: open(sys.argv[1]).read()),
     "unix_socket": blocked(lambda: socket.socket(socket.AF_UNIX)),
-}))
+}
+if sys.argv[2:]:  # under WSL
+    got["windows_paths"] = all(empty(p) for p in sys.argv[2:])
+    got["windows_programs"] = windows_program_refused()
+    got["vm_socket"] = blocked(lambda: socket.socket(socket.AF_VSOCK))
+print(json.dumps(got))
 """
 
 
@@ -278,10 +310,11 @@ def self_test(srt: list[str]) -> Check:
         (base / "probe.py").write_text(PROBE)
         spec = SandboxSpec(allowed_hosts=[], allow_write=[base / "ws"], deny_read=[hidden])
         (base / "ws").mkdir()
+        windows = [str(p) for p in windows_paths() if p.exists()]
         cmd = wrap(
             srt,
             spec.write(base / "srt.json"),
-            [sys.executable, "-I", str(base / "probe.py"), str(hidden / "secret")],
+            [sys.executable, "-I", str(base / "probe.py"), str(hidden / "secret"), *windows],
         )
         env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG") if k in os.environ}
         try:
@@ -310,9 +343,50 @@ def self_test(srt: list[str]) -> Check:
             f"NOT blocked inside the sandbox: {', '.join(leaks)}",
             "don't rely on isolation until this passes; report it",
         )
-    return Check(
-        "isolation self-test", "ok", "direct network, DNS, hidden folder and Unix sockets blocked"
-    )
+    blocked_here = "direct network, DNS, hidden folder and Unix sockets"
+    if "windows_paths" in got:
+        blocked_here += ", Windows drives, Windows programs and VM sockets"
+    return Check("isolation self-test", "ok", f"{blocked_here} blocked")
+
+
+def check_wsl(cfg: Config) -> list[Check]:
+    """What's different under WSL. Nothing to report elsewhere."""
+    version = wsl_version()
+    if version is None:
+        return []
+    if version == 1:
+        return [
+            Check(
+                "WSL",
+                "fail",
+                "this is WSL1, which can't run the sandbox",
+                "in Windows: wsl --set-version <distro> 2",
+            )
+        ]
+    out = [Check("WSL", "ok", "WSL2; Windows drives and programs are hidden from sandboxes")]
+    p = cfg.paths
+    on_drive = [str(d) for d in (p.config_dir, p.data_dir, p.state_dir) if on_windows_drive(d)]
+    if on_drive:
+        out.append(
+            Check(
+                "WSL folders",
+                "fail",
+                f"on a Windows drive: {', '.join(on_drive)}",
+                "keep them in the Linux file system: SQLite's locks, Unix sockets and file "
+                "permissions don't work reliably on a Windows drive",
+            )
+        )
+    if wsl_interop_on():
+        out.append(
+            Check(
+                "WSL interop",
+                "warn",
+                "Linux programs here can start Windows programs",
+                "sandboxes block this, but unsandboxed programs can: set [interop] "
+                "enabled=false in /etc/wsl.conf if you don't need it",
+            )
+        )
+    return out
 
 
 def check_data(cfg: Config) -> list[Check]:
@@ -378,6 +452,14 @@ def check_disk_encryption() -> Check:
         return Check("disk encryption", "skip", "lsblk failed")
     if "crypt" in out.split():
         return Check("disk encryption", "ok", "an encrypted volume (LUKS) is in use")
+    if wsl_version():
+        return Check(
+            "disk encryption",
+            "warn",
+            "can't be seen from inside WSL",
+            "WSL's disk is a file on the Windows drive: turn on BitLocker or Device Encryption "
+            "in Windows; recommended, not required",
+        )
     return Check(
         "disk encryption",
         "warn",
@@ -401,6 +483,7 @@ def run_checks(paths: Paths) -> list[Check]:
     checks.append(Check("configuration", "ok", f"privacy {cfg.privacy().label} (global)"))
     checks += check_ports(cfg)
     checks += check_backends(cfg)
+    checks += check_wsl(cfg)
     checks += check_isolation(cfg)
     checks += check_data(cfg)
     checks.append(check_file_modes(cfg))

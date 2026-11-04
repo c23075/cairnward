@@ -67,7 +67,7 @@ environment.
 
 ## Quick start
 
-You need Linux (developed on Debian and Ubuntu), Python 3.12+, [uv](https://docs.astral.sh/uv/)
+You need Linux (developed on Debian and Ubuntu; on Windows, [use WSL2](docs/wsl2.md)), Python 3.12+, [uv](https://docs.astral.sh/uv/)
 and [Ollama](https://ollama.com/). The sandbox also needs Node.js 22.12+, bubblewrap, socat and
 ripgrep:
 
@@ -174,7 +174,8 @@ mirror, remote backups, hosted providers, a real remote MCP server or OAuth prov
 chat apps' manual checklist. Everything above used short synthetic papers, not real ones.
 
 **Known gaps:** locking a research library doesn't cover its source PDFs, the release workflow has never run, and no
-one but the assistant that wrote the code has reviewed its security. It's meant for Linux; CI
+one but the assistant that wrote the code has reviewed its security. It's meant for Linux. On
+Windows it runs [inside WSL2](docs/wsl2.md), which hasn't been tried on a real machine yet; CI
 also runs the unit tests on Windows.
 
 The current state and next steps are in the newest [handoff](docs/plan/), and each requirement's
@@ -187,6 +188,7 @@ locking doesn't erase earlier plaintext from disks or old backups. Read the
 
 ## Documentation
 
+- [Project status](docs/status.md): where things stand, open issues and what's left to test
 - [Getting started](docs/getting-started.md): the full setup guide
 - [Specification](docs/spec.md): the design and its decisions
 - [Requirements](docs/requirements.md) and [architecture decisions](docs/adr/)
