@@ -34,6 +34,7 @@ HOSTS = {"openalex": "api.openalex.org", "semantic-scholar": "api.semanticschola
          "pubmed": "eutils.ncbi.nlm.nih.gov"}  # fmt: skip
 CACHE_DAYS = 7
 MAX_PDF_BYTES = 50 * 1024 * 1024
+MAX_ANSWER_BYTES = 10 * 1024 * 1024  # a search or metadata answer (read whole, cached)
 USER_AGENT = "Cairnward (literature review; https://github.com/c23075/possessed-incantation)"
 ATOM = {"a": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 
@@ -320,14 +321,21 @@ class Searcher:
         if self.check is not None:
             await self.check(source, url)
         try:
-            resp = await self._client.get(url)
+            async with self._client.stream("GET", url) as resp:
+                chunks, size = [], 0
+                async for chunk in resp.aiter_bytes():
+                    size += len(chunk)
+                    if size > MAX_ANSWER_BYTES:
+                        raise SourceError(f"{source}: the answer is larger than "
+                                          f"{MAX_ANSWER_BYTES // 1024 // 1024} MB")  # fmt: skip
+                    chunks.append(chunk)
         except httpx.HTTPError as exc:
             raise SourceError(f"{source}: {type(exc).__name__}: {str(exc)[:200]}") from None
-        if resp.status_code == 403 and "cairnward" in resp.text.lower():
-            raise SourceError(f"{source}: refused by Cairnward's egress ({resp.text[:200]})")
+        body = b"".join(chunks).decode(resp.encoding or "utf-8", "replace")
+        if resp.status_code == 403 and "cairnward" in body.lower():
+            raise SourceError(f"{source}: refused by Cairnward's egress ({body[:200]})")
         if resp.status_code != 200:
             raise SourceError(f"{source}: HTTP {resp.status_code}")
-        body = resp.text
         if cache:
             self._store(url, body, resp.headers.get("content-type", ""))
         return body, False

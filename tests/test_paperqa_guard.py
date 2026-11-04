@@ -2,6 +2,8 @@
 Cairnward, and the mapping of its answers. Runs without paper-qa installed."""
 
 import importlib.util
+import pickle
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -95,3 +97,31 @@ def test_answer_mapping() -> None:
     assert a.passages == 3 and not a.uncited and a.quote_problems == []
     c = paperqa.to_answer("q", "lib", {"answer": "I cannot answer.", "contexts": []}, papers, [])
     assert c.cannot_answer and c.uncited
+
+
+def test_index_cache_is_loaded_only_when_signed(tmp_path: Path) -> None:
+    """The index is a pickle (loading it runs code): only Cairnward's signed copy is read."""
+    w = worker()
+    key, cache = bytes(32), tmp_path / "index.pkl"
+    assert w.load_cache(cache, key) is None  # nothing yet
+    w.save_cache(cache, key, {"docs": ["a"]})
+    assert w.load_cache(cache, key) == {"docs": ["a"]}
+    assert w.load_cache(cache, b"x" * 32) is None  # another key
+
+    class Boom:
+        def __reduce__(self) -> Any:
+            return (exec, ("raise SystemExit('pickle ran')",))
+
+    cache.write_bytes(pickle.dumps(Boom()))  # planted, old signature left in place
+    assert w.load_cache(cache, key) is None
+    (tmp_path / "index.pkl.sig").unlink()
+    assert w.load_cache(cache, key) is None  # unsigned
+
+
+def test_cache_key_is_kept_owner_only(tmp_path: Path) -> None:
+    from cairnward.config.paths import Paths
+
+    paths = Paths(tmp_path / "c", tmp_path / "d", tmp_path / "s")
+    first = paperqa.cache_key(paths)
+    assert len(first) == 32 and paperqa.cache_key(paths) == first
+    assert (paths.state_dir / "paperqa-cache.key").stat().st_mode & 0o077 == 0

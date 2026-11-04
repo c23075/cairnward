@@ -72,6 +72,12 @@ async def test_vault_operations_and_downloads(env: Any) -> None:  # noqa: F811
         assert "vault.purge" in actions(audit)
         missing = await c.post("/api/vault/no-such-id/title", json={"title": "x"}, headers=hdr)
         assert missing.status_code == 404
+        # a body that isn't a JSON object, or doesn't fit the operation: 400, not a crash
+        for body in (b"[1, 2]", b'"pin"', b"not json"):
+            bad = await c.post(f"/api/vault/{conv}/pin", content=body,
+                               headers={**hdr, "Content-Type": "application/json"})  # fmt: skip
+            assert bad.status_code == 400, body
+        assert (await post("title", title=7)).status_code == 400
     finally:
         await c.aclose()
 

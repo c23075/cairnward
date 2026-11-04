@@ -269,6 +269,41 @@ def test_approval_timeout_denies(start: Callable[..., Running]) -> None:
     assert resp.startswith(b"HTTP/1.1 403") and b"approval timed out" in resp
 
 
+def test_host_header_comes_from_the_checked_url(start: Callable[..., Running], origin: int) -> None:
+    """On a shared address another Host would reach a site the policy never checked."""
+    r = start(allow_local(origin))
+    req = (f"GET http://127.0.0.1:{origin}/ HTTP/1.1\r\nHost: not-allowed.example\r\n"
+           f"host: second.example\r\nProxy-Authorization: {r.auth}\r\n\r\n")  # fmt: skip
+    assert r.raw(req.encode()).endswith(b"hello from origin")
+    assert Origin.seen[0]["host"] == f"127.0.0.1:{origin}"
+
+
+def test_late_approval_is_dropped_and_prompts_dont_overlap(start: Callable[..., Running]) -> None:
+    """After a timeout the prompt may still be open: a later "yes, this environment" must
+    not be remembered, and no second prompt opens next to it."""
+    release, open_now, most = threading.Event(), [0], [0]
+
+    def held(req: ApprovalRequest) -> ApprovalAnswer:
+        open_now[0] += 1
+        most[0] = max(most[0], open_now[0])
+        release.wait(10)
+        open_now[0] -= 1
+        return ApprovalAnswer(True, "environment")
+
+    r = start('network = "ask"', answer=held, egress="approval_timeout_s = 1")
+    first = r.get("http://10.9.9.9:1/")
+    assert first.startswith(b"HTTP/1.1 403") and b"approval timed out" in first
+    second = r.get("http://10.9.9.8:1/")  # the first prompt is still open
+    assert second.startswith(b"HTTP/1.1 403") and b"still open" in second
+    release.set()
+    deadline = time.monotonic() + 5
+    while open_now[0] and time.monotonic() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.1)
+    assert most[0] == 1 and len(r.approver.asked) == 1
+    assert not r.proxy.engine.memory._grants  # the late "yes" wasn't kept
+
+
 def test_unreachable_upstream(start: Callable[..., Running]) -> None:
     port = closed_port()
     r = start(allow_local(port))
