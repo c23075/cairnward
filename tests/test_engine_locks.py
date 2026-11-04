@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cairnward.research.engines import locks, presidio
+from cairnward.redaction_engines import locks, presidio
 
 
 def requirements(text: str) -> list[str]:

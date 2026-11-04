@@ -4,7 +4,7 @@ findings (category "personal") to the regex scanner's.
 
 Installed into its own virtual environment (`cairnward redaction install presidio`):
 presidio-analyzer (pinned below, MIT) and spaCy's small English model, from the lock
-shipped in engines/locks/presidio.txt (every package and the model wheel hash-pinned).
+shipped in redaction_engines/locks/presidio.txt (every package and the model wheel hash-pinned).
 The worker is a long-running child process (the model loads once), started on first use
 by whichever process scans: inside the core's sandbox when the core is isolated; it needs
 no network. If it can't start or stops answering, the regex scanner still applies and the
@@ -55,7 +55,7 @@ def install(paths: Paths, log: Any = print) -> dict[str, Any]:
     root = engine_dir(paths)
     root.mkdir(parents=True, exist_ok=True)
     venv, lock = root / "venv", root / "requirements.lock.txt"
-    from cairnward.research.engines import locks
+    from cairnward.redaction_engines import locks
 
     ready = locks.shipped("presidio")
     if ready is not None:

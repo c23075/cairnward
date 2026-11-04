@@ -1,4 +1,4 @@
-"""Hash-locked requirements for the optional engines (Docling, Presidio).
+"""Hash-locked requirements for the optional engines (Docling).
 
 A lock shipped in the repository (`locks/<engine>.txt` for every platform, or
 `locks/<engine>-<platform>.txt`) is installed as is, with hashes required: nothing is

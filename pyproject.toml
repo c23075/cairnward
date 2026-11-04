@@ -64,6 +64,7 @@ ignore = []
 "src/cairnward/run/snapshots.py" = ["S603"]
 "src/cairnward/audit/anchor.py" = ["S603"]
 "src/cairnward/artifacts.py" = ["S603"]
+"src/cairnward/redaction_engines/*.py" = ["S603"]  # starts its own worker
 "src/cairnward/research/engines/*.py" = ["S603", "S301"]  # starts its own worker; loads its own index  # git with fixed arguments
 "src/cairnward/research/check.py" = ["RUF001"]
 "src/cairnward/research/cite.py" = ["RUF001"]  # typographic dashes are part of the styles  # it normalises typographic quotes and dashes on purpose  # git and ssh-keygen with fixed arguments
