@@ -1,6 +1,6 @@
 # ADR-0017: Research as a separate plugin, under a standard plugin contract
 
-- Status: Proposed
+- Status: Accepted (2026-11-05)
 - Date: 2026-11-04
 - Spec: §1, §3.2, §4.2, §4.6, §5.3, §5.4; D15, D42, D43, D55, D63, D67, D71; FR-RES-1 to
   FR-RES-13, FR-RED-2
@@ -71,7 +71,7 @@ or whether that output is correct.
    on top of option 3 or 4.
 
 ## Decision
-Proposed: **option 4, with a skill for the review workflow.** Research moves to its own
+**Option 4, with a skill for the review workflow.** Research moves to its own
 repository (`cairnward-research`) and runs as a plugin under the contract below. The contract is
 general: any future plugin follows the same rules.
 
@@ -239,10 +239,28 @@ Where each kind of issue sits once research is a plugin:
    model and the README.
 7. Run the evals through the plugin on the reference machine and compare with the baseline.
 
-### Open questions
-- Should the workflow YAML runner (FR-RES-11) move too, or become a general core feature?
-  Today it only runs research steps.
-- Should backups leave the egress process in the same change, so it only proxies?
-- Should the research plugin keep its own job page, or rely on a generic dashboard view?
-- Should plugins be installable from a list of known plugins with published hashes, or only
-  from a path or repository the user names?
+### Open questions, as decided
+- The workflow YAML runner moved with research. It only runs research steps.
+- Backups stay in the outer process for now. Moving them is separate work with its own risk, and it
+  doesn't affect the plugin.
+- No job page in the dashboard. The plugin's tools and CLI report jobs; a generic view can come later.
+- Plugins come only from a path the user names. A list of known plugins needs someone to publish it.
+
+### Where the build differs from this ADR
+- **Rule 1 is narrower:** a direct `network` entry must be an exact local address and port. An
+  outside host is refused, because the sandbox would reach it around egress, so "another protocol"
+  isn't supported in contract 1.
+- **Rule 3 has one more service:** item keys, so a locked library's key stays with the
+  conversations' keys and the recovery key still covers it. Without it, locked libraries would have
+  needed re-locking, and the ADR's migration note would be wrong.
+- **Rule 3's fetch limits hosts by `fetch_hosts`,** so an open-access PDF on a repository not listed
+  is refused until you add the host. Before, it asked. This is stricter and less convenient.
+- **Rule 4 pins a folder,** the installed code, instead of a lock file. A lock's hash says nothing
+  about what's on disk now.
+- **Rule 7:** a new tool isn't a failure, because the hub offers it to no one until `cairnward mcp
+  approve`, which needs the plugin to start. A changed one is.
+- **A plugin's key can't use the MCP endpoint.** The ADR didn't cover this; review found it.
+- **The CLI runs in the sandbox too,** through `cairnward plugin run`, so parsing a PDF by hand gets
+  the same limits. Only engine installs, Drive and moving downloads stay outside.
+- **Research's own audit records are gone** (`research.ask`, `library.index`, `job.*`): the core
+  records its model calls, fetches and tool calls. A plugin's own account of itself isn't evidence.

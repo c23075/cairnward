@@ -104,90 +104,12 @@ uv run cairnward audit anchor --setup
 uv run cairnward audit verify --anchors
 ```
 
-## 6. A literature library
-Pull the embedding model once:
-```bash
-ollama pull qwen3-embedding:0.6b
-```
-Register a folder of PDFs and index it (re-run `index` after adding papers; only new or changed files are processed):
-```bash
-uv run cairnward library create thesis ~/research/papers
-```
-```bash
-uv run cairnward library index thesis
-```
-Find passages, with pages:
-```bash
-uv run cairnward library search thesis "effect of sleep on working memory"
-```
-Ask a question; the answer cites passages as [n] with file and page, and says so when the papers don't answer it (a few minutes on a CPU; through the running server when there is one):
-```bash
-uv run cairnward library ask thesis "Does longer sleep improve working memory?"
-```
-Check a draft's quotations and references against the library:
-```bash
-uv run cairnward library check thesis draft.md
-```
-Format references exported from Zotero as CSL-JSON (APA 7 or IEEE):
-```bash
-uv run cairnward cite references.json --style apa
-```
-For output identical to Zotero's, and any of the 10,000+ CSL styles (`--style path/to/style.csl`), install the citeproc-js engine (needs Node.js 20 or newer; pinned and hash-checked), or have pandoc installed; Cairnward then uses it automatically (`[research] citation_engine = "auto"`):
-```bash
-uv run cairnward research engine install citeproc-js
-```
-Run a review overnight: notes per paper and a comparison table with references (it picks up where it left off if Cairnward restarts):
-```bash
-uv run cairnward research review thesis --question "Does sleep affect working memory?" --at 23:30
-```
-A review screens every paper's title and abstract with the fast model first (add `--criteria "adults; sleep measured objectively"` to sharpen it, or `--no-screen` to read everything), reads only the included papers in full, writes a synthesis that cites them by number, and saves the references as BibTeX too (`uv run cairnward jobs result <id> --bib > references.bib`).
+## 6. A literature library (a plugin)
+Questions over a folder of PDFs and reviews come from the `cairnward-research` plugin. See [Plugins](plugins.md) to install it. Its commands are `cairnward-research library`, `research`, `jobs` and `cite`, and its README covers the rest.
 
-The papers are picked when the review starts, so PDFs you add to the library folder before then are indexed and included. To review only some papers (paths inside the library folder; they can be added after queuing):
+If you used `cairnward library` before the split, copy your libraries over once. The originals stay where they are:
 ```bash
-uv run cairnward research review thesis --question "Does sleep affect working memory?" --files new/smith2024.pdf new/lee2025.pdf --at 23:30
-```
-```bash
-uv run cairnward jobs list
-```
-Optional deeper engine, PaperQA2 (more model calls per question, so several minutes more on a CPU; runs sandboxed, every call through Cairnward):
-```bash
-uv run cairnward research engine install paperqa
-```
-```bash
-uv run cairnward library ask thesis "Does longer sleep improve working memory?" --engine paperqa
-```
-Or overnight, for a list of questions:
-```bash
-uv run cairnward research ask thesis questions.txt --engine paperqa --at 23:30
-```
-Chat clients can do the same through MCP: add `tools = ["research"]` to the library's environment for `cairnward__lit_search` and `cairnward__lit_ask`.
-
-Scanned PDFs, tables or messy layouts: switch a library to Docling (optional, about 3 GB, installed once, then offline and sandboxed). For better metadata and reference lists, run GROBID (`docker run --rm --network none -p 127.0.0.1:8070:8070 grobid/grobid:<version>`) and set `[research] grobid_url = "http://127.0.0.1:8070"` in `cairnward.toml`:
-```bash
-uv run cairnward research engine install docling
-```
-```bash
-uv run cairnward library set thesis --parser docling --metadata grobid
-```
-```bash
-uv run cairnward library index thesis --rebuild
-```
-
-Mirror a Google Drive folder (read-only; set up an rclone remote first with `rclone config`, ideally with `scope = drive.readonly`; `serve` must be running, and the library's environment must allow Google's hosts, since rclone's traffic goes through Cairnward's egress):
-```bash
-uv run cairnward library drive thesis --remote gdrive:Papers/Thesis --preview
-```
-
-Bring papers in from Zotero (Zotero 7 running, with Settings → Advanced → "Allow other applications on this computer to communicate with Zotero" on; read-only):
-```bash
-uv run cairnward library zotero thesis --collection "Thesis"
-```
-Search OpenAlex, Semantic Scholar, arXiv, Crossref and PubMed (allowed in the `litreview-online` environment; each new host is asked about first), then add open-access PDFs by their ID:
-```bash
-uv run cairnward research search "sleep and working memory in older adults"
-```
-```bash
-uv run cairnward research add thesis doi:10.1111/jsr.13540
+cairnward-research import
 ```
 
 ## 7. Hosted models (optional)
@@ -239,7 +161,7 @@ uv run cairnward replicate approve <id>
 If both devices reply in the same conversation before syncing, both replies are kept, as a fork. Purging a conversation purges it everywhere, once each device has synced. Turn off version history for this folder in Syncthing or your cloud drive, or old files outlive purges and locks. Research libraries and settings aren't shared. If you lose a device, `replicate block <id>` stops its changes being accepted, but it can still read the folder with the key it holds: to shut it out, run `replicate leave` then `init` on a new folder, and `join` from the others.
 
 ## 10. Check everything on your machine
-With `cairnward serve` running and your models pulled, one command runs the doctor, the lit.ask eval (and PaperQA2 next to it when installed), the coding eval with each installed agent, and summarises what your chat clients did:
+With `cairnward serve` running and your models pulled, one command runs the doctor and the coding eval (the research evals are in the plugin's repository):
 ```bash
 uv run cairnward check
 ```

@@ -1,0 +1,17 @@
+# A user service. Copy to ~/.config/systemd/user/, adjust ExecStart, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now cairnward
+# To keep it running after you log out: loginctl enable-linger $USER
+[Unit]
+Description=Cairnward privacy gateway
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/cairnward serve
+Restart=on-failure
+RestartSec=5
+# It holds an owner-only data folder; the sandbox it starts needs user namespaces, so this
+# service doesn't add its own NoNewPrivileges or namespace limits.
+UMask=0077
+
+[Install]
+WantedBy=default.target

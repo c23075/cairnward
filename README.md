@@ -25,8 +25,9 @@ tamper-evident log, and runs tools in a sandbox whose only network route goes th
   its own. Changed MCP tools are detected and disabled.
 - **Reviewable agent runs.** `cairnward run` snapshots the project before and after, so you can
   diff or undo what an agent did, and set limits on requests, tokens and time.
-- **Literature research.** Ask questions of a folder of PDFs and get answers cited to the page,
-  or run a review as an overnight batch job, with APA or IEEE references and checked quotations.
+- **Plugins under a contract.** A plugin runs sandboxed with no network of its own, and asks
+  Cairnward for models and outside requests. [Literature research](docs/plugins.md) is one: answers
+  cited to the page from a folder of PDFs, and reviews as overnight batch jobs.
 - **Built for CPU-only machines.** Scheduling, context limits and waiting-time estimates come
   from benchmarks on a desktop with no GPU.
 
@@ -126,19 +127,7 @@ uv run --project ~/cairnward cairnward run --profile aider --env coding -- aider
 uv run cairnward runs diff <run-id>
 ```
 
-Ask questions of a folder of PDFs:
-
-```bash
-uv run cairnward library create thesis ~/papers --env litreview-offline
-```
-
-```bash
-uv run cairnward library index thesis
-```
-
-```bash
-uv run cairnward library ask thesis "How far did the glacier retreat?"
-```
+For questions over a folder of PDFs, add the [research plugin](docs/plugins.md).
 
 See what happened, and check that the log is intact:
 
@@ -157,23 +146,20 @@ Client setup guides: [Open WebUI](docs/clients/open-webui.md), [Jan](docs/client
 
 ## Status
 
-Measured for real on the reference machine (AMD Ryzen 3 3200G, 29 GB RAM, no GPU), through the
-isolated server, on [synthetic test papers](docs/bench/):
+Measured for real on the [reference machine](docs/bench/) (AMD Ryzen 3 3200G, 29 GB RAM, no GPU),
+through the isolated server. Research results are in the plugin's repository:
 
 | Check | Result |
 |---|---|
-| Page-cited answers (`lit.ask`) | 8/8, nothing invented, on both engines, about 4 to 6 minutes per question |
 | Fixing a failing test with Aider | Passed 3 of 3, in about 3 to 7 minutes |
-| Literature review pipeline | 12/12 through the isolated server, about 23 minutes for 4 papers. An earlier isolated run scored 9/12 when screening excluded a borderline paper; excluding now takes two tries that agree, which lowers that risk without removing it |
 | Gateway overhead | 7 ms with protections off (meets target); 105 ms under Strict with isolation (misses the 50 ms target) |
 | Core memory and start | 122 MB (meets target); starts in about 2.8 s with isolation on empty data (target 3 s) |
 | First token, model loaded | 11 to 14 s fast model, 22 s main model (meets targets) |
 
-**Not yet tried against the real thing,** only against stand-ins: academic APIs, Zotero, Drive
-mirror, remote backups, hosted providers, a real remote MCP server or OAuth provider, and the
-chat apps' manual checklist. Everything above used short synthetic papers, not real ones.
+**Not yet tried against the real thing,** only against stand-ins: remote backups, hosted providers, a real remote MCP server or OAuth provider, and the
+chat apps' manual checklist.
 
-**Known gaps:** locking a research library doesn't cover its source PDFs, the release workflow has never run, and no
+**Known gaps:** the release workflow has never run, and no
 one but the assistant that wrote the code has reviewed its security. It's meant for Linux. On
 Windows it runs [inside WSL2](docs/wsl2.md), which hasn't been tried on a real machine yet; CI
 also runs the unit tests on Windows.

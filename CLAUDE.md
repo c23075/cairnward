@@ -1,8 +1,9 @@
 # Cairnward: notes for Claude sessions
 
 A local privacy gateway (model gateway, egress proxy, policy engine, audit log, transcript
-vault, MCP proxy, research/literature-review workflows) for one person's machine.
-Python 3.12+, uv, Apache-2.0. Design: `docs/spec.md` (decisions D1–D74), ADRs in
+vault, MCP proxy, plugin contract) for one person's machine. Research workflows are a plugin in
+another repository (`cairnward-research`, ADR-0017).
+Python 3.12+, uv, Apache-2.0. Design: `docs/spec.md` (decisions D1–D75), ADRs in
 `docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. The current
 state and next steps are in the newest `docs/plan/handoff-*.md`; requirement status is in
 `docs/plan/requirements-status.md`, so a new handoff doesn't copy it. `docs/status.md` is the
@@ -29,8 +30,8 @@ uv run cairnward config schema   # after changing anything in config/models.py (
   warnings, dashboard highlight) and audited.
 - Secrets never go in config files (use `${env:NAME}` or `env:`/`keyring:` refs), the audit
   log, or reports. Audit records hold digests of prompts/queries, not text.
-- Third-party downloads are hash-pinned (uv.lock, `research/engines/locks/`,
-  `research/csl/MANIFEST.json`, `tests/e2e/package-lock.json`).
+- Third-party downloads are hash-pinned (uv.lock, `redaction_engines/locks/`,
+  `tests/e2e/package-lock.json`).
 - Docs are plain and specific: say what was tested for real and what only against a
   stand-in. Update `docs/spec.md` (and the ADR, if a decision changes) with the code.
 - Commit only when asked; never put model identifiers in commits or docs.
