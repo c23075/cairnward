@@ -215,7 +215,28 @@ With `serve` running, `auto` backs up every 24 hours. Purging a conversation als
 uv run cairnward backup restore --at 2026-11-01
 ```
 
-## 9. Check everything on your machine
+## 9. The same chats on another device (optional)
+Use any folder both devices can reach: a Syncthing folder, a NAS mount or a synced drive. Cairnward only reads and writes files there, and everything it writes is encrypted. On the first device:
+
+```bash
+uv run cairnward replicate init /path/to/shared/folder
+```
+
+This shows a sync key, once. Keep it like a password: it opens the folder. **Every conversation on the device is published at the next sync**, so list any environment that should stay put in `[replication] exclude_environments` first. On the other device, when the folder has arrived:
+
+```bash
+uv run cairnward replicate join /path/to/shared/folder
+```
+
+Back on the first device, approve it (`status` lists devices), then restart `serve` on both to start syncing every 5 minutes. `cairnward replicate sync` does it right away.
+
+```bash
+uv run cairnward replicate approve <id>
+```
+
+If both devices reply in the same conversation before syncing, both replies are kept, as a fork. Purging a conversation purges it everywhere, once each device has synced. Turn off version history for this folder in Syncthing or your cloud drive, or old files outlive purges and locks. Research libraries and settings aren't shared. If you lose a device, `replicate block <id>` stops its changes being accepted, but it can still read the folder with the key it holds: to shut it out, run `replicate leave` then `init` on a new folder, and `join` from the others.
+
+## 10. Check everything on your machine
 With `cairnward serve` running and your models pulled, one command runs the doctor, the lit.ask eval (and PaperQA2 next to it when installed), the coding eval with each installed agent, and summarises what your chat clients did:
 ```bash
 uv run cairnward check

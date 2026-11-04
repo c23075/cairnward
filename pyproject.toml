@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.8",
     "pypdfium2>=4.30",
     "pyrage>=1.2",
+    "cryptography>=44",
     "pyyaml>=6",
     "sqlalchemy>=2.0",
     "sqlite-vec>=0.1.6",

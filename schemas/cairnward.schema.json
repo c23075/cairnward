@@ -557,6 +557,61 @@
       "title": "RedactionConfig",
       "type": "object"
     },
+    "ReplicationConfig": {
+      "additionalProperties": false,
+      "description": "The same chats and artifacts on several devices, through a shared folder (FR-SYNC-4).",
+      "properties": {
+        "exclude_environments": {
+          "default": [],
+          "description": "conversations in these environments stay on this device",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Environments",
+          "type": "array"
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "a folder every device can reach: Syncthing, a NAS mount or a synced drive (contents are encrypted). Set by `cairnward replicate init` or `join`",
+          "title": "Folder"
+        },
+        "include_artifacts": {
+          "default": true,
+          "description": "also share conversations' artifacts",
+          "title": "Include Artifacts",
+          "type": "boolean"
+        },
+        "interval_minutes": {
+          "default": 5,
+          "description": "auto mode: how often",
+          "maximum": 1440,
+          "minimum": 1,
+          "title": "Interval Minutes",
+          "type": "integer"
+        },
+        "mode": {
+          "default": "none",
+          "description": "none: off; on_demand: `cairnward replicate sync`; auto: also by serve",
+          "enum": [
+            "none",
+            "on_demand",
+            "auto"
+          ],
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "ReplicationConfig",
+      "type": "object"
+    },
     "ResearchConfig": {
       "additionalProperties": false,
       "description": "Research workflows (spec \u00a74.6).",
@@ -754,6 +809,16 @@
           "NRP"
         ],
         "presidio_min_score": 0.6
+      }
+    },
+    "replication": {
+      "$ref": "#/$defs/ReplicationConfig",
+      "default": {
+        "exclude_environments": [],
+        "folder": null,
+        "include_artifacts": true,
+        "interval_minutes": 5,
+        "mode": "none"
       }
     },
     "research": {

@@ -90,7 +90,7 @@ class ArtifactStore:
         return self.root / scope / owner
 
     def _git(self, repo: Path, *args: str, input_bytes: bytes | None = None,
-             check: bool = True) -> bytes:  # fmt: skip
+             check: bool = True, extra_env: dict[str, str] | None = None) -> bytes:  # fmt: skip
         git = shutil.which("git")
         if git is None:
             raise ArtifactError("git is not installed (needed for artifacts)")
@@ -98,7 +98,7 @@ class ArtifactStore:
                "GIT_AUTHOR_NAME": "cairnward", "GIT_AUTHOR_EMAIL": "cairnward@localhost",
                "GIT_COMMITTER_NAME": "cairnward", "GIT_COMMITTER_EMAIL": "cairnward@localhost",
                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-               "GIT_TERMINAL_PROMPT": "0"}  # fmt: skip
+               "GIT_TERMINAL_PROMPT": "0", **(extra_env or {})}  # fmt: skip
         res = subprocess.run([git, *args], cwd=repo, env=env, input=input_bytes,
                              capture_output=True, check=False)  # fmt: skip
         if check and res.returncode != 0:
@@ -262,6 +262,104 @@ class ArtifactStore:
                     elif (d / ".git").exists():
                         out.append((scope, d.name, len(self.files(scope, d.name))))
         return out
+
+    # ------------------------------------------------------------------ replication
+
+    def head(self, owner: str) -> str | None:
+        """The conversation repository's latest commit, if it has one and isn't sealed."""
+        repo = self.repo("conversation", owner)
+        if not (repo / ".git").exists():
+            return None
+        return (
+            self._git(repo, "rev-parse", "--verify", "-q", "HEAD", check=False).decode().strip()
+            or None
+        )
+
+    def bundle(self, owner: str) -> bytes:
+        """The conversation repository's whole history, as one file."""
+        repo = self.repo("conversation", owner)
+        with tempfile.TemporaryDirectory(prefix="cw-art-", dir=_private_tmp()) as tmp:
+            target = Path(tmp) / "history.bundle"
+            self._git(repo, "bundle", "create", "--quiet", str(target), "main")
+            return target.read_bytes()
+
+    def merge_in(self, owner: str, source: Path) -> str:
+        """Bring another device's history (a bundle or a repository) into this one; returns
+        the new head. Two devices merging the same two histories make the same commit."""
+        self._create_parents("conversation")
+        with self._working("conversation", owner, write=True) as repo:
+            self._ensure(repo)
+            self._git(repo, "-c", "transfer.fsckObjects=true", "fetch", "--quiet", str(source),
+                      "+main:refs/sync/incoming")  # fmt: skip
+            theirs = self._git(repo, "rev-parse", "refs/sync/incoming").decode().strip()
+            their_files = self._tree(repo, theirs)  # refuses what a write could be tricked by
+            ours = self._git(repo, "rev-parse", "--verify", "-q", "HEAD",
+                             check=False).decode().strip()  # fmt: skip
+            base = ""
+            if ours:
+                base = self._git(repo, "merge-base", ours, theirs, check=False).decode().strip()
+            if ours and base == theirs:
+                return ours
+            if not ours or base == ours:
+                self._git(repo, "update-ref", "refs/heads/main", theirs)
+                self._git(repo, "reset", "--quiet", "--hard", "main")
+                return theirs
+            merged = self._merge_commit(repo, ours, theirs, base, their_files)
+            self._git(repo, "update-ref", "refs/heads/main", merged)
+            self._git(repo, "reset", "--quiet", "--hard", "main")
+            return merged
+
+    def _tree(self, repo: Path, rev: str) -> dict[str, tuple[str, str]]:
+        """{path: (mode, blob)}. Only ordinary files with ordinary paths: a symlink in history
+        from another device could make a later write land outside the repository."""
+        out = self._git(repo, "ls-tree", "-r", "-z", rev).decode()
+        files = {}
+        for line in filter(None, out.split("\0")):
+            info, path = line.split("\t", 1)
+            mode, _kind, blob = info.split(" ")
+            if mode not in ("100644", "100755"):
+                raise ArtifactError("history from another device holds something other than files")
+            clean_path(path)
+            files[path] = (mode, blob)
+        return files
+
+    def _merge_commit(self, repo: Path, ours: str, theirs: str, base: str,
+                      their_files: dict[str, tuple[str, str]]) -> str:  # fmt: skip
+        """Three-way, file by file. Both sides changed a file: one copy stays at its path (the
+        side with the greater commit id, so every device picks the same), and the other is
+        kept next to it. The commit's date and parents don't depend on who merges."""
+        low, high = sorted((ours, theirs))
+        a, b = self._tree(repo, low), their_files if high == theirs else self._tree(repo, high)
+        if low == theirs:
+            a = their_files
+        old = self._tree(repo, base) if base else {}
+        merged: dict[str, tuple[str, str]] = {}
+        for path in sorted({*a, *b}):
+            mine, other, was = a.get(path), b.get(path), old.get(path)
+            if other == mine or mine == was:
+                chosen = other
+            elif other == was:
+                chosen = mine
+            else:
+                chosen = other or mine
+                if other is not None and mine is not None:
+                    merged[f"{path}.from-{low[:10]}"] = mine
+            if chosen is not None:
+                merged[path] = chosen
+        date = max(
+            int(self._git(repo, "log", "-1", "--format=%ct", r).decode()) for r in (low, high)
+        )
+        stamp = f"{date} +0000"
+        with tempfile.TemporaryDirectory(prefix="cw-art-", dir=_private_tmp()) as tmp:
+            index = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
+            lines = "".join(f"{m} {blob}\t{p}\n" for p, (m, blob) in sorted(merged.items()))
+            self._git(repo, "update-index", "--add", "--index-info", input_bytes=lines.encode(),
+                      extra_env=index)  # fmt: skip
+            tree = self._git(repo, "write-tree", extra_env=index).decode().strip()
+        return self._git(repo, "commit-tree", tree, "-p", low, "-p", high, "-m",
+                         "merge from another device",
+                         extra_env={"GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp}
+                         ).decode().strip()  # fmt: skip
 
     def purge(self, scope: Scope, owner: str) -> bool:
         repo = self.repo(scope, owner)

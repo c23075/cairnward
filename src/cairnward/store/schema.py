@@ -1,7 +1,7 @@
 """Table definitions for the two databases (SQLAlchemy Core).
 
-vault.db  conversations, messages, folders. Content and titles are encrypted per
-          conversation (age) unless crypto-shredding is switched off.
+vault.db  conversations, messages, folders, replication progress. Content and titles are
+          encrypted per conversation (age) unless crypto-shredding is switched off.
 research.db  literature libraries: documents, page-aware chunks, keyword (FTS5) and
              vector (sqlite-vec) indexes. Vector tables are created per library because
              their dimension depends on the embedding model.
@@ -80,8 +80,38 @@ messages = Table(
     Column("content_digest", String(64), nullable=False),  # sha256 of the plaintext body
     Column("enc", String(8), nullable=False),
     Column("body", LargeBinary, nullable=False),  # JSON message, encrypted when enc = "age"
+    # replication (FR-SYNC-4): where the message sorts; NULL until it's in this device's log
+    Column("lamport", Integer),
+    Column("origin", String(32)),
     Index("ix_messages_conversation_seq", "conversation_id", "seq"),
     Index("ix_messages_prefix_hash", "prefix_hash"),
+    Index("ix_messages_lamport", "lamport"),
+)
+
+# Replication (FR-SYNC-4). The clock; what has been published or applied, field by field
+# (kind: folder, conv, key, tomb, art); and how far each device's files have been read.
+sync_state = Table(
+    "sync_state",
+    VAULT_METADATA,
+    Column("name", String(32), primary_key=True),
+    Column("value", Text, nullable=False),
+)
+
+sync_items = Table(
+    "sync_items",
+    VAULT_METADATA,
+    Column("kind", String(8), primary_key=True),
+    Column("id", String(36), primary_key=True),
+    Column("state", Text, nullable=False),  # JSON: {field: [lamport, origin, value digest]}
+)
+
+sync_files = Table(
+    "sync_files",
+    VAULT_METADATA,
+    Column("device", String(32), primary_key=True),
+    Column("path", String(64), primary_key=True),
+    Column("offset", Integer, nullable=False),  # logs: bytes read. Others: the file's size
+    Column("records", Integer, nullable=False),  # logs: records read. Others: its mtime (ns)
 )
 
 conversation_keys = Table(

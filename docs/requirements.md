@@ -140,7 +140,7 @@ All security requirements below describe what each protection does **when it is 
 |---|---|---|---|---|
 | FR-SYNC-1 | Modes none/on_demand/auto for every job | M | M3 | `test_backup.py` |
 | FR-SYNC-3 | restic backups of vault, artifacts, research library; retention; restore to date | M | M3 | local restic repo |
-| FR-SYNC-4 | Replication via per-device event logs + git; deterministic merge; fork on concurrent turns | S | M3 | Hypothesis convergence |
+| FR-SYNC-4 | Replication via per-device event logs + git history for artifacts, through a shared folder; deterministic merge; fork on concurrent turns | S | M3 | Hypothesis convergence (`test_replication.py`) |
 | FR-SYNC-6 | Locked items only written encrypted; cloud warning; "encrypt this sync target" | M | M3 | `test_backup.py` (backups encrypted, cloud warning) |
 | FR-SYNC-8 | Purge rewrites restic snapshots and prunes; pending state shown; retries | M | M3 | `test_backup.py` (content absent from all snapshots) |
 | FR-SYNC-2 | Drive mirror (read-only) via rclone with preview | S | M3 | rclone local backend |
