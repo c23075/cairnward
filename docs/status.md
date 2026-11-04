@@ -24,7 +24,6 @@ for use, so all their real-world checks below apply.
 ## In progress
 | Item | State |
 |---|---|
-| Full check on `main` (`cairnward check --review`) | Running since 2026-11-04, about 2 hours |
 | WSL2 support | Committed on the `wsl2` branch, not pushed or merged |
 
 ## Decisions and actions for the owner
@@ -53,6 +52,7 @@ for use, so all their real-world checks below apply.
 | I6 | A research library is plain while unlocked, its source PDFs are never encrypted, and it has no timed unlock (T-24) | Accepted |
 | I7 | Run snapshots can't be locked, and locking doesn't erase earlier plaintext from disks or old backups | Accepted |
 | I8 | Presidio's small spaCy model misses some names, so redaction isn't complete | Accepted |
+| I20 | PaperQA2 can say a source "explicitly states" something it doesn't. The checker only catches this inside quotation marks ([reruns](bench/results-2026-11-04-paperqa-reruns.md)) | Open |
 
 ### Functionality
 | # | Issue | State |
@@ -62,6 +62,8 @@ for use, so all their real-world checks below apply.
 | I11 | `keyring:` references usually fail under WSL. Use `env:` | Accepted: documented |
 | I12 | Only the built-in APA and IEEE citation styles work until pandoc or citeproc-js is installed | Your choice |
 | I13 | Audit anchoring is off, so there's no outside proof of the audit log | Your choice |
+| I21 | PaperQA2's refusals in other words aren't recognised as refusals, so `cannot_answer` is wrong | Open |
+| I22 | The check fails a correct "Six" on q5 because it looks for "6", so `cairnward check` can report a false failure | Open |
 
 ### Performance
 | # | Issue | State |
@@ -73,13 +75,15 @@ for use, so all their real-world checks below apply.
 | # | Issue | State |
 |---|---|---|
 | I16 | One slow fast-model run in the first-token measurements | Unexplained |
-| I17 | Question q5's failure in the first eval | Unexplained |
+| I17 | Question q5's failure in the first eval. I22 could be the cause, but those answers weren't kept | Unexplained |
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
 
 ## Testing still to do
 ### Could reveal real bugs
-- [ ] Full check on `main` (running)
+- [x] Full check on `main`, 2026-11-04: overall fail (report on the `dev` branch). Lean passed 8 of
+      8, PaperQA2 6 of 8 (I20 to I22), and the coding and review evals passed. Chat clients were
+      skipped because none has made a model call yet
 - [ ] Real papers: accuracy, and how many relevant papers screening loses
 - [ ] Research workflows on a real model, then on real papers
 - [ ] Aider's full task with the home folder hidden
@@ -136,3 +140,4 @@ Read from the code. Connections to real outside services haven't been tried yet.
 - **PR 16:** default backup folder, and a choice of folder and permissions (merged)
 - **PR 15:** research workflows (merged)
 - First backup taken on the desktop
+- Full check run on `main`, and PaperQA2's two failures rerun
