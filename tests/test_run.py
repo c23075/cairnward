@@ -14,7 +14,9 @@ from cairnward.egress import Session, Sessions
 from cairnward.egress.control import LocalEgress, control_app
 from cairnward.gateway.clients import RunKeys
 from cairnward.run import PROFILES, RunError, plan_run
-from cairnward.sandbox import SandboxSpec, srt_hosts, wrap
+from cairnward.run.runner import _install_dirs, program_reads
+from cairnward.sandbox import SandboxSpec, secret_dirs, srt_hosts, wrap
+from cairnward.sandbox.srt import srt_dirs
 
 
 @pytest.fixture
@@ -52,6 +54,24 @@ def plan(
         settings_file=tmp_path / "srt.json",
         tmp_dir=tmp_path,
     )
+
+
+def test_run_refuses_a_model_from_another_environment(paths: Paths) -> None:
+    from cairnward.run import run_agent
+    from cairnward.run.runner import check_model_environment
+
+    (paths.config_dir / "environments").mkdir(parents=True)
+    (paths.config_dir / "environments" / "other.toml").write_text("")
+    cfg = cfg_with(paths, 'isolation = "off"')
+    with pytest.raises(RunError, match="in environment 'other' but this run is in 'e'"):
+        run_agent(cfg, command=["no-such-program"], environment="e", model="cw/other:high")
+    with pytest.raises(RunError, match="in environment 'other'"):
+        check_model_environment(cfg, "e", "cw/other")
+    # these reach the gateway in the run's environment, or get its own 404
+    for fine in ("cw/e:high", "cw/e", "cw/raw/qwen3:30b", "cw/nowhere:high", "not-virtual"):
+        check_model_environment(cfg, "e", fine)
+    with pytest.raises(RunError, match="command not found"):
+        run_agent(cfg, command=["no-such-program"], environment="e", model="cw/e:high")
 
 
 def test_sandboxed_plan(paths: Paths, tmp_path: Path) -> None:
@@ -230,3 +250,155 @@ def test_sandbox_debug_switch(
 ) -> None:
     monkeypatch.setenv("CAIRNWARD_SANDBOX_DEBUG", "1")
     assert plan(paths, 'preset = "strict"', tmp_path, srt=["srt"]).env["SRT_DEBUG"] == "1"
+
+
+# ------------------------------------------------------------------ what a run can read
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CAIRNWARD_CACHE_DIR", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    return home
+
+
+def plan_in(paths: Paths, privacy: str, tmp_path: Path, workspace: Path, command: list[str]) -> Any:
+    run_tmp = tmp_path / "run"  # beside the fake home, as the real one is
+    run_tmp.mkdir(exist_ok=True)
+    return plan_run(cfg_with(paths, privacy), environment="e", profile=PROFILES["aider"],
+                    model="cw/e:medium", workspace=workspace, command=command, run=RUN,
+                    srt=["srt"], settings_file=run_tmp / "srt.json",
+                    tmp_dir=run_tmp)  # fmt: skip
+
+
+def test_run_hides_the_home_folder(paths: Paths, tmp_path: Path, home: Path) -> None:
+    ws = home / "projects" / "ws"
+    ws.mkdir(parents=True)
+    (home / ".gitconfig").write_text("[user]\n")
+    (home / ".aider.conf.yml").write_text("")
+    (home / ".env").write_text("KEY=1\n")
+    (home / ".config" / "rclone").mkdir(parents=True)
+    (home / ".cache" / "cairnward" / "paperqa").mkdir(parents=True)
+    p = plan_in(paths, 'preset = "strict"', tmp_path, ws, ["sh"])
+    assert home in p.spec.deny_read
+    allowed = p.spec.allow_read
+    assert ws in allowed and tmp_path / "run" in allowed and home / ".aider" in allowed
+    assert home / ".gitconfig" in allowed and home / ".aider.conf.yml" in allowed
+    assert home not in allowed and home / ".env" not in allowed
+    assert home / ".config" / "rclone" in p.spec.deny_read
+    # the profile may write ~/.cache, but not PaperQA2's index and pickle cache in it
+    assert home / ".cache" / "cairnward" / "paperqa" in p.spec.deny_read
+    assert paths.data_dir / "sandbox-runtime" in allowed
+    assert not any("home_access" in w for w in p.warnings)
+
+
+def test_run_home_opt_out_warns(paths: Paths, tmp_path: Path, home: Path) -> None:
+    ws = home / "ws"
+    ws.mkdir()
+    p = plan_in(paths, 'preset = "strict"\nhome_access = "readable"', tmp_path, ws, ["sh"])
+    assert home not in p.spec.deny_read and home / ".ssh" in secret_dirs()
+    assert any("home_access = readable" in w for w in p.warnings)
+    eff = cfg_with(paths, 'preset = "strict"\nhome_access = "readable"').privacy("e")
+    assert "home_access" in eff.weaker_than_strict  # shown by privacy show and the dashboard
+    assert cfg_with(paths, 'preset = "balanced"').privacy("e").value("home_access") == "hidden"
+
+
+@pytest.mark.parametrize("above", [False, True])
+def test_workspace_holding_the_home_folder_says_so(
+    paths: Paths, tmp_path: Path, home: Path, above: bool
+) -> None:
+    (home / ".ssh").mkdir()
+    p = plan_in(paths, 'preset = "strict"', tmp_path, home.parent if above else home, ["sh"])
+    assert home not in p.spec.deny_read  # a re-allowed workspace would undo it anyway
+    assert home / ".ssh" in p.spec.deny_read
+    assert any("contains your home folder" in w for w in p.warnings)
+
+
+def test_srt_package_stays_readable(tmp_path: Path, paths: Paths) -> None:
+    pkg = tmp_path / "pkg"
+    (pkg / "dist").mkdir(parents=True)
+    (pkg / "dist" / "cli.js").write_text("")
+    assert srt_dirs(paths, ["node", str(pkg / "dist" / "cli.js")]) == [
+        paths.data_dir / "sandbox-runtime", pkg.resolve()]  # fmt: skip
+    assert srt_dirs(paths, ["srt-not-on-path"]) == [paths.data_dir / "sandbox-runtime"]
+
+
+def executable(path: Path, text: str = "#!/bin/sh\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    path.chmod(0o755)
+    return path
+
+
+def test_program_reads_follow_links_and_interpreters(tmp_path: Path, home: Path) -> None:
+    ws = tmp_path / "ws"
+    # as `uv tool install` lays it out: link -> tool's script -> tool's python -> a runtime
+    runtime = executable(home / "rt" / "cpython" / "bin" / "python3")
+    (home / "rt" / "cpython" / "lib").mkdir()
+    tool = home / "tools" / "aider"
+    (tool / "bin").mkdir(parents=True)
+    (tool / "pyvenv.cfg").write_text("")
+    (tool / "bin" / "python").symlink_to(runtime)
+    script = executable(tool / "bin" / "aider", f"#!{tool}/bin/python\n")
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".local" / "bin" / "aider").symlink_to(script)
+    bin_dir = str(home / ".local" / "bin")
+    reads = program_reads(["aider"], bin_dir, workspace=ws, home=home)
+    assert {tool, home / "rt" / "cpython", home / ".local" / "bin"} <= set(reads)
+    # `#!/usr/bin/env -S node --flag` is looked up on PATH
+    node = executable(home / "fnm" / "v22" / "bin" / "node")
+    (home / "fnm" / "v22" / "lib").mkdir()
+    qwen = executable(home / "npm" / "qwen", "#!/usr/bin/env -S node --flag\n")
+    reads = program_reads([str(qwen)], str(node.parent), workspace=ws, home=home)
+    assert home / "fnm" / "v22" in reads and home / "npm" in reads
+
+
+def test_program_reads_stay_narrow(tmp_path: Path, home: Path) -> None:
+    ws = tmp_path / "ws"
+    in_home = executable(home / "agent")
+    assert program_reads([str(in_home)], "", workspace=ws, home=home) == [in_home]
+    # ~/bin, ~/.local and a prefix that's no install: never the folder around them
+    assert _install_dirs(home / "bin" / "x", home) == [home / "bin"]
+    local = _install_dirs(home / ".local" / "bin" / "x", home)
+    assert local == [home / ".local" / "bin", home / ".local" / "lib", home / ".local" / "lib64"]
+    (home / ".cargo" / "bin").mkdir(parents=True)
+    assert _install_dirs(home / ".cargo" / "bin" / "x", home) == [home / ".cargo" / "bin"]
+    # PATH holding the home folder itself doesn't open it, nor does a file argument
+    assert program_reads(["sh"], str(home), workspace=ws, home=home) == []
+    (home / "private").mkdir()
+    (home / "private" / "notes.md").write_text("")
+    notes = str(home / "private" / "notes.md")
+    assert program_reads(["/bin/true", notes], "", workspace=ws, home=home) == []
+    # an interpreter's script does need its folder (and only the file when it's in home)
+    assert home / "private" in program_reads(["/bin/python3", notes], "", workspace=ws, home=home)
+    # the active venv
+    venv = home / "work" / ".venv"
+    reads = program_reads(["/bin/true"], "", workspace=ws, home=home, virtual_env=str(venv))
+    assert reads == [venv]
+    assert program_reads(["/bin/true"], "", workspace=ws, home=home, virtual_env=str(home)) == []
+
+
+def test_re_allowed_paths_are_only_the_outermost(paths: Paths, tmp_path: Path, home: Path) -> None:
+    runtime = home / ".local/share/uv/python/cpython-3.12.16/bin"
+    runtime.mkdir(parents=True)
+    executable(runtime / "python3")
+    link = home / ".local/share/uv/python/cpython-3.12"
+    link.symlink_to("cpython-3.12.16")
+    prog = executable(home / "tool" / "agent", f"#!{link}/bin/python3\n")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    allowed = plan_in(paths, 'preset = "strict"', tmp_path, ws, [str(prog)]).spec.allow_read
+    assert home / ".local/share/uv/python" in allowed and home / "tool" in allowed
+    assert link not in allowed  # bwrap refuses a mount on a link inside a re-allowed folder
+
+
+def test_secret_list_covers_what_runs_could_read(home: Path) -> None:
+    secrets = secret_dirs()
+    for name in (".config/rclone", ".bash_history", ".zsh_history", ".pypirc", ".npmrc",
+                 ".cargo/credentials", ".cargo/credentials.toml", ".thunderbird",
+                 ".config/BraveSoftware", ".librewolf", ".config/Code", ".config/Signal",
+                 ".var/app", ".ssh", ".config/git/credentials"):  # fmt: skip
+        assert home / name in secrets, name

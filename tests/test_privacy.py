@@ -82,6 +82,7 @@ def test_everything_off_is_possible() -> None:
     every = {
         "isolation": "off",
         "network": "open",
+        "home_access": "readable",
         "hosted_backends": "allow",
         "training_backends": "allow",
         "approvals": "off",
