@@ -188,6 +188,7 @@ locking doesn't erase earlier plaintext from disks or old backups. Read the
 
 ## Documentation
 
+- [Project status](docs/status.md): where things stand, open issues and what's left to test
 - [Getting started](docs/getting-started.md): the full setup guide
 - [Specification](docs/spec.md): the design and its decisions
 - [Requirements](docs/requirements.md) and [architecture decisions](docs/adr/)
