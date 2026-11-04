@@ -68,8 +68,10 @@ def set_key(path: Path, table: str, key: str, value: str | int | None) -> None:
 
 
 def change_backup(cfg: Config, mode: str, repository: str | None,
-                  interval_hours: int | None = None) -> tuple[Config, list[str]]:  # fmt: skip
-    """Set the backup mode and folder; returns the new configuration and what changed.
+                  interval_hours: int | None = None,
+                  access: str | None = None) -> tuple[Config, list[str]]:  # fmt: skip
+    """Set the backup mode, folder and who can read it; returns the new configuration and what
+    changed. With no folder, backups go to the default one.
     Only a folder can be set here: a remote repository names a bucket and may need
     credentials, so it stays a change made in the file, and an existing one is left alone."""
     from cairnward import backup
@@ -84,13 +86,15 @@ def change_backup(cfg: Config, mode: str, repository: str | None,
                         "repository is set in cairnward.toml)")  # fmt: skip
     if remote and repository is None:
         repository = b.repository
-    if mode != "none" and not repository:
-        raise EditError(f"{mode} needs a folder to back up to")
+    if access not in (None, "owner", "group"):
+        raise EditError("access must be owner or group")
     path = cfg.paths.main_config
     before = path.read_text(encoding="utf-8") if path.exists() else None
     wanted: dict[str, str | int | None] = {"mode": mode, "repository": repository}
     if interval_hours is not None:
         wanted["interval_hours"] = interval_hours
+    if access is not None:
+        wanted["access"] = access
 
     def undo() -> None:
         if before is None:

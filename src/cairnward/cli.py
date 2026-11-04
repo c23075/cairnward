@@ -116,6 +116,13 @@ def build_parser() -> argparse.ArgumentParser:
     doc.add_argument("--json", action="store_true", help="machine-readable output")
     bk = sub.add_parser("backup", help="encrypted backups with restic (vault, library, artifacts)")
     bk_sub = bk.add_subparsers(dest="backup_command", metavar="ACTION", required=True)
+    bk_use = bk_sub.add_parser("use", help="turn backups on: choose the folder and who can read it")
+    bk_use.add_argument("folder", nargs="?",
+                        help="full path (default: current, or ~/cairnward-backups)")  # fmt: skip
+    bk_use.add_argument("--mode", choices=["auto", "on_demand"], default="auto",
+                        help="auto (default): every 24 hours while the server runs")  # fmt: skip
+    bk_use.add_argument("--access", choices=["owner", "group"],
+                        help="who can read the folder (default: only you)")  # fmt: skip
     bk_sub.add_parser("init", help="create the repository set in [backup] repository")
     bk_sub.add_parser("run", help="back up now (and remove purged conversations from old backups)")
     bk_sub.add_parser("list", help="the snapshots")
@@ -1507,6 +1514,28 @@ def _backup_action(cfg: Config, args: argparse.Namespace, action: str) -> int:
 
     from cairnward import backup
 
+    if action == "use":
+        from cairnward.config.edit import EditError, change_backup
+
+        wanted = args.folder and str(Path(args.folder).expanduser().absolute())
+        try:
+            cfg, changed = change_backup(cfg, args.mode, wanted or cfg.main.backup.repository,
+                                         access=args.access)  # fmt: skip
+        except EditError as exc:
+            print(f"cairnward: {exc}", file=sys.stderr)
+            return 1
+        backup._audit(cfg, "backup.settings", changed=changed, mode=args.mode)
+        who = "you and your group" if cfg.main.backup.access == "group" else "only you"
+        print(f"Backups: {args.mode}, to {backup.repository(cfg)}, readable by {who}.")
+        if warning := backup.same_disk_warning(cfg):
+            print(f"note: {warning}.")
+        if not backup.restic():
+            print("restic isn't installed (e.g. sudo apt install restic). Then: cairnward backup "
+                  "init")  # fmt: skip
+            return 0
+        action = "init"
+        if changed:
+            print("Restart cairnward serve for automatic backups to start.")
     if action == "init":
         password = backup.init(cfg)
         if password:

@@ -164,7 +164,12 @@ class BackupConfig(_Strict):
     repository: str | None = Field(
         default=None,
         description="a folder for the restic repository: a second disk, NAS mount or synced "
-        "folder (contents are encrypted by restic)",
+        "folder (contents are encrypted by restic). Default: ~/cairnward-backups",
+    )
+    access: Literal["owner", "group"] = Field(
+        default="owner",
+        description="who can read a folder repository: only you, or also your group (for example "
+        "to let another account copy it). Contents stay encrypted either way",
     )
     interval_hours: int = Field(default=24, ge=1, le=24 * 30, description="auto mode: how often")
     keep_daily: int = Field(default=7, ge=0, le=3650)

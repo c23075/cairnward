@@ -104,7 +104,7 @@ async def backup_loop(cfg: Config, log: Log) -> None:
     from cairnward import backup
 
     b = cfg.main.backup
-    if b.mode == "none" or not b.repository:
+    if b.mode == "none":
         return
     await asyncio.sleep(60)  # let startup settle
     while True:

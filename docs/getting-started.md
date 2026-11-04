@@ -199,18 +199,14 @@ uv run cairnward backend template openrouter-free
 Keys come from environment variables (e.g. `export OPENROUTER_API_KEY=...`), never from config files. Hosted backends are still refused until an environment allows them (`hosted_backends = "ask"` or `"allow"`), never get locked conversations, and free tiers that may train on your prompts only answer in environments marked `scratch = true`.
 
 ## 8. Back up
-Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. Add to `cairnward.toml`, with a folder on another disk:
-```toml
-[backup]
-mode = "auto"            # or "on_demand"
-repository = "/media/backup/cairnward"
+Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. They hold your chats, artifacts, research library, job results, audit log and settings. To turn them on:
+```bash
+uv run cairnward backup use /media/backup/cairnward
 ```
+With no folder they go to `~/cairnward-backups`, but that's on the same disk as your data, so it protects against mistakes and not a failed disk. `--mode on_demand` backs up only when asked. By default only you can read the folder; `--access group` also lets your group read it (for example so another account can copy it). The contents stay encrypted either way. The same settings are in `[backup]` in `cairnward.toml` and in the dashboard's Backups view, and `include_research`, `include_artifacts` and `include_config` choose what's included.
 A remote repository works too (`s3:`, `rest:`, `b2:`, `azure:`, `gs:`, `swift:` or `rclone:`, e.g. `repository = "s3:s3.eu-central-1.amazonaws.com/my-bucket/cairnward"`, with the provider's keys in restic's usual environment variables). Its traffic goes through Cairnward's egress, so `serve` must be running and the backup environment (`[backup] environment`, default the default one) must allow the host, e.g. by adding it to `network_allow_hosts`.
 
-Then create the repository (keep the password it shows somewhere safe) and take the first backup:
-```bash
-uv run cairnward backup init
-```
+That also creates the repository, and shows its password once: keep a copy somewhere else. Then take the first backup:
 ```bash
 uv run cairnward backup run
 ```
