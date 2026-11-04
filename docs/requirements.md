@@ -159,7 +159,7 @@ FR-RES-1 to FR-RES-13 moved to the `literature-review-agent-plugin` repository w
 
 | ID | Requirement | Pri | Verification |
 |---|---|---|---|
-| NFR-P2 | Gateway adds ≤ 50 ms per request excluding model time (Strict); ≤ 10 ms with all protections off | M | `scripts/bench_gateway.py`, `test_bench_gateway.py`; Strict 105 ms isolated, 59 ms not (misses), all off 7 ms (meets) |
+| NFR-P2 | Gateway adds ≤ 75 ms, or ≤ 150 ms with isolation per request excluding model time (Strict); ≤ 10 ms with all protections off. Raised from 50 ms on 2026-11-05 by owner decision: the cost is audit writes waiting for the disk and the sandbox's route to the model, and a model call takes minutes on the reference machine | M | `scripts/bench_gateway.py`, `test_bench_gateway.py`; Strict 105 ms isolated, 59 ms not (meets), all off 7 ms (meets) |
 | NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | `bench_backend.py --cache-test` through the gateway: 19.6× |
 | NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | `bench_backend.py` through the gateway: 11 to 14 s fast, 22 s main |
 | NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | `docs/bench/results-2026-11-03-measurements.md`: 122 MB meets; start about 2.8 s isolated on empty data, not yet tried on a large data folder |

@@ -38,7 +38,7 @@ from cairnward.store import Vault
 
 # Target from requirements.md for each mode, in milliseconds.
 MODES: dict[str, tuple[str, float]] = {
-    "strict": ('preset = "strict"\n', 50.0),
+    "strict": ('preset = "strict"\n', 75.0),
     "all-off": (
         'preset = "open"\nisolation = "off"\nnetwork = "open"\napprovals = "off"\n'
         'redaction = "off"\nvault = "off"\naudit = "off"\naudit_anchor = "off"\n'

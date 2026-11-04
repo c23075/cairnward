@@ -405,7 +405,7 @@ Full list in [requirements.md](requirements.md).
 
 | Area | Target |
 |---|---|
-| Gateway overhead | ≤ 50 ms added per model request (policy, audit, vault write), excluding model time |
+| Gateway overhead | ≤ 75 ms, or ≤ 150 ms with isolation, added per model request under Strict (policy, audit, vault write), excluding model time |
 | Model speed (measured, reference machine) | Baseline, not a target Cairnward controls: main model ~20 tok/s reading, 2–11 tok/s writing; fast model ~50 / 6.5–17 tok/s |
 | Cache reuse | Follow-up turn in an unchanged conversation: ≥ 10× faster first token than a cold turn (measured 18.6×); the gateway must never break this |
 | Responsiveness | Fast-model virtual models start answering a 512-token prompt in ≤ 15 s (measured 10 s); main model ≤ 30 s (measured 21 s) |

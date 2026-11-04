@@ -9,6 +9,8 @@
   for models, outside requests, saved output and keys. See [docs/plugins.md](docs/plugins.md).
 - **Prompt injection:** research prompts now say a paper's text isn't instructions, and an injection
   corpus runs on the real model. One planted instruction still gets through sometimes.
+- **Strict overhead target** raised from 50 ms to 75 ms, or 150 ms with isolation. Nothing got
+  faster: the target was changed by decision, and the numbers are the same.
 - **Backups** hold plugins' data under `plugins/<name>/`, without installed engines.
   `include_research` is now `include_plugins`.
 - **WSL2 support** (not yet run on real WSL2), and a warning for backends on the network that use

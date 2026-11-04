@@ -1,5 +1,5 @@
 """The gateway overhead benchmark runs, on real sockets (NFR-P2). This guards against large
-regressions only: the 50 ms and 10 ms targets depend on the disk and CPU, and shared CI
+regressions only: the 75 ms and 10 ms targets depend on the disk and CPU, and shared CI
 machines vary, so they're checked by running the script on the reference machine
 (docs/bench/results-2026-11-03-gateway-overhead.md)."""
 

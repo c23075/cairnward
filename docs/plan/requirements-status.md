@@ -134,7 +134,7 @@ Research requirements (FR-RES-*) are tracked in the `literature-review-agent-plu
 ### Non-functional
 | ID | Status | Notes |
 |---|---|---|
-| NFR-P2 gateway overhead ≤ 50 ms | ◐ | `scripts/bench_gateway.py`: **Strict 105 ms isolated, 59 ms not: misses**; all off 7 ms, meets. Proposed: change the target (owner decision) |
+| NFR-P2 gateway overhead ≤ 75 ms, ≤ 150 ms isolated | ✅ | `scripts/bench_gateway.py`: Strict 105 ms isolated, 59 ms not; all off 7 ms. Target raised from 50 ms by owner decision, 2026-11-05 |
 | NFR-P3 cache reuse ≥ 10× | ✅ | measured through the gateway: 19.6× |
 | NFR-P5 core ≤ 500 MB, starts ≤ 3 s | ◐ | measured: 122 MB meets; start about 2.8 s isolated on empty data, down from about 3.6 s by the same script; **a large data folder not tried** |
 | NFR-P6 first token within 15 s / 30 s | ✅ | measured through the gateway, model loaded: 11 to 14 s fast, 22 s main; loading the main model first adds about 70 s |
