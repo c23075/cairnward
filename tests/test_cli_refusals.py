@@ -218,6 +218,7 @@ def test_no_repository_means_the_default_folder(
     paths: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # what Windows reads instead
     assert backup.repository(load_config(paths)) == tmp_path / "cairnward-backups"
 
 
