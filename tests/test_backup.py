@@ -170,15 +170,21 @@ def test_locked_items_can_still_be_opened_after_a_restore(cfg_paths: Paths, tmp_
     with Vault.open(cfg_paths) as v:
         v.create_conversation(environment="coding", client="aider", title="Any")
         key = v.lock_item("library:thesis", secret)
-    locks = cfg_paths.data_dir / "library-locks"
-    locks.mkdir()
+    code = tmp_path / "plugin-code"
+    code.mkdir()
+    (cfg_paths.config_dir / "mcp.toml").write_text(
+        '[servers.research]\nkind = "plugin"\ncommand = ["x"]\nunsandboxed = true\n'
+        "[servers.research.permissions]\nread = []\n"
+    )
+    cfg = load_config(cfg_paths)
+    locks = cfg_paths.data_dir / "mcp" / "research" / "library-locks"
+    locks.mkdir(parents=True)
     (locks / "thesis.age").write_bytes(crypto.seal(key, b"the-sealed-index"))
-    (cfg_paths.data_dir / "research.db").touch()
     backup.init(cfg, log=lambda m: None)
     backup.run(cfg, log=lambda m: None)
     _snap, export = backup.restore(cfg, tmp_path / "restored")
     assert "library:thesis" in (export / "locked-items" / "keys.json").read_text()
-    sealed = (export / "research" / "library-locks" / "thesis.age").read_bytes()
+    sealed = (export / "plugins" / "research" / "library-locks" / "thesis.age").read_bytes()
     assert b"the-sealed-index" not in sealed
 
     fresh = replace(cfg_paths, data_dir=tmp_path / "new-data", state_dir=tmp_path / "new-state")

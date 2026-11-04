@@ -195,7 +195,8 @@ def test_fetch_passes_bytes_and_redirects_back(services: Any) -> None:
 
 def test_fetch_sets_the_host_header_itself(services: Any) -> None:
     services.client.post("/v1/cairnward/fetch", json={
-        "url": "https://api.example.org/", "headers": {"Host": "other.example", "X-A": "1"}})  # fmt: skip
+        "url": "https://api.example.org/",
+        "headers": {"Host": "other.example", "X-A": "1"}})  # fmt: skip
     assert services.sent[0].headers["host"] == "api.example.org"
     assert services.sent[0].headers["x-a"] == "1"
 

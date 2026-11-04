@@ -19,8 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 NEEDED_IN_WHEEL = (
     "cairnward/dashboard/static/index.html",
-    "cairnward/research/csl/MANIFEST.json",
-    "cairnward/research/engines/paperqa-requirements.txt",
+    "cairnward/redaction_engines/locks/presidio.txt",
 )
 NEVER_IN_SBOM = {"pytest", "ruff", "mypy"}  # dev tools mean the wrong dependency group
 

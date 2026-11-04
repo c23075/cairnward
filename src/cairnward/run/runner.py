@@ -248,8 +248,6 @@ def plan_run(
             warnings.append(
                 "network = ask: answer requests for new hosts with `cairnward approvals`"
             )
-        from cairnward.research.engines.paperqa import cache_dir
-
         if on_windows_drive(workspace):
             warnings.append(
                 "the workspace is on a Windows drive: Windows programs can change it, file "
@@ -257,8 +255,10 @@ def plan_run(
             )
         p = cfg.paths
         writable = _ensure_dirs(home_dirs(profile))
-        # PaperQA2's index holds library text and a pickle: profiles may write ~/.cache
-        deny = [*secret_dirs(), p.config_dir, p.data_dir, p.state_dir, cache_dir(),
+        # PaperQA2's index from before ADR-0017 holds library text and a pickle, and profiles may
+        # write ~/.cache. The plugin keeps a new one in its data folder.
+        old_index = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "cairnward"
+        deny = [*secret_dirs(), p.config_dir, p.data_dir, p.state_dir, old_index / "paperqa",
                 *_sync_folders(cfg, workspace)]  # fmt: skip
         # srt's own helpers may live in a hidden folder and must stay readable.
         reads = srt_dirs(p, srt)

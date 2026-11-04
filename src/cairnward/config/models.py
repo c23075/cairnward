@@ -174,6 +174,14 @@ class ReplicationConfig(_Strict):
 
 
 class BackupConfig(_Strict):
+    @model_validator(mode="before")
+    @classmethod
+    def _renamed(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "include_research" in value:
+            value = dict(value)
+            value["include_plugins"] = value.pop("include_research")
+        return value
+
     """Encrypted backups with restic (spec §4.8, FR-SYNC-1/3/8)."""
 
     mode: Literal["none", "on_demand", "auto"] = Field(
@@ -204,7 +212,9 @@ class BackupConfig(_Strict):
         description="whose network policy a remote repository's traffic follows "
         "(default: [defaults] environment)",
     )
-    include_research: bool = Field(default=True, description="research.db (indexed libraries)")
+    include_plugins: bool = Field(
+        default=True, description="plugins' data folders, without their installed engines"
+    )
     include_artifacts: bool = True
     include_config: bool = Field(default=True, description="the config folder (no secrets)")
 
@@ -220,24 +230,16 @@ class TelemetryConfig(_Strict):
     interval_s: int = Field(default=30, ge=5, le=3600)
 
 
-class ResearchConfig(_Strict):
-    """Research workflows (spec §4.6)."""
-
-    grobid_url: str | None = Field(
-        default=None,
-        description="your GROBID service on this machine, e.g. "
-        "http://127.0.0.1:8070 (libraries with --metadata grobid)",
-    )
-
-    citation_engine: Literal["auto", "builtin", "citeproc-js", "pandoc"] = Field(
-        default="auto",
-        description="reference formatting: auto = citeproc-js if installed, else pandoc, "
-        "else the built-in APA/IEEE formatter",
-    )
-
-
 class MainConfig(_Strict):
     """cairnward.toml"""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _research_moved(cls, value: Any) -> Any:
+        """ADR-0017: these settings are in the plugin's research.toml now."""
+        if isinstance(value, dict) and "research" in value:
+            value = {k: v for k, v in value.items() if k != "research"}
+        return value
 
     schema_version: Literal[1] = SCHEMA_VERSION
     server: ServerConfig = ServerConfig()
@@ -246,7 +248,6 @@ class MainConfig(_Strict):
     defaults: Defaults = Defaults()
     redaction: RedactionConfig = RedactionConfig()
     anchor: AnchorConfig = AnchorConfig()
-    research: ResearchConfig = ResearchConfig()
     backup: BackupConfig = BackupConfig()
     replication: ReplicationConfig = ReplicationConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
@@ -521,6 +522,14 @@ class RunBudget(_Strict):
 
 
 class EnvironmentConfig(_Strict):
+    @model_validator(mode="before")
+    @classmethod
+    def _sources_moved(cls, value: Any) -> Any:
+        """ADR-0017: online sources are set in the plugin's research.toml now."""
+        if isinstance(value, dict) and "research_sources" in value:
+            value = {k: v for k, v in value.items() if k != "research_sources"}
+        return value
+
     """environments/<name>.toml (the file name is the environment's name)"""
 
     schema_version: Literal[1] = SCHEMA_VERSION
@@ -539,13 +548,6 @@ class EnvironmentConfig(_Strict):
         default=False,
         description="throwaway work: backends that may train on prompts are allowed here "
         "(training_backends = scratch_only)",
-    )
-    research_sources: list[
-        Literal["openalex", "semantic-scholar", "arxiv", "crossref", "pubmed"]
-    ] = Field(
-        default_factory=list,
-        description="online academic sources this environment may "
-        "search (opt-in; each request is still checked against its network setting)",
     )
     citation_style: str = "apa"
     vault_retention_days: int | None = Field(default=None, ge=1)
@@ -782,7 +784,6 @@ def builtin_environments() -> dict[str, EnvironmentConfig]:
             tools=["rag", "pdf", "zotero", "scholar"],
             skills=["lit-review", "citation-check", "references"],
             effort_default="high",
-            research_sources=["openalex", "semantic-scholar", "arxiv", "crossref", "pubmed"],
             privacy=PrivacyOverrides(
                 network="ask",
                 network_allow_hosts=[

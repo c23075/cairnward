@@ -226,18 +226,8 @@ class PolicyEngine:
             server = self.config.mcp.servers.get(server_name)
             env = self.config.environments.get(action.environment or "")
             if server_name == "cairnward" and env is not None:  # Cairnward's own tools
-                research_tools = ("lit_search", "lit_ask", "lit_review_start")
-                needed = "research" if tool in research_tools else None
-                if tool.startswith("artifact_"):
-                    needed = "artifacts"
-                if needed and needed in env.tools:
+                if tool.startswith("artifact_") and "artifacts" in env.tools:
                     return Rule("allow", "low", f"Cairnward's {tool} (read-only, local)")
-                if (
-                    tool == "lit_find"
-                    and env.research_sources
-                    and ({"research", "scholar"} & set(env.tools))
-                ):  # each host it contacts is checked again as net.connect
-                    return Rule("allow", "low", "Cairnward's lit_find (online sources on here)")
                 return Rule("deny", "high", f"Cairnward's {tool} isn't enabled here")
             if server is None or env is None or server_name not in env.mcp_servers:
                 return Rule("deny", "high", f"MCP server '{server_name}' isn't enabled here")

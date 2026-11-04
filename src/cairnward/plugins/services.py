@@ -102,8 +102,15 @@ def _b64(value: str) -> bytes:
         raise HTTPException(400, "not valid base64") from None
 
 
+class ItemKeyIn(BaseModel):
+    op: str = Field(pattern=r"^(status|lock|open|remove|recover)$")
+    item: str = Field(max_length=200)
+    secret: str | None = Field(default=None, max_length=4000, repr=False)
+
+
 def plugin_router(cfg: Config, engine: PolicyEngine, backends: Any, sessions: PluginSessions,
-                  *, transport: httpx.AsyncBaseTransport | None = None) -> APIRouter:  # fmt: skip
+                  *, transport: httpx.AsyncBaseTransport | None = None,
+                  vault: Any = None) -> APIRouter:  # fmt: skip
     router = APIRouter(prefix="/v1/cairnward")
     store = ArtifactStore(cfg.paths.data_dir)
 
@@ -132,8 +139,10 @@ def plugin_router(cfg: Config, engine: PolicyEngine, backends: Any, sessions: Pl
             raise HTTPException(400, str(exc)[:300]) from None
         if resolved.environment != s.environment:
             raise HTTPException(403, f"this plugin is in '{s.environment}'")
+        sub = cfg.effort[resolved.effort].subagents
         return {"context_tokens": resolved.options.context_tokens,
-                "thinking": bool(resolved.options.thinking)}  # fmt: skip
+                "thinking": bool(resolved.options.thinking), "subagent_limit": sub.max,
+                "subagent_parallel": sub.max_parallel}  # fmt: skip
 
     @router.post("/fetch")
     async def fetch(body: FetchIn, request: Request) -> dict[str, Any]:
@@ -226,6 +235,45 @@ def plugin_router(cfg: Config, engine: PolicyEngine, backends: Any, sessions: Pl
             raise HTTPException(502, error)
         return {"status": status, "headers": reply_headers, "warning": verdict.warning,
                 "body_b64": base64.b64encode(data).decode()}  # fmt: skip
+
+    @router.post("/item-keys")
+    def item_keys(body: ItemKeyIn, request: Request) -> dict[str, Any]:
+        """A plugin's item key, stored wrapped with the conversations' keys so the recovery key
+        covers it. Opening one takes the passphrase. Names are kept apart per plugin, except
+        `library:` keys, which research libraries locked before the split already use."""
+        from cairnward.store.crypto import DecryptionError
+        from cairnward.store.vault import LockedError, VaultError
+
+        s = session_of(request)
+        if vault is None:
+            raise HTTPException(503, "no vault in this process")
+        item = f"plugin:{s.name}:{body.item}"
+        if body.item.startswith("library:") and vault.is_locked(body.item):
+            item = body.item
+        try:
+            if body.op == "status":
+                return {"locked": vault.is_locked(item)}
+            if body.op == "remove":
+                vault.remove_item(item)
+                outcome: dict[str, Any] = {"ok": True}
+            elif body.op == "recover":
+                identity, _, secret = (body.secret or "").partition("\n")
+                vault.recover(item, identity, secret)
+                outcome = {"ok": True}
+            else:
+                fn = vault.lock_item if body.op == "lock" else vault.open_item
+                key = fn(item, body.secret or "")
+                outcome = {"key_b64": base64.b64encode(key).decode()}
+        except (VaultError, LockedError, DecryptionError) as exc:
+            if engine.audit:
+                engine.audit.append("plugin.item_key", actor=f"plugin:{s.name}", target=item,
+                                    environment=s.environment, outcome="error",
+                                    details={"op": body.op})  # fmt: skip
+            raise HTTPException(400, str(exc)) from None
+        if engine.audit:
+            engine.audit.append("plugin.item_key", actor=f"plugin:{s.name}", target=item,
+                                environment=s.environment, details={"op": body.op})  # fmt: skip
+        return outcome
 
     def artifact_call(fn: Any, *args: Any) -> Any:
         try:

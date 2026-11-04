@@ -62,7 +62,6 @@
     },
     "BackupConfig": {
       "additionalProperties": false,
-      "description": "Encrypted backups with restic (spec \u00a74.8, FR-SYNC-1/3/8).",
       "properties": {
         "access": {
           "default": "owner",
@@ -98,10 +97,10 @@
           "title": "Include Config",
           "type": "boolean"
         },
-        "include_research": {
+        "include_plugins": {
           "default": true,
-          "description": "research.db (indexed libraries)",
-          "title": "Include Research",
+          "description": "plugins' data folders, without their installed engines",
+          "title": "Include Plugins",
           "type": "boolean"
         },
         "interval_hours": {
@@ -628,39 +627,6 @@
       "title": "ReplicationConfig",
       "type": "object"
     },
-    "ResearchConfig": {
-      "additionalProperties": false,
-      "description": "Research workflows (spec \u00a74.6).",
-      "properties": {
-        "citation_engine": {
-          "default": "auto",
-          "description": "reference formatting: auto = citeproc-js if installed, else pandoc, else the built-in APA/IEEE formatter",
-          "enum": [
-            "auto",
-            "builtin",
-            "citeproc-js",
-            "pandoc"
-          ],
-          "title": "Citation Engine",
-          "type": "string"
-        },
-        "grobid_url": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "your GROBID service on this machine, e.g. http://127.0.0.1:8070 (libraries with --metadata grobid)",
-          "title": "Grobid Url"
-        }
-      },
-      "title": "ResearchConfig",
-      "type": "object"
-    },
     "ServerConfig": {
       "additionalProperties": false,
       "properties": {
@@ -767,7 +733,7 @@
         "environment": null,
         "include_artifacts": true,
         "include_config": true,
-        "include_research": true,
+        "include_plugins": true,
         "interval_hours": 24,
         "keep_daily": 7,
         "keep_monthly": 12,
@@ -836,13 +802,6 @@
         "include_artifacts": true,
         "interval_minutes": 5,
         "mode": "none"
-      }
-    },
-    "research": {
-      "$ref": "#/$defs/ResearchConfig",
-      "default": {
-        "citation_engine": "auto",
-        "grobid_url": null
       }
     },
     "schema_version": {

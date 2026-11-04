@@ -22,7 +22,6 @@ SEEN_HOSTS: list[str] = []
 
 
 class Origin(BaseHTTPRequestHandler):
-
     def log_message(self, *a: Any) -> None:
         pass
 

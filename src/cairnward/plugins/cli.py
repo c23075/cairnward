@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -185,6 +186,54 @@ def run(cfg: Config, name: str, environment: str | None, command: list[str]) -> 
     finally:
         mgmt.post(f"/v1/plugins/session/{session['run_id']}/end")
         mgmt.close()
+
+
+def allow_read(cfg: Config, name: str, folder: Path) -> int:
+    """A folder you named for this plugin (a library's, say). A running server sees it after a
+    restart; `cairnward plugin run` sees it at once."""
+    server = _plugin(cfg, name)
+    target = str(folder.expanduser().resolve())
+    reads = list(server.permissions.read or [])
+    if target in reads:
+        return 0
+    path = cfg.paths.mcp_config
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    start = next((i for i, x in enumerate(lines) if x.strip() == f"[servers.{name}.permissions]"),
+                 None)  # fmt: skip
+    if start is None:
+        print(f"no [servers.{name}.permissions] in {path}", file=sys.stderr)
+        return 2
+    for i in range(start + 1, len(lines)):
+        if lines[i].lstrip().startswith("read"):
+            lines[i] = f"read = {_toml([*reads, target])}\n"
+            break
+        if lines[i].lstrip().startswith("["):
+            print(f"no read list under [servers.{name}.permissions]", file=sys.stderr)
+            return 2
+    path.write_text("".join(lines), encoding="utf-8")
+    print(f"{name} may now read {target}")
+    return 0
+
+
+def helper(cfg: Config, name: str, environment: str, command: list[str]) -> int:
+    """A program that can't use the fetch service (rclone), run outside the sandbox with its
+    traffic through egress in `environment`, whose network policy applies."""
+    from cairnward.run.runner import RunError, egress_session
+
+    _plugin(cfg, name)
+    if not command:
+        print("give a command after --", file=sys.stderr)
+        return 2
+    try:
+        with egress_session(cfg, environment, f"plugin-{name}") as proxy:
+            env = {**os.environ, "HTTP_PROXY": proxy, "HTTPS_PROXY": proxy}
+            for key in ("NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy", "http_proxy",
+                        "https_proxy"):  # fmt: skip
+                env.pop(key, None)
+            return subprocess.run(command, env=env, check=False).returncode  # noqa: S603
+    except RunError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
 
 
 def list_plugins(cfg: Config, as_json: bool) -> int:

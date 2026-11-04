@@ -6,7 +6,7 @@ in a staging folder (`<state>/backup/staging`):
     conversations/<id>/conversation.json   the conversation row and its messages, exactly as
                                            stored (ciphertext when encrypted)
     conversations/<id>/key.json            its key (wrapped when the conversation is locked)
-    vault/folders.json, research/research.db, audit/, artifacts/, jobs/, mcp_pins.json,
+    vault/folders.json, plugins/<name>/, audit/, artifacts/, jobs/, mcp_pins.json,
     config/, MANIFEST.json
 
 so that purging one conversation can remove it from **every** old snapshot: `restic
@@ -282,6 +282,22 @@ def _ro(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
 
 
+def _copy_plugin(source: Path, dest: Path) -> None:
+    """A plugin's own data: databases copied safely, and without what can be installed again."""
+    for path in sorted(source.rglob("*")):
+        rel = path.relative_to(source)
+        if not path.is_file() or path.is_symlink() or rel.parts[0] in ("engines", "home", "tmp"):
+            continue
+        if path.name.endswith(("-wal", "-shm", ".lock")):
+            continue
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix == ".db":
+            _copy_db(path, target)
+        else:
+            shutil.copy2(path, target)
+
+
 def _copy_db(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     with contextlib.closing(_ro(src)) as s, contextlib.closing(sqlite3.connect(dst)) as d:
@@ -334,10 +350,10 @@ def stage(cfg: Config, dest: Path) -> dict[str, Any]:
                     (dest / "locked-items").mkdir()
                     (dest / "locked-items" / "keys.json").write_text(json.dumps(items),
                                                                      encoding="utf-8")  # fmt: skip
-    if b.include_research and (data / "research.db").exists():
-        _copy_db(data / "research.db", dest / "research" / "research.db")
-        if (data / "library-locks").is_dir():
-            shutil.copytree(data / "library-locks", dest / "research" / "library-locks")
+    if b.include_plugins and (data / "mcp").is_dir():
+        for name, server in cfg.mcp.servers.items():
+            if server.kind == "plugin" and (data / "mcp" / name).is_dir():
+                _copy_plugin(data / "mcp" / name, dest / "plugins" / name)
     if (data / "audit.db").exists():
         _copy_db(data / "audit.db", dest / "audit" / "audit.db")
     if (data / "audit.jsonl").exists():

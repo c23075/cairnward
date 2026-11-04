@@ -63,7 +63,6 @@ def test_change_rules(paths: Paths) -> None:
     new, _ = change_privacy(cfg, "litreview-online", "network", "off")
     env_file = paths.environments_dir / "litreview-online.toml"
     assert env_file.exists() and new.environments["litreview-online"].tools == builtin_tools
-    assert new.environments["litreview-online"].research_sources
     assert new.privacy("litreview-online").settings["network"].value == "off"
     # a change that would make the configuration invalid isn't written
     (paths.environments_dir / "bad.toml").write_text('[privacy]\nnetwork = "off"\n')

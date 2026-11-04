@@ -196,8 +196,8 @@ async def _tools(cfg: Config, name: str, environment: str, extra_env: dict[str, 
     # which itself needs the plugin to start.
     changed = [s.name for s in states if s.status == "changed"]
     flagged = [s.name for s in states if s.flags]
-    out.append(Result("its tool definitions match the pins", not changed,
-                      f"review with `cairnward mcp approve {name}`: {', '.join(changed)}"))  # fmt: skip
+    hint = f"review with `cairnward mcp approve {name}`: {', '.join(changed)}"
+    out.append(Result("its tool definitions match the pins", not changed, hint))
     out.append(Result("no suspicious text in its tools", not flagged, ", ".join(flagged)))
     return out
 

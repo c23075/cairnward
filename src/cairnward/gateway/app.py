@@ -171,7 +171,8 @@ def create_app(deps: GatewayDeps) -> FastAPI:
     if deps.plugins is not None:
         from cairnward.plugins.services import plugin_router
 
-        app.include_router(plugin_router(cfg, deps.engine, deps.backends, deps.plugins))
+        app.include_router(plugin_router(cfg, deps.engine, deps.backends, deps.plugins,
+                                         vault=deps.vault))  # fmt: skip
 
     @app.middleware("http")
     async def loopback_host_only(
