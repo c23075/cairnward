@@ -247,7 +247,7 @@ def _core_parts(
 
         return await run_ask(cfg, engine, backends, library, question, scheduler=scheduler, **kw)
 
-    def chat_for(library: str, effort: str | None = None) -> Any:
+    def chat_for(library: str, effort: str | None = None, actor: str | None = None) -> Any:
         """The library's environment's model, at its default effort unless given."""
         from cairnward.research import Research
         from cairnward.research.llm import InProcessChat
@@ -255,7 +255,8 @@ def _core_parts(
         with Research.open(cfg.paths) as research:
             env = research.get(library).environment
         return InProcessChat(cfg, engine, backends, environment=env, scheduler=scheduler,
-                             effort=effort, purpose="review")  # fmt: skip
+                             effort=effort, actor=actor or "cairnward",
+                             purpose="workflow" if actor else "review")  # fmt: skip
 
     async def index_library(library: str, files: list[str] | None, actor: str) -> dict[str, Any]:
         from cairnward.research import InProcessEmbedder, Research
