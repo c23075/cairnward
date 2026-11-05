@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,10 @@ from cairnward.gateway.clients import RunKeys
 from cairnward.run import PROFILES, RunError, plan_run, run_agent
 from cairnward.sandbox import openshell
 
+# Isolated runs are Linux-only here (Windows uses WSL), the management API is a Unix socket, and
+# OpenShell itself runs on Linux, macOS and WSL.
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="OpenShell runs need Linux (or WSL)")
+
 FAKE = Path(__file__).parent / "fakes" / "openshell_cli.py"
 RUN = {"run_id": "r1234567890abcdef", "gateway_key": "cw-run-k", "egress_token": "tok",
        "gateway_port": 8484, "egress_port": 8486}  # fmt: skip
@@ -40,7 +45,7 @@ def paths() -> Iterator[Paths]:
     # short: the management socket lives in state_dir (Unix socket paths max out at 107 bytes)
     root = Path(tempfile.mkdtemp(prefix="cwos-"))
     yield Paths(root / "c", root / "d", root / "s")
-    __import__("shutil").rmtree(root, ignore_errors=True)
+    shutil.rmtree(root, ignore_errors=True)
 
 
 def configure(paths: Paths, extra: str = "") -> Any:
@@ -254,7 +259,9 @@ def test_run_in_openshell_copies_work_back_and_cleans_up(
     assert not (fake_cli / "sandboxes").exists() or not any((fake_cli / "sandboxes").iterdir())
     start = next(r for r in server.records() if r.action == "run.start")
     end = next(r for r in server.records() if r.action == "run.end")
-    assert start.details["sandbox"] == "openshell" and end.details["changed_files"] == 4
+    assert start.details["sandbox"] == "openshell"
+    # snapshots need git: without it the run still works, but doesn't count changed files
+    assert end.details["changed_files"] == (4 if shutil.which("git") else None)
     assert any("2 written, 1 deleted" in line or "written" in line for line in lines)
 
 

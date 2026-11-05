@@ -93,7 +93,7 @@ def manifest(root: Path) -> dict[str, str]:
         base = Path(dirpath)
         for name in [*filenames, *(d for d in dirnames if (base / d).is_symlink())]:
             p = base / name
-            out[str(p.relative_to(root))] = "l" if p.is_symlink() else "f"
+            out[p.relative_to(root).as_posix()] = "l" if p.is_symlink() else "f"
     return out
 
 

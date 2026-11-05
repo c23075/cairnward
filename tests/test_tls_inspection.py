@@ -389,6 +389,7 @@ def test_plain_http_requests_follow_the_same_rules(
 
 
 @pytest.mark.skipif(shutil.which("curl") is None, reason="curl isn't installed")
+@pytest.mark.skipif(os.name == "nt", reason="Windows' curl uses schannel, which ignores CA bundles")
 def test_curl_through_inspection(
     start: Callable[..., Proxy], https_origin: tuple[int, Path]
 ) -> None:
