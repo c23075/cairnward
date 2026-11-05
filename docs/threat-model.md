@@ -1,6 +1,6 @@
 # Cairnward threat model
 
-Status: Draft v0.3, reviewed 2026-11-03 ([review](reviews/threat-model-2026-11-03.md); earlier versions in git history)
+Status: Draft v0.4, reviewed 2026-11-05 for TLS inspection and the OpenShell sandbox ([review](reviews/threat-model-2026-11-05.md); before that [2026-11-03](reviews/threat-model-2026-11-03.md); earlier versions in git history)
 Method: **STRIDE** (security) and **LINDDUN** (privacy) applied to the components and data flows in [spec §3](spec.md#3-architecture), with every control mapped to the **OWASP Top 10 for LLM Applications (2025)**. Each threat has an ID; controls point to spec sections and requirement IDs in [requirements.md](requirements.md).
 
 Review this document whenever a component, data flow or trust boundary changes, and at least once per milestone. Record each review in [`reviews/`](reviews/). A control marked *planned* doesn't exist yet.
@@ -32,6 +32,8 @@ Review this document whenever a component, data flow or trust boundary changes, 
 | B5 | Core ↔ network (egress proxy) | Core | Internet hosts, hosted model backends, sync targets |
 | B6 | Core ↔ local disk | Core while running | Anyone with later access to the disk or a backup |
 | B7 | Core ↔ third-party clients and agents | Core | Chat clients and coding agents (Open WebUI, Jan, Qwen Code, opencode, Aider, Goose, ...): their code, updates and own network behaviour |
+| B8 | Core ↔ OpenShell, with `sandbox = "openshell"` (D77) | Core; OpenShell's gateway and supervisor, trusted to enforce the sandbox | The agent inside the sandbox, and the image it runs in |
+| B9 | Egress ↔ tools, with TLS inspection on (D78) | Egress, holding the local CA's key | Tools in the run, which trust that CA for every site |
 
 The model is **not** a trusted component: anything it decides passes through the policy engine (B2). Since v0.6, third-party clients and agents are **not trusted** either (B7): they run in OS-enforced sandboxes and only reach the network through `cairnward-egress`.
 
@@ -55,7 +57,7 @@ The model is **not** a trusted component: anything it decides passes through the
 | T-14 | Elevation of privilege | Injected content triggers user-only actions (encrypt everything, add sync target, enable hosted backend) | Confirmation dialog **in Cairnward's own UI** (not the client) showing provenance, with untrusted content since the last user message highlighted; passphrases only typed there. Residual: a user may approve without reading (accepted, mitigated by risk tiers keeping these prompts rare) | §5.3 | FR-POL-4 |
 | T-15 | Elevation of privilege | Malicious model file runs code on load | GGUF/safetensors only; checksums; downloads via egress and audited | §5.6 | FR-SUP-2 |
 | T-16 | Elevation of privilege | Compromised dependency or release | Hash-locked deps; pip-audit; licence allow-list; pinned CI actions. Release workflow with SBOM and signing is built but has never run on GitHub | §5.6 | NFR-SUP-1 |
-| T-17 | Info disclosure | Third-party tool sends sensitive content over HTTPS to an allowed host; Cairnward can't see content to redact | Network off by default; per-host approval; egress report with bytes per host; optional TLS interception (off). Accepted limitation | §3.2 | FR-NET-1, FR-EGR-1 |
+| T-17 | Info disclosure | Third-party tool sends sensitive content over HTTPS to an allowed host; Cairnward can't see content to redact | Network off by default; per-host approval; egress report with bytes per host. With TLS inspection on (D78, off by default), egress also checks each request's method and path and refuses a request for another site (T-34). Residual: request bodies are passed on, not redacted, even when inspected; without inspection only the host is seen. Accepted limitation | §3.2 | FR-NET-1, FR-NET-2, FR-EGR-1 |
 | T-18 | Info disclosure | Conversation copies persist in a client's own database outside Cairnward's control (no lock, no purge) | Setup guides minimise client history; vault UI states it; clients run in containers whose data volumes the user controls | §4.4, §4.5 | FR-CLI-1 |
 | T-19 | Tampering / EoP | Sandbox misconfiguration silently gives a tool network or file access | `cairnward doctor` isolation self-tests at start and on demand; CI isolation suite | §3.2 | FR-ISO-5, NFR-S4 |
 | T-20 | Spoofing | Compromised or malicious client update (e.g. a chat app adds telemetry) | Client runs sandboxed with network only via egress; new hosts require approval and appear in the egress report | §3.2 | FR-ISO-4, FR-NET-1 |
@@ -72,13 +74,18 @@ The model is **not** a trusted component: anything it decides passes through the
 | T-31 | Tampering, denial of service | The new core services are abused: oversized answers, many requests, guessing a passphrase, a redirect to this machine | Size, rate and parallel limits; `Host` set from the URL; redirects returned, so each hop is checked; addresses checked by egress, or by fetch itself without egress; wrong passphrases limited per plugin. The fetch service passes bytes through without parsing them |
 | T-32 | Elevation of privilege | A compromised core asks the outer process to weaken a setting, since it can't write the configuration folder itself | The outer process only changes listed privacy and backup settings, and only if the whole configuration still loads. It can't touch allow-lists, backends or MCP servers. Changes apply on restart, and the settings diff is audited then, by a process the core doesn't control. Residual: the core can pass `confirm`, because the dashboard's own confirmation happens inside it | §5.0 | — |
 
+| T-33 | Spoofing, info disclosure | The local CA's private key is stolen or misused, and used to impersonate any site to tools that trust the CA | Off by default, per environment. The key is owner-only in the data folder. srt runs and OpenShell sandboxes can't read it. The CA is trusted only by runs in an inspecting environment, through variables, and never installed system-wide. Host certificates last 7 days and are kept in memory. `egress-ca rotate` is audited. Residual: with isolation off, the agent can read the key, as can any program running as the user. The CA has no name constraints. A host certificate's key passes briefly through a private temporary file | §3.2 | FR-NET-2 |
+| T-34 | Spoofing, elevation of privilege | Domain fronting: a tool opens a tunnel to an allowed host on a shared CDN, then names another site in `Host`, which the CDN serves. This gets around the host allow list and path rules | Inspected tunnels refuse a request whose `Host` or absolute URL names another site than the tunnel (since 2026-11-05). Residual: an uninspected tunnel can't be checked, because its `Host` is encrypted | §3.2 | FR-NET-1, FR-NET-2 |
+| T-35 | Info disclosure | With inspection on, egress holds requests in plaintext, and the audit gains one record per request | Plaintext is never written: the audit has method, status, byte counts and a digest of the path and query. Residual: a digest of a short, predictable path can be reversed by guessing | §3.2, §5.2 | FR-NET-2, FR-AUD-1 |
+| T-36 | Elevation of privilege, tampering | With `sandbox = "openshell"`, a flaw or misconfiguration in OpenShell lets the agent out of its sandbox. Or the image is malicious. Or copying the work back writes outside the workspace | The policy allows only Cairnward's two ports, and egress keeps applying the environment's rules. The run key never appears in a command line on the host. The copy back refuses any path through a symlinked folder and won't turn a folder into a link (tested). Residual: OpenShell is trusted to enforce the sandbox. It pulls the image itself, outside egress and the audit. Its gateway sends telemetry unless the owner turns it off. Copies of the workspace stay in its storage until the sandbox is deleted, which on a failed copy back is by hand. **Tested only against a stand-in CLI** | §3.2 | FR-ISO-1 |
+
 ## 4. LINDDUN privacy threats
 
 | ID | LINDDUN | Threat | Controls |
 |---|---|---|---|
 | P-01 | Linking | A plugin's queries to outside services from one IP build a profile of the user | Hosts are listed in the plugin's manifest and allowed per environment; every fetch is audited. The research plugin's sources are in its `docs/threat-model.md` |
 | P-02 | Identifying | Synced chat titles/metadata reveal identity or topics on a cloud target | "Encrypt this sync target" offer; restic backups always encrypted; ☁ badge |
-| P-03 | Non-repudiation | The audit log is a detailed activity record that could be used against the user | Content-free audit records (digests); retention setting; not synced unless chosen; user can export/redact |
+| P-03 | Non-repudiation | The audit log is a detailed activity record that could be used against the user | Content-free audit records (digests); retention setting; not synced unless chosen; user can export/redact. TLS inspection adds a record per request (T-35) |
 | P-04 | Detecting | Cloud providers can infer activity from sync timing/size | On-demand mode; scheduled batching; padding not provided (documented limitation) |
 | P-05 | Data disclosure | More data than needed sent to hosted backends/tools | Minimal context assembly (retrieval rather than whole documents); redaction |
 | P-06 | Unawareness | User doesn't realise what left the machine | Per-chat egress report; network badge in status bar; first-time approval for each new host/target |
@@ -89,8 +96,8 @@ The model is **not** a trusted component: anything it decides passes through the
 | OWASP | Risk | Main Cairnward controls | Threats |
 |---|---|---|---|
 | LLM01 | Prompt Injection | Untrusted-content notes in approvals; policy engine outside the model; approvals; `user_initiated_only`. A plugin's output is treated as untrusted (ADR-0017, rule 6) | T-07, T-14 |
-| LLM02 | Sensitive Information Disclosure | Redaction; network off by default; hosted backends denied; egress report | T-07, T-08 |
-| LLM03 | Supply Chain | Pinned/hashed deps and MCP servers; licence allow-list; model format restrictions. Signed releases and SBOM: workflow built, never run on GitHub | T-04, T-15, T-16 |
+| LLM02 | Sensitive Information Disclosure | Redaction; network off by default; hosted backends denied; egress report; optional TLS inspection with method and path rules | T-07, T-08, T-17, T-34, T-35 |
+| LLM03 | Supply Chain | Pinned/hashed deps and MCP servers; licence allow-list; model format restrictions. Signed releases and SBOM: workflow built, never run on GitHub. An OpenShell image is chosen by the owner and pulled outside egress | T-04, T-15, T-16, T-36 |
 | LLM04 | Data and Model Poisoning | Models only from verified sources with checksums; RAG sources marked with provenance; synced data validated | T-05, T-15 |
 | LLM05 | Improper Output Handling | Model output never executed directly: diffs and commands go through approval + sandbox; artifact previews sandboxed. Open: reasoning reaching clients as the answer | T-11, T-12, T-26 |
 | LLM06 | Excessive Agency | Least-privilege tool grants per environment; approvals; user-only actions | T-14 |
@@ -105,7 +112,9 @@ The model is **not** a trusted component: anything it decides passes through the
 - Prompt injection can't be fully prevented by any known method; Cairnward limits its impact instead (approvals, network off, user-only actions).
 - Unlocked chats' search index is plaintext in SQLite; deleting it is best effort on SSDs.
 - A recovery key opens every locked conversation it covers; it's shown once and never stored, so keeping it safe is up to the user.
-- Content of third-party tools' own HTTPS traffic to allowed hosts can't be inspected (T-17).
+- Content of third-party tools' own HTTPS traffic to allowed hosts can't be inspected unless the environment turns on TLS inspection, and even then bodies aren't redacted (T-17).
+- With TLS inspection on, the local CA's key is as valuable as the sites it can impersonate to the run's tools (T-33).
+- With `sandbox = "openshell"`, OpenShell is trusted to enforce the sandbox, and has never been run with Cairnward for real (T-36).
 - Copies of conversations inside clients' own databases (T-18).
 - Records newer than the last audit anchor can be altered by someone with full control of the machine (T-03).
 - Traffic-analysis of sync timing/size by cloud providers (P-04).

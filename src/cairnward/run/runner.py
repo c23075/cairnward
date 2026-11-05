@@ -540,6 +540,8 @@ def run_agent(
                 "program": Path(command[0]).name,
                 "arg_count": len(command) - 1,
                 "sandbox": "openshell" if in_openshell else "srt" if srt else "none",
+                # plan_run gives the agent the CA bundle whenever this is on
+                "tls_trust": cfg.environments[env_name].tls_inspection.enabled,
                 **{k: v for k, v in (budget or {}).items() if v},
             },
         )
