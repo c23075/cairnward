@@ -1,6 +1,6 @@
 # Project status
 
-Last updated 2026-11-05, after CI first ran on the merged code. This is the owner's view of where Cairnward stands. Detail on each
+Last updated 2026-11-05, after the real runs that followed `main`'s CI going green. This is the owner's view of where Cairnward stands. Detail on each
 requirement is in [requirements-status.md](plan/requirements-status.md), and the
 [handoff](plan/) is working notes for agents.
 
@@ -8,7 +8,7 @@ requirement is in [requirements-status.md](plan/requirements-status.md), and the
 The planned code is built, and most of what remains is testing or needs you. **It isn't production
 ready yet:** the code and its tests are in good order, but the backup has never been restored, it
 has never run on real WSL2 or real papers, and nobody but the assistant that wrote it has reviewed
-it. CI on `main` is also failing, on tests and the coverage gate (I25). Those are below.
+it. Those are below.
 
 Research now lives in its own package, as a plugin ([ADR-0017](adr/0017-research-as-a-plugin.md)).
 Of the 104 requirements tracked (91 here and 13 in the research repository):
@@ -65,7 +65,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 ### Functionality
 | # | Issue | State |
 |---|---|---|
-| I9 | Restoring locked job, run and library files is by hand. Only conversations are imported automatically | Open |
+| I9 | Restoring locked job, run and library files was by hand | Fixed: `backup restore` brings them back, tested with real restic |
 | I10 | Scheduled backups and replication stop when WSL goes idle | Accepted: documented |
 | I11 | `keyring:` references usually fail under WSL. Use `env:` | Accepted: documented |
 | I12 | Only the built-in APA and IEEE citation styles work until pandoc or citeproc-js is installed | Your choice |
@@ -77,7 +77,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | # | Issue | State |
 |---|---|---|
 | I14 | Strict overhead missed its 50 ms target | Closed: target raised to 75 ms, or 150 ms with isolation. Measured 59 ms and 105 ms |
-| I15 | Start time is 2.8 s on empty data, against a 3 s target. A large data folder hasn't been tried | Untested |
+| I15 | Start time misses the 3 s target when isolated: about 3.5 s until `/health` answers on 2026-11-05 (3.3 to 3.8 on empty data, 3.1 to 3.8 with 3,000 conversations). Data size makes no difference. An earlier script read 2.8 s, and why this one reads higher wasn't looked into | Open: small miss, the owner decides |
 
 ### Unexplained or uncovered
 | # | Issue | State |
@@ -87,7 +87,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
 | I24 | The research repository's first Windows run found a Linux-only lock, a test checking POSIX file modes, and line endings breaking the citation files' hash check | Fixed in its PR 1, waiting on that PR's CI |
-| I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum | Fixed on the `fix-main-ci` branch, not yet run on GitHub. Windows may show more once those tests get past setup |
+| I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum | Fixed in PR 25: `main` passes CI, including Windows |
 
 ## Testing still to do
 ### Could reveal real bugs
@@ -97,23 +97,26 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 - [ ] Real papers: accuracy, and how many relevant papers screening loses
 - [x] Research evals on a real model through the plugin, 2026-11-05: answers, review and injection
       all ran, with the failures explained in the research repository's `docs/bench`
-- [ ] Research workflows on a real model, then on real papers
-- [ ] Aider's full task with the home folder hidden
+- [x] Research workflows on a real model, synthetic papers, 2026-11-05: ran, and found a bug in the plugin, now fixed (see its `docs/bench`)
+- [ ] Research workflows on real papers
+- [x] Aider's full task with the home folder hidden, 2026-11-05: passed 3 of 3 (228, 459 and 564 s). Aider's request to `raw.githubusercontent.com` was denied each run and did no harm
 - [ ] Qwen Code, opencode and Goose with the home folder hidden
 - [ ] WSL2 checklist on the laptop
 
 ### Never run for real
 - [ ] Replication between the desktop and laptop, through real Syncthing or a NAS, and on its
       schedule under an isolated server
-- [ ] Locking artifacts, jobs, runs and libraries through a live isolated server
+- [x] Locking a conversation and its artifacts from the dashboard on a live isolated server: found and fixed a bug (`tests/isolation/test_owner_flows.py`)
+- [x] Locking a library through a live isolated server, 2026-11-05: lock, refused search while locked, unlock
+- [ ] Locking jobs and runs through a live isolated server
 - [ ] Screening's disagreement path
-- [ ] The `cut_off` warning
-- [ ] Dashboard settings and "back up now" in isolated mode
+- [x] The `cut_off` warning, 2026-11-05: a real model limit returned `finish_reason` `length` through the gateway, and a workflow reported it
+- [x] Dashboard settings and "back up now" in isolated mode: settings never worked there, now fixed (`tests/isolation/test_owner_flows.py`)
 - [ ] OAuth token refresh inside the sandbox
-- [ ] Start time on a large data folder
+- [x] Start time on a large data folder, 2026-11-05: 3,000 conversations (23 MB) start as fast as empty data (I15)
 
 ### Project-level
-- [ ] Clean install from the README on a fresh Debian VM
+- [x] Clean install from the public repositories, as a new user with an empty home on this machine, following the READMEs: the core worked, and the plugin's steps needed a fix. Not a fresh VM, so system packages weren't tested
 - [ ] Release workflow on GitHub (A8)
 - [x] Injection test corpus: written and run on the real model (I23). Six cases, so it shows that an attack works, not that the others are safe
 - [ ] `deploy/systemd/cairnward.service` under real systemd (only `systemd-analyze verify` so far)

@@ -11,6 +11,10 @@
   corpus runs on the real model. One planted instruction still gets through sometimes.
 - **Strict overhead target** raised from 50 ms to 75 ms, or 150 ms with isolation. Nothing got
   faster: the target was changed by decision, and the numbers are the same.
+- **Fixed, on isolated servers:** changing settings from the dashboard failed with a 500, and a locked
+  conversation's artifacts couldn't be read after unlocking. Neither had ever been run for real.
+- **`cairnward backup restore`** now brings back artifacts, jobs and plugins' data too, not just
+  conversations.
 - **Backups** hold plugins' data under `plugins/<name>/`, without installed engines.
   `include_research` is now `include_plugins`.
 - **WSL2 support** (not yet run on real WSL2), and a warning for backends on the network that use

@@ -31,7 +31,7 @@ Upgrades have only been tried by the tests' schema migrations, not from one real
 ## Back up and restore
 See [Getting started](getting-started.md#8-back-up). What to keep off this machine is the backup password: without it, a backup can't be opened after a disk failure. **Try a restore before relying on it.**
 
-Plugins' data comes back under `plugins/<name>/` in a restored copy. Conversations are imported automatically. Copy a plugin's folder back by hand, to `~/.local/share/cairnward/mcp/<name>/`, with the server stopped.
+`cairnward backup restore` brings back conversations, artifacts, jobs and plugins' data, and locked ones stay locked. Each item comes back whole or not at all: anything already here is left as it is, and a purged conversation's artifacts stay gone. Stop the server first if a plugin's data is coming back. `--to <folder>` only extracts the backup, if you'd rather look first. Audit records, settings and the plugin's installed engines aren't brought back: they're in the extracted copy, apart from engines, which you install again.
 
 ## Remove it
 1. Stop the server, and disable the service if you installed it.

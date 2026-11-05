@@ -64,6 +64,7 @@ def control_app(
     sessions: Sessions,
     mcp: Any = None,
     backup_now: Any = None,
+    edit_settings: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="cairnward-egress control", docs_url=None, redoc_url=None)
 
@@ -108,6 +109,20 @@ def control_app(
         try:
             result: dict[str, Any] = await asyncio.to_thread(backup_now)
         except BackupError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return result
+
+    @app.post("/v1/settings/{kind}")
+    def settings(kind: str, body: dict[str, Any]) -> dict[str, Any]:
+        """A dashboard edit, for the isolated core that can't write the configuration folder.
+        The checks are the same as anywhere: only listed settings, and the result must load."""
+        from cairnward.config.edit import EditError
+
+        if edit_settings is None:
+            raise HTTPException(404, "settings can't be changed here")
+        try:
+            result: dict[str, Any] = edit_settings(kind, body)
+        except (EditError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from None
         return result
 

@@ -5,7 +5,7 @@ and goes to Cairnward for models, outside requests and saved output, so no prote
 plugin behaving well. The design is in [ADR-0017](adr/0017-research-as-a-plugin.md).
 
 ## Install one
-A plugin ships a manifest. The research plugin writes its own:
+A plugin ships a manifest. The research plugin writes its own. It needs `cairnward` on your `PATH`, which `uv run` doesn't do, so first run `uv tool install .` in your Cairnward folder. Then:
 
 ```bash
 uv tool install ./literature-review-agent-plugin

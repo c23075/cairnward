@@ -23,7 +23,7 @@ from cairnward.config.schema import render, schemas, write_schemas
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cairnward",
-        description="Local privacy gateway for AI clients and agents, with research workflows.",
+        description="Local privacy gateway for AI clients and agents.",
     )
     parser.add_argument("--version", action="version", version=f"cairnward {__version__}")
     parser.add_argument(
@@ -1336,9 +1336,12 @@ def _backup_action(cfg: Config, args: argparse.Namespace, action: str) -> int:
         with tempfile.TemporaryDirectory(prefix="cw-restore-") as tmp:
             snap, folder = backup.restore(cfg, Path(tmp), snapshot=args.snapshot, at=args.at)
             counts = backup.import_conversations(cfg, folder)
+            files = backup.import_files(cfg, folder)
         print(f"from backup {snap['short_id']} ({snap['time'][:19]}): "
               f"{counts['added']} conversation(s) brought back, {counts['skipped']} already "
               "here (left as they are)")  # fmt: skip
+        print(f"artifacts, jobs and plugins' data: {files['added']} brought back, "
+              f"{files['skipped']} already here (left as they are)")  # fmt: skip
         return 0
     return 2
 
