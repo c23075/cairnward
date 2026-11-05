@@ -1,6 +1,6 @@
 # Project status
 
-Last updated 2026-11-05, after the real runs that followed `main`'s CI going green. This is the owner's view of where Cairnward stands. Detail on each
+Last updated 2026-11-05, after adding TLS inspection and the OpenShell sandbox (ADR-0018). This is the owner's view of where Cairnward stands. Detail on each
 requirement is in [requirements-status.md](plan/requirements-status.md), and the
 [handoff](plan/) is working notes for agents.
 
@@ -17,9 +17,9 @@ Literature research is a separate project with its own status page: `docs/status
 | State | Count |
 |---|---|
 | Done and covered by tests or measurements | 82 |
-| Built, but only tested against a stand-in | 13 |
+| Built, but only tested against a stand-in | 14 |
 | Partly done | 6 |
-| Left out by decision (Ollama-compatible endpoint, Anthropic driver, TLS interception) | 3 |
+| Left out by decision (Ollama-compatible endpoint, Anthropic driver) | 2 |
 
 The biggest unknown is whether it works on Windows, because WSL2 support has never run on real WSL2.
 
@@ -45,6 +45,8 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | A7 | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
 | A8 | Run the first signed release | Both repositories are now public, so the workflow should get as far as signing. It has never run on GitHub |
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
+| A11 | If you want the OpenShell sandbox: install OpenShell, set `OPENSHELL_TELEMETRY_ENABLED=false` for its gateway, and try one run with `sandbox = "openshell"` | It has only run against a stand-in. Whether a sandbox can reach Cairnward's loopback-only ports is unknown |
+| A12 | If you turn on TLS inspection: try it with your real agents and the sites they use | Only tested with httpx and curl against a local server. Agents that pin certificates will fail |
 
 ## Known issues
 ### Security and privacy
@@ -57,6 +59,8 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I5 | The first streamed reply from a model not yet known to leak reasoning still reaches the client (T-26) | Open |
 | I7 | Run snapshots can't be locked, and locking doesn't erase earlier plaintext from disks or old backups | Accepted |
 | I8 | Presidio's small spaCy model misses some names, so redaction isn't complete | Accepted |
+| I26 | With TLS inspection on, the local CA's key could impersonate any site to tools that trust it | Accepted: off by default, owner-only file outside every sandbox, `cairnward egress-ca rotate` |
+| I27 | TLS inspection passes request bodies on unredacted, offers only HTTP/1.1, and doesn't read WebSocket messages after the upgrade | Accepted (ADR-0018) |
 
 ### Functionality
 | # | Issue | State |
@@ -65,6 +69,8 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I10 | Scheduled backups and replication stop when WSL goes idle | Accepted: documented |
 | I11 | `keyring:` references usually fail under WSL. Use `env:` | Accepted: documented |
 | I13 | Audit anchoring is off, so there's no outside proof of the audit log | Your choice |
+| I28 | Egress serves one plain-HTTP request per connection but doesn't tell the client, so a keep-alive client's second `http://` request on that connection fails. HTTPS (CONNECT) isn't affected. Found while testing TLS inspection | Open |
+| I29 | With `sandbox = "openshell"` the agent works on a copy: large workspaces are slow to copy, and a failed copy back leaves the work in the kept sandbox | Accepted (ADR-0018) |
 
 ### Performance
 | # | Issue | State |
@@ -97,6 +103,8 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 - [x] The `cut_off` warning, 2026-11-05: a real model limit returned `finish_reason` `length` through the gateway, and a workflow reported it
 - [x] Dashboard settings and "back up now" in isolated mode: settings never worked there, now fixed (`tests/isolation/test_owner_flows.py`)
 - [ ] OAuth token refresh inside the sandbox
+- [ ] A run with `sandbox = "openshell"` against a real OpenShell gateway (A11)
+- [ ] TLS inspection with real agents and outside sites (A12)
 - [x] Start time on a large data folder, 2026-11-05: 3,000 conversations (23 MB) start as fast as empty data (I15)
 
 ### Project-level
@@ -132,6 +140,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
+- TLS inspection in egress and OpenShell as a second sandbox (ADR-0018, D77 and D78), both opt-in per environment
 - Research issues, its checklists and A2 moved to the plugin's status page, and the core no longer ships its environments (D76)
 - **PR 22:** ADR-0017 accepted, and research moved to a plugin, with a plugin contract in the core
   (merged before CI could run, I25)

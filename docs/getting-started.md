@@ -59,6 +59,28 @@ uv run cairnward approvals
 
 Stop runaway sessions with `--max-requests`, `--max-tokens` or `--max-minutes` on `cairnward run` (or `[run_budget]` in an environment).
 
+Two optional settings in an environment file ([ADR-0018](adr/0018-openshell-sandbox-and-tls-inspection.md)). Neither has been tried with real agents yet:
+```toml
+# Run agents in an OpenShell sandbox instead of srt. Needs OpenShell, with Docker, Podman or KVM.
+# The agent works on a copy of the workspace, copied back when it exits.
+sandbox = "openshell"
+[openshell]
+image = "ghcr.io/you/agent-image:1"   # default: the OpenShell gateway's default image
+
+# Decrypt the runs' HTTPS in cairnward-egress, to allow or refuse each request by method and path.
+# Tools must trust Cairnward's local CA (runs get SSL_CERT_FILE and similar set). Clients that pin
+# certificates will fail: list their hosts in skip_hosts.
+[tls_inspection]
+enabled = true
+unmatched = "allow"
+[[tls_inspection.rules]]
+host = "api.github.com"
+method = "DELETE"
+path = "/repos/**"
+decision = "deny"
+```
+`cairnward egress-ca show` prints the CA's fingerprint, and `cairnward egress-ca rotate` replaces it.
+
 Let Cairnward warn you about slow prompts by importing your benchmark results:
 ```bash
 uv run cairnward bench import bench-qwen3_30b-*.json bench-qwen3_1.7b-*.json

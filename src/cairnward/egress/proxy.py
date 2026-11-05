@@ -10,7 +10,11 @@ An HTTP proxy on the loopback interface. For each connection it:
 4. tunnels (CONNECT) or forwards (plain HTTP), and records a pre/post audit pair with
    byte counts and duration, or a deny event.
 
-HTTPS content is never decrypted here: policy is per host (spec §3.2, T-17).
+HTTPS content isn't decrypted unless the environment turns on `[tls_inspection]` (FR-NET-2,
+ADR-0018, off by default): then a CONNECT is ended here with a certificate from Cairnward's
+local CA, a verified TLS connection is opened to the host, and each HTTP/1.1 request is checked
+against the environment's method and path rules (`inspect.py`). The core's own connections are
+never inspected. Otherwise policy is per host (spec §3.2, T-17).
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import contextlib
 import re
 import secrets
 import socket
+import ssl
 import threading
 import time
 from collections.abc import Callable
@@ -28,8 +33,11 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
+from cairnward.audit.log import digest
 from cairnward.config.loader import Config
+from cairnward.config.models import TlsInspection
 from cairnward.egress.addresses import is_ip_literal, special_reason
+from cairnward.egress.inspect import Exchange, Inspector, Verdict, check_request, request_path
 from cairnward.policy.engine import Action, Decision, PolicyEngine, host_matches
 
 MAX_HEAD = 64 * 1024
@@ -131,6 +139,7 @@ class EgressProxy:
         host: str = "127.0.0.1",
         port: int | None = None,
         resolver: Callable[[str, int], Any] | None = None,
+        upstream_ssl: ssl.SSLContext | None = None,
     ):
         self.config = config
         self.engine = engine
@@ -144,6 +153,8 @@ class EgressProxy:
         # Approval prompts are interactive; one at a time.
         self._ask_lock = asyncio.Lock()
         self._checks: set[asyncio.Future[Decision]] = set()  # policy checks still running
+        self._issuer: Any = None  # tls.Issuer, made when an environment first inspects
+        self._upstream_ssl = upstream_ssl
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -244,6 +255,92 @@ class EgressProxy:
                           f"cairnward-egress: {decision.action.target} denied: {decision.reason}\n",
                           {"X-Cairnward-Decision": "deny"})  # fmt: skip
 
+    def _inspection(self, session: Session, host: str, port: int) -> TlsInspection | None:
+        """The environment's inspection settings, when this connection is to be inspected."""
+        if session.trusted_core:
+            return None  # the core's own calls: it checks and records them itself
+        env = self.config.environments.get(session.environment)
+        if env is None or not env.tls_inspection.enabled:
+            return None
+        tls = env.tls_inspection
+        target = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+        if any(host_matches(target, p) or host_matches(host, p) for p in tls.skip_hosts):
+            return None
+        return tls
+
+    def _tls_contexts(self, host: str) -> tuple[ssl.SSLContext, ssl.SSLContext]:
+        from cairnward.egress import tls
+
+        if self._issuer is None:
+            self._issuer = tls.Issuer(self.config.paths.data_dir)
+        if self._upstream_ssl is None:
+            self._upstream_ssl = tls.upstream_context()
+        return self._issuer.context(host), self._upstream_ssl
+
+    async def _record_request(self, action: Action, ex: Exchange) -> None:
+        """One audit record per inspected request; the path and query only as a digest."""
+        req = Action(
+            kind="net.request", target=action.target, environment=action.environment,
+            client=action.client, run_id=action.run_id, actor=action.actor,
+            details={"method": ex.method[:20], "status": ex.status, "bytes_up": ex.bytes_up,
+                     "bytes_down": ex.bytes_down, "via": "egress", "inspected": True,
+                     "rule": ex.verdict.rule, **({"error": ex.error} if ex.error else {})},
+        )  # fmt: skip
+        allowed = ex.verdict.allowed
+        decision = Decision(req, "allow" if allowed else "deny", "low" if allowed else "medium",
+                            ex.verdict.reason)  # fmt: skip
+        await asyncio.to_thread(self.engine.audit_request, decision, digest(ex.target),
+                                "ok" if ex.error is None else "error")  # fmt: skip
+
+    async def _inspect(self, action: Action, inspection: TlsInspection, host: str, port: int,
+                       reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                       up_reader: asyncio.StreamReader, up_writer: asyncio.StreamWriter,
+                       counts: dict[str, int]) -> str | None:  # fmt: skip
+        """End the tool's TLS here, open our own to the host, check each request. Returns an
+        error for the connection's audit record, or None."""
+        try:
+            server_ctx, client_ctx = await asyncio.to_thread(self._tls_contexts, host)
+        except (OSError, ValueError) as exc:
+            return f"inspection unavailable: {type(exc).__name__}"
+        writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        await writer.drain()
+        try:
+            await asyncio.wait_for(writer.start_tls(server_ctx), self.limits.connect_timeout_s)
+        except (ssl.SSLError, ConnectionError, TimeoutError, OSError) as exc:
+            return (
+                f"the tool refused Cairnward's certificate ({type(exc).__name__}): it "
+                "doesn't trust the local CA, or pins certificates (add it to skip_hosts)"
+            )
+        try:
+            await asyncio.wait_for(up_writer.start_tls(client_ctx, server_hostname=host),
+                                   self.limits.connect_timeout_s)  # fmt: skip
+        except ssl.SSLCertVerificationError as exc:
+            await self._reply(writer, 502, "Bad Gateway",
+                              f"cairnward-egress: {host}'s certificate failed verification: "
+                              f"{exc.verify_message}\n")  # fmt: skip
+            return f"upstream certificate failed verification: {exc.verify_message}"
+        except (ssl.SSLError, ConnectionError, TimeoutError, OSError) as exc:
+            await self._reply(writer, 502, "Bad Gateway",
+                              f"cairnward-egress: TLS to {host} failed\n")  # fmt: skip
+            return f"upstream TLS failed: {type(exc).__name__}"
+
+        async def record(ex: Exchange) -> None:
+            counts["bytes_up"] += ex.bytes_up
+            counts["bytes_down"] += ex.bytes_down
+            counts["requests"] = counts.get("requests", 0) + 1
+            if not ex.verdict.allowed:
+                counts["denied"] = counts.get("denied", 0) + 1
+            await self._record_request(action, ex)
+
+        async def pipe(cr: asyncio.StreamReader, cw: asyncio.StreamWriter,
+                       ur: asyncio.StreamReader, uw: asyncio.StreamWriter) -> None:  # fmt: skip
+            await self._pipe(cr, cw, ur, uw, counts)
+
+        inspector = Inspector(lambda m, p: check_request(inspection, host, port, m, p),
+                              record, pipe, self.limits.idle_timeout_s)  # fmt: skip
+        await inspector.run(reader, writer, up_reader, up_writer)
+        return None
+
     # ------------------------------------------------------------------ connection handling
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -330,6 +427,18 @@ class EgressProxy:
         if not decision.allowed:
             await self._deny(writer, decision)
             return
+        inspection = self._inspection(session, host, port)
+        if inspection is not None and path is not None:
+            # plain HTTP: the request is already readable, so the same rules apply to it
+            verdict = check_request(inspection, host, port, method, request_path(path))
+            if not verdict.allowed:
+                await self._record_request(action, Exchange(method, path, verdict, status=403))
+                await self._reply(writer, 403, "Forbidden by cairnward",
+                                  f"cairnward-egress: {method} denied: {verdict.reason}\n",
+                                  {"X-Cairnward-Decision": "deny"})  # fmt: skip
+                return
+            ok = Verdict(True, verdict.reason, verdict.rule)
+            await self._record_request(action, Exchange(method, path, ok))
 
         # Resolve once, refuse special addresses, dial what was checked.
         try:
@@ -354,6 +463,7 @@ class EgressProxy:
         pre_seq = await asyncio.to_thread(self.engine.audit_pre, decision)
         started = time.monotonic()
         counts = {"bytes_up": 0, "bytes_down": 0}
+        details_extra: dict[str, Any] = {}
         outcome, error = "ok", None
         try:
             up_reader, up_writer = await asyncio.wait_for(
@@ -364,9 +474,16 @@ class EgressProxy:
             await self._reply(writer, 502, "Bad Gateway", f"cairnward-egress: {error}\n")
         else:
             try:
-                if path is None:
+                if path is None and inspection is not None:
+                    details_extra["inspected"] = True
+                    error = await self._inspect(action, inspection, host, port, reader, writer,
+                                                up_reader, up_writer, counts)  # fmt: skip
+                    if error:
+                        outcome = "error"
+                elif path is None:
                     writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
                     await writer.drain()
+                    await self._pipe(reader, writer, up_reader, up_writer, counts)
                 else:
                     # Host comes from the URL that was checked, never from the client: on a
                     # shared address, another Host would reach a site policy never saw.
@@ -377,7 +494,7 @@ class EgressProxy:
                     first = ("\r\n".join(out) + "\r\n\r\n").encode()
                     up_writer.write(first)
                     counts["bytes_up"] += len(first)
-                await self._pipe(reader, writer, up_reader, up_writer, counts)
+                    await self._pipe(reader, writer, up_reader, up_writer, counts)
             except (ConnectionError, TimeoutError) as exc:
                 outcome, error = "error", type(exc).__name__
             finally:
@@ -387,6 +504,7 @@ class EgressProxy:
             **counts,
             "duration_s": round(time.monotonic() - started, 3),
             "address": chosen,
+            **details_extra,
         }
         if error:
             details["error"] = error

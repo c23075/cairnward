@@ -1,0 +1,308 @@
+"""Request-level checks for traffic cairnward-egress decrypts (FR-NET-2, ADR-0018).
+
+`Inspector.run` sits between two connections that are already TLS on both sides: the tool's
+(ended with a certificate from Cairnward's CA) and the real host's (verified). It passes
+HTTP/1.1 messages between them with h11, so framing (Content-Length, chunked, keep-alive, HEAD,
+1xx) follows a tested implementation rather than ours. Each request is checked against the
+environment's rules before it goes out: a denied one is answered 403 here and never reaches
+the host. A protocol switch (WebSocket's 101) is checked as a request, then piped unread.
+
+The audit gets one record per request: method, a digest of the path and query (they can hold
+tokens), status, byte counts and the rule that decided. Never the path itself or any content.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from functools import lru_cache
+
+import h11
+
+from cairnward.config.models import HttpRule, TlsInspection
+from cairnward.policy.engine import host_matches
+
+MAX_HEADERS = 64 * 1024
+
+
+@lru_cache(maxsize=512)
+def _glob(pattern: str) -> re.Pattern[str]:
+    out = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(out) + r"\Z")
+
+
+def path_matches(path: str, pattern: str) -> bool:
+    """'*' matches within one path segment, '**' across segments. '/a/**' also matches '/a'."""
+    if pattern.endswith("/**") and path == pattern[:-3]:
+        return True
+    return _glob(pattern).match(path) is not None
+
+
+def request_path(target: str) -> str:
+    """The path of a request target, without the query (rules don't see the query)."""
+    if "://" in target:  # absolute form inside a tunnel: drop scheme and authority
+        target = "/" + target.split("://", 1)[1].partition("/")[2]
+    path = target.split("?", 1)[0].split("#", 1)[0]
+    return path or "/"
+
+
+@dataclass(frozen=True)
+class Verdict:
+    allowed: bool
+    reason: str
+    rule: int | None  # index into rules, None for the `unmatched` default
+
+
+def check_request(tls: TlsInspection, host: str, port: int, method: str, path: str) -> Verdict:
+    target = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+    method = method.upper()
+    for i, rule in enumerate(tls.rules):
+        if not (host_matches(target, rule.host) or host_matches(host, rule.host)):
+            continue
+        if rule.method not in ("*", method) or not path_matches(path, rule.path):
+            continue
+        return Verdict(rule.decision == "allow", _describe(rule, i), i)
+    return Verdict(tls.unmatched == "allow", f"no rule matched (unmatched = {tls.unmatched})", None)
+
+
+def _describe(rule: HttpRule, i: int) -> str:
+    return f"rule {i + 1}: {rule.decision} {rule.method} {rule.host}{rule.path}"
+
+
+@dataclass
+class Exchange:
+    """One request, for the audit."""
+
+    method: str
+    target: str  # path and query; digested before it's recorded
+    verdict: Verdict
+    status: int | None = None
+    bytes_up: int = 0
+    bytes_down: int = 0
+    error: str | None = None
+
+
+Record = Callable[[Exchange], Awaitable[None]]
+Check = Callable[[str, str], Verdict]
+Pipe = Callable[
+    [asyncio.StreamReader, asyncio.StreamWriter, asyncio.StreamReader, asyncio.StreamWriter],
+    Awaitable[None],
+]
+
+
+class _Closed(Exception):
+    pass
+
+
+class Inspector:
+    def __init__(self, check: Check, record: Record, pipe: Pipe, idle_s: float):
+        self.check = check
+        self.record = record
+        self.pipe = pipe
+        self.idle_s = idle_s
+
+    async def _next(self, conn: h11.Connection, reader: asyncio.StreamReader) -> object:
+        while True:
+            ev = conn.next_event()
+            if ev is not h11.NEED_DATA:
+                return ev
+            data = await asyncio.wait_for(reader.read(65536), self.idle_s)
+            conn.receive_data(data)  # b"" is end of stream
+
+    @staticmethod
+    async def _send(conn: h11.Connection, writer: asyncio.StreamWriter, ev: h11.Event) -> None:
+        data = conn.send(ev)
+        if data:
+            writer.write(data)
+            await writer.drain()
+
+    async def _refuse(
+        self,
+        client: h11.Connection,
+        c_reader: asyncio.StreamReader,
+        c_writer: asyncio.StreamWriter,
+        status: int,
+        text: str,
+    ) -> None:
+        """Answer the tool ourselves, after reading the rest of its request."""
+        while True:
+            ev = await self._next(client, c_reader)
+            if isinstance(ev, h11.EndOfMessage | h11.ConnectionClosed) or ev is h11.PAUSED:
+                break
+        body = text.encode()
+        await self._send(
+            client,
+            c_writer,
+            h11.Response(
+                status_code=status,
+                headers=[
+                    ("content-type", "text/plain; charset=utf-8"),
+                    ("content-length", str(len(body))),
+                    ("x-cairnward-decision", "deny"),
+                    ("connection", "close"),
+                ],
+            ),
+        )
+        await self._send(client, c_writer, h11.Data(data=body))
+        await self._send(client, c_writer, h11.EndOfMessage())
+
+    async def run(
+        self,
+        c_reader: asyncio.StreamReader,
+        c_writer: asyncio.StreamWriter,
+        u_reader: asyncio.StreamReader,
+        u_writer: asyncio.StreamWriter,
+    ) -> None:
+        client = h11.Connection(h11.SERVER, max_incomplete_event_size=MAX_HEADERS)
+        upstream = h11.Connection(h11.CLIENT, max_incomplete_event_size=MAX_HEADERS)
+        while True:
+            try:
+                ev = await self._next(client, c_reader)
+            except (h11.RemoteProtocolError, TimeoutError, ConnectionError):
+                return
+            if isinstance(ev, h11.ConnectionClosed) or not isinstance(ev, h11.Request):
+                return
+            method = ev.method.decode("ascii", "replace")
+            target = ev.target.decode("latin-1")
+            ex = Exchange(method, target, self.check(method, request_path(target)))
+            if method.upper() == "CONNECT":
+                ex.verdict = Verdict(False, "a tunnel inside an inspected tunnel", None)
+            if not ex.verdict.allowed:
+                ex.status = 403
+                try:
+                    await self._refuse(
+                        client,
+                        c_reader,
+                        c_writer,
+                        403,
+                        f"cairnward-egress: {method} denied: {ex.verdict.reason}\n",
+                    )
+                except (
+                    h11.LocalProtocolError,
+                    h11.RemoteProtocolError,
+                    TimeoutError,
+                    ConnectionError,
+                ) as exc:
+                    ex.error = type(exc).__name__
+                await self.record(ex)
+                return  # we said Connection: close
+            try:
+                switched = await self._exchange(
+                    ev, ex, client, upstream, c_reader, c_writer, u_reader, u_writer
+                )
+            except (
+                h11.LocalProtocolError,
+                h11.RemoteProtocolError,
+                TimeoutError,
+                ConnectionError,
+                _Closed,
+            ) as exc:
+                ex.error = type(exc).__name__
+                await self.record(ex)
+                return
+            await self.record(ex)
+            if switched:
+                await self._switch(client, upstream, c_reader, c_writer, u_reader, u_writer)
+                return
+            if h11.MUST_CLOSE in (
+                client.our_state,
+                client.their_state,
+                upstream.our_state,
+                upstream.their_state,
+            ):
+                return
+            try:
+                client.start_next_cycle()
+                upstream.start_next_cycle()
+            except h11.LocalProtocolError:
+                return
+
+    async def _exchange(
+        self,
+        req: h11.Request,
+        ex: Exchange,
+        client: h11.Connection,
+        upstream: h11.Connection,
+        c_reader: asyncio.StreamReader,
+        c_writer: asyncio.StreamWriter,
+        u_reader: asyncio.StreamReader,
+        u_writer: asyncio.StreamWriter,
+    ) -> bool:
+        """Forward one request and its response. True when the protocol switched (101)."""
+        if client.they_are_waiting_for_100_continue:
+            # Answer 100 ourselves and don't pass Expect on, so the body can stream straight
+            # through without waiting for the host.
+            await self._send(
+                client, c_writer, h11.InformationalResponse(status_code=100, headers=[])
+            )
+        headers = [(k, v) for k, v in req.headers if k.lower() != b"expect"]
+        await self._send(
+            upstream,
+            u_writer,
+            h11.Request(
+                method=req.method, target=req.target, headers=headers, http_version=req.http_version
+            ),
+        )
+        while True:
+            ev = await self._next(client, c_reader)
+            if isinstance(ev, h11.Data):
+                ex.bytes_up += len(ev.data)
+                await self._send(upstream, u_writer, ev)
+            elif isinstance(ev, h11.EndOfMessage):
+                await self._send(upstream, u_writer, ev)
+                break
+            elif ev is h11.PAUSED:  # an Upgrade request with no body
+                break
+            else:
+                raise _Closed
+        while True:
+            ev = await self._next(upstream, u_reader)
+            if isinstance(ev, h11.InformationalResponse):
+                if ev.status_code == 100:
+                    continue  # already sent our own
+                await self._send(client, c_writer, ev)
+                if ev.status_code == 101:
+                    ex.status = 101
+                    return True
+            elif isinstance(ev, h11.Response):
+                ex.status = ev.status_code
+                await self._send(client, c_writer, ev)
+            elif isinstance(ev, h11.Data):
+                ex.bytes_down += len(ev.data)
+                await self._send(client, c_writer, ev)
+            elif isinstance(ev, h11.EndOfMessage):
+                await self._send(client, c_writer, ev)
+                return False
+            else:
+                raise _Closed
+
+    async def _switch(
+        self,
+        client: h11.Connection,
+        upstream: h11.Connection,
+        c_reader: asyncio.StreamReader,
+        c_writer: asyncio.StreamWriter,
+        u_reader: asyncio.StreamReader,
+        u_writer: asyncio.StreamWriter,
+    ) -> None:
+        """After a 101: send what h11 already read on, then pipe the rest unread."""
+        up_extra, _ = client.trailing_data
+        down_extra, _ = upstream.trailing_data
+        if up_extra:
+            u_writer.write(up_extra)
+        if down_extra:
+            c_writer.write(down_extra)
+        await self.pipe(c_reader, c_writer, u_reader, u_writer)

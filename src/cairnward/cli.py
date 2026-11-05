@@ -371,6 +371,12 @@ def build_parser() -> argparse.ArgumentParser:
     egress.add_argument("--client", help="client name to attribute traffic to")
     egress.add_argument("--port", type=int, help="port (default: [server] egress_port)")
 
+    eca = sub.add_parser("egress-ca", help="the local CA for TLS inspection ([tls_inspection])")
+    eca_sub = eca.add_subparsers(dest="ca_command", metavar="ACTION", required=True)
+    eca_show = eca_sub.add_parser("show", help="where the CA is and its fingerprint")
+    eca_show.add_argument("--pem", action="store_true", help="print the certificate")
+    eca_sub.add_parser("rotate", help="replace the CA (restart `cairnward serve` afterwards)")
+
     store = sub.add_parser("store", help="local storage (vault and keys)")
     store_sub = store.add_subparsers(dest="store_command", metavar="ACTION", required=True)
     store_sub.add_parser("info", help="database files, schema versions and counts")
@@ -639,6 +645,36 @@ def _cmd_policy_explain(args: argparse.Namespace) -> int:
     if decision.advisory:
         print("  note:   isolation is off, so the OS doesn't enforce this decision")
     print(f"  privacy: {cfg.privacy(env).label}")
+    return 0
+
+
+def _cmd_egress_ca(args: argparse.Namespace) -> int:
+    from cairnward.audit import AuditLog, enabled_for
+    from cairnward.egress import tls
+
+    cfg = _load(args)
+    using = [n for n, e in cfg.environments.items() if e.tls_inspection.enabled]
+    if args.ca_command == "rotate":
+        old = tls.ca_dir(cfg.paths.data_dir) / tls.CA_CERT
+        before = tls.ca_fingerprint(old.read_bytes()) if old.is_file() else None
+        tls.rotate_ca(cfg.paths.data_dir)
+        after = tls.ca_fingerprint(tls.ca_cert_pem(cfg.paths.data_dir))
+        with AuditLog.open(cfg.paths, enabled_for(cfg)) as log:
+            log.append("egress.ca_rotate", actor="user", target="egress-ca",
+                       details={"old_fingerprint": before, "new_fingerprint": after})  # fmt: skip
+        print(f"New CA: {after}")
+        print("Restart `cairnward serve`; runs started after that trust the new CA.")
+        return 0
+    if not using and not (tls.ca_dir(cfg.paths.data_dir) / tls.CA_CERT).is_file():
+        print("TLS inspection is off in every environment, and no CA has been made.")
+        return 0
+    pem = tls.ca_cert_pem(cfg.paths.data_dir)
+    if args.pem:
+        sys.stdout.write(pem.decode())
+        return 0
+    print(f"CA:          {tls.ca_dir(cfg.paths.data_dir) / tls.CA_CERT}")
+    print(f"fingerprint: {tls.ca_fingerprint(pem)}")
+    print(f"inspecting:  {', '.join(using) if using else 'no environment'}")
     return 0
 
 
@@ -1537,6 +1573,11 @@ def _cmd_sandbox(args: argparse.Namespace) -> int:
         import shutil
 
         print(f"{tool + ':':16} {shutil.which(tool) or 'not found'}")
+    from cairnward.sandbox import openshell
+
+    oshell = openshell.locate()
+    print(f"{'openshell:':16} {' '.join(oshell) if oshell else 'not found'} "
+          '(only for sandbox = "openshell")')  # fmt: skip
     return 0 if cmd else 1
 
 
@@ -1622,6 +1663,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_policy_explain(args)
         if args.command == "egress":
             return _cmd_egress(args)
+        if args.command == "egress-ca":
+            return _cmd_egress_ca(args)
         if args.command == "serve":
             return _cmd_serve(args)
         if args.command == "_core":

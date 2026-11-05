@@ -35,6 +35,7 @@ from cairnward.policy.approvals import (
 Kind = Literal[
     "model.call",  # target: backend name
     "net.connect",  # target: host or host:port
+    "net.request",  # target: host:port; one HTTP request egress decrypted (FR-NET-2)
     "fs.read",  # target: path
     "fs.write",  # target: path
     "exec",  # target: command line (summary)
@@ -339,6 +340,17 @@ class PolicyEngine:
             self.audit.append(
                 action.kind, phase="event", decision="deny",
                 details=self._details(decision), **self._common(action),
+            )  # fmt: skip
+
+    def audit_request(self, decision: Decision, target_digest: str, outcome: str) -> None:
+        """One event per request egress inspected: allowed or denied, with the digest of its
+        path and query (never the text)."""
+        if self.audit:
+            action = decision.action
+            self.audit.append(
+                action.kind, phase="event", decision=decision.decision, outcome=outcome,
+                params_digest=target_digest, details=self._details(decision),
+                **self._common(action),
             )  # fmt: skip
 
     def audit_pre(self, decision: Decision, params: bytes | str | None = None) -> int | None:

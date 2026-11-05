@@ -48,13 +48,13 @@ real tests are named here.
 ### Isolation, egress, policy
 | ID | Status | Notes |
 |---|---|---|
-| FR-ISO-1 `cairnward run` sandbox | ✅ | `tests/isolation/` (CI) |
+| FR-ISO-1 `cairnward run` sandbox | ✅ | `tests/isolation/` (CI). The optional OpenShell backend (D77) is tested only against a stand-in CLI (`test_openshell_backend.py`) |
 | FR-ISO-2 filesystem policy for runs | ✅ | `tests/isolation/test_run_home.py`, `test_run.py`; real Aider checked, Qwen Code only as a stand-in |
 | FR-ISO-3 core isolated, only egress networked | ✅ | `test_isolated_serve.py`; running in isolated mode on this machine |
 | FR-ISO-4 container templates for server clients | 🧪 | checked with `docker compose config` only; not run with Podman/Docker |
 | FR-ISO-5 doctor + isolation self-test | ✅ | `test_doctor_setup.py`; passed on this machine |
 | FR-NET-1 network off by default, allow-list, ask, logged | ✅ | `test_egress.py`, `test_tool_egress.py` |
-| FR-NET-2 TLS interception | ⏸ | Could / later |
+| FR-NET-2 TLS interception | 🧪 | built (D78): `test_tls_inspection.py`, with real TLS, httpx and curl against a local HTTPS origin; not tried against outside sites or real agents |
 | FR-EGR-1 egress report | ✅ | `test_egress_report.py` |
 | FR-POL-1 allow/ask/deny outside the model | ✅ | `test_policy.py` |
 | FR-POL-2 risk tiers | ✅ | `test_policy.py`, `test_approvals.py` |

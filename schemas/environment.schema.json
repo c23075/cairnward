@@ -1,5 +1,88 @@
 {
   "$defs": {
+    "HttpRule": {
+      "additionalProperties": false,
+      "description": "One method/path rule for inspected traffic (FR-NET-2). The first matching rule wins.",
+      "properties": {
+        "decision": {
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "host": {
+          "description": "host pattern, as in network_allow_hosts ('*.example.org')",
+          "title": "Host",
+          "type": "string"
+        },
+        "method": {
+          "default": "*",
+          "description": "HTTP method, or '*' for any",
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "default": "/**",
+          "description": "path glob: '*' within a segment, '**' across",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "decision"
+      ],
+      "title": "HttpRule",
+      "type": "object"
+    },
+    "OpenShellOptions": {
+      "additionalProperties": false,
+      "description": "How `cairnward run` uses OpenShell when sandbox = 'openshell' (ADR-0018).",
+      "properties": {
+        "gateway": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "openshell gateway name (-g)",
+          "title": "Gateway"
+        },
+        "host_name": {
+          "default": "host.openshell.internal",
+          "description": "the name a sandbox uses for this machine",
+          "title": "Host Name",
+          "type": "string"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "image the agent runs in (--from); default: the gateway's",
+          "title": "Image"
+        },
+        "workdir": {
+          "default": "/sandbox/work",
+          "description": "where the workspace is copied",
+          "title": "Workdir",
+          "type": "string"
+        }
+      },
+      "title": "OpenShellOptions",
+      "type": "object"
+    },
     "PrivacyOverrides": {
       "additionalProperties": false,
       "description": "A `[privacy]` table: an optional preset plus optional individual settings.",
@@ -319,6 +402,44 @@
       },
       "title": "RunBudget",
       "type": "object"
+    },
+    "TlsInspection": {
+      "additionalProperties": false,
+      "description": "Decrypting third-party HTTPS in cairnward-egress (FR-NET-2, ADR-0018). Off by default and\nnever set by a preset: tools in this environment must trust Cairnward's local CA, and\nCairnward then sees their requests.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/HttpRule"
+          },
+          "title": "Rules",
+          "type": "array"
+        },
+        "skip_hosts": {
+          "description": "hosts tunnelled without inspection (clients that pin certificates)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Skip Hosts",
+          "type": "array"
+        },
+        "unmatched": {
+          "default": "allow",
+          "description": "requests no rule matches (the host itself is allowed)",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "title": "Unmatched",
+          "type": "string"
+        }
+      },
+      "title": "TlsInspection",
+      "type": "object"
     }
   },
   "$id": "https://github.com/c23075/cairnward/schemas/environment.schema.json",
@@ -396,6 +517,15 @@
       "title": "Models",
       "type": "object"
     },
+    "openshell": {
+      "$ref": "#/$defs/OpenShellOptions",
+      "default": {
+        "gateway": null,
+        "host_name": "host.openshell.internal",
+        "image": null,
+        "workdir": "/sandbox/work"
+      }
+    },
     "privacy": {
       "$ref": "#/$defs/PrivacyOverrides",
       "default": {
@@ -425,6 +555,16 @@
         "max_tokens": null
       }
     },
+    "sandbox": {
+      "default": "srt",
+      "description": "the sandbox `cairnward run` uses when isolation = on: srt or openshell",
+      "enum": [
+        "srt",
+        "openshell"
+      ],
+      "title": "Sandbox",
+      "type": "string"
+    },
     "schema_version": {
       "const": 1,
       "default": 1,
@@ -443,6 +583,15 @@
       },
       "title": "Skills",
       "type": "array"
+    },
+    "tls_inspection": {
+      "$ref": "#/$defs/TlsInspection",
+      "default": {
+        "enabled": false,
+        "rules": [],
+        "skip_hosts": [],
+        "unmatched": "allow"
+      }
     },
     "tools": {
       "items": {

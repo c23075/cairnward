@@ -49,7 +49,21 @@ class Config:
         if environment is None:
             return resolve_privacy(self.main.privacy)
         env = self.environments[environment]
-        return resolve_privacy(self.main.privacy, env.privacy, environment)
+        eff = resolve_privacy(self.main.privacy, env.privacy, environment)
+        if env.tls_inspection.enabled:
+            # Opt-in, so not a preset setting, but it changes who can read tools' HTTPS: shown
+            # wherever privacy warnings are (doctor, config check, serve, dashboard).
+            eff.warnings.append(
+                "tls_inspection is on: tools here must trust Cairnward's local CA, and "
+                "cairnward-egress decrypts their HTTPS (a stolen CA key could impersonate any "
+                "site to them)"
+            )
+        if env.sandbox == "openshell" and eff.value("isolation") == "on":
+            eff.notes.append(
+                "sandbox = openshell: runs start in an OpenShell sandbox. Its gateway sends "
+                "anonymous telemetry unless OPENSHELL_TELEMETRY_ENABLED=false is set for it."
+            )
+        return eff
 
     def effort_levels_ordered(self) -> list[str]:
         visible = [(lvl.order, name) for name, lvl in self.effort.items() if not lvl.hidden]
