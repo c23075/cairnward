@@ -47,7 +47,7 @@ appendWindowsPath=false
 Encryption in Windows. `cairnward doctor` can't see this from inside WSL.
 
 ## What's different from Linux
-- **Windows drives are hidden from every sandbox**, including the core and research engines. Keep
+- **Windows drives are hidden from every sandbox**, including the core and plugins. Keep
   projects, papers and Cairnward's own folders in the Linux file system (`~/...`). `cairnward
   serve` refuses to start if its own folders are on a Windows drive, and a run warns if its
   workspace is on one.

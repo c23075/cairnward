@@ -367,7 +367,7 @@ def _notes(eff: EffectivePrivacy) -> list[str]:
     out: list[str] = []
     if eff.value("redaction") != "off":
         out.append(
-            "redaction only covers traffic Cairnward handles itself (model, MCP and research "
+            "redaction only covers traffic Cairnward handles itself (model, MCP and plugin "
             "calls), not third-party tools' own HTTPS connections."
         )
     if eff.value("audit_anchor") == "git":

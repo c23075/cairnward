@@ -26,8 +26,8 @@ tamper-evident log, and runs tools in a sandbox whose only network route goes th
 - **Reviewable agent runs.** `cairnward run` snapshots the project before and after, so you can
   diff or undo what an agent did, and set limits on requests, tokens and time.
 - **Plugins under a contract.** A plugin runs sandboxed with no network of its own, and asks
-  Cairnward for models and outside requests. [Literature research](docs/plugins.md) is one: answers
-  cited to the page from a folder of PDFs, and reviews as overnight batch jobs.
+  Cairnward for models and outside requests. See [Plugins](docs/plugins.md). A literature review plugin
+  is a separate project, [`literature-review-agent-plugin`](https://github.com/c23075/literature-review-agent-plugin).
 - **Built for CPU-only machines.** Scheduling, context limits and waiting-time estimates come
   from benchmarks on a desktop with no GPU.
 
@@ -127,8 +127,6 @@ uv run --project ~/cairnward cairnward run --profile aider --env coding -- aider
 uv run cairnward runs diff <run-id>
 ```
 
-For questions over a folder of PDFs, add the [research plugin](docs/plugins.md).
-
 See what happened, and check that the log is intact:
 
 ```bash
@@ -147,7 +145,7 @@ Client setup guides: [Open WebUI](docs/clients/open-webui.md), [Jan](docs/client
 ## Status
 
 Measured for real on the [reference machine](docs/bench/) (AMD Ryzen 3 3200G, 29 GB RAM, no GPU),
-through the isolated server. Research results are in the plugin's repository:
+through the isolated server:
 
 | Check | Result |
 |---|---|

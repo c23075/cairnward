@@ -61,7 +61,7 @@ class Backends:
         self._drivers: dict[tuple[str, str | None], Driver] = {}
 
     def web_proxy(self, environment: str | None) -> str | None:
-        """The proxy for Cairnward's own outbound requests (research sources): egress, or
+        """The proxy for Cairnward's own outbound requests (a plugin's fetches): egress, or
         srt's proxy inside the isolated core."""
         return self.proxy_all or self._egress_for(environment)
 

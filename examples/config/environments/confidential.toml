@@ -1,0 +1,11 @@
+#:schema ../../../schemas/environment.schema.json
+# The file name is the environment's name: pick it in any client as cw/confidential:<effort>.
+schema_version = 1
+description = "Confidential material: strict, no conversation content kept"
+workspace = ["~/work/confidential"]
+effort_default = "high"
+context_tokens = 8192
+
+[privacy]
+preset = "strict"
+vault = "digests"

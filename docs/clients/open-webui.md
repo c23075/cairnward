@@ -37,7 +37,7 @@ docker run -d --name open-webui --network=host -v open-webui:/app/backend/data \
 In Open WebUI's settings, add an external tool server of type MCP (streamable HTTP) with URL `http://127.0.0.1:8484/mcp/<environment>` and header `Authorization: Bearer <your key>` (menu names change between versions; see [mcp.md](mcp.md)).
 
 ## 3. Use it
-Pick a model such as `cw/coding:low` (fast) or `cw/litreview-offline:high` (30B, thinking on). The model picker is also your effort and environment picker.
+Pick a model such as `cw/coding:low` (fast) or `cw/coding:high` (30B, thinking on). The model picker is also your effort and environment picker.
 
 Optional: in Open WebUI's settings, turn chat history off or use temporary chats; Cairnward's vault keeps its own (lockable, purgeable) copy.
 

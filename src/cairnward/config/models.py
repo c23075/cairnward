@@ -524,10 +524,11 @@ class RunBudget(_Strict):
 class EnvironmentConfig(_Strict):
     @model_validator(mode="before")
     @classmethod
-    def _sources_moved(cls, value: Any) -> Any:
-        """ADR-0017: online sources are set in the plugin's research.toml now."""
-        if isinstance(value, dict) and "research_sources" in value:
-            value = {k: v for k, v in value.items() if k != "research_sources"}
+    def _research_settings_moved(cls, value: Any) -> Any:
+        """ADR-0017: these belong to the research plugin now, so old files still load."""
+        if isinstance(value, dict) and value.keys() & {"research_sources", "citation_style"}:
+            value = {k: v for k, v in value.items()
+                     if k not in ("research_sources", "citation_style")}  # fmt: skip
         return value
 
     """environments/<name>.toml (the file name is the environment's name)"""
@@ -549,7 +550,6 @@ class EnvironmentConfig(_Strict):
         description="throwaway work: backends that may train on prompts are allowed here "
         "(training_backends = scratch_only)",
     )
-    citation_style: str = "apa"
     vault_retention_days: int | None = Field(default=None, ge=1)
     run_budget: RunBudget = RunBudget()
     context_overflow: Literal["warn", "reject"] = Field(
@@ -771,29 +771,6 @@ def builtin_environments() -> dict[str, EnvironmentConfig]:
             description="Coding agents in the current project",
             tools=["fs", "shell", "git"],
             effort_default="medium",
-        ),
-        "litreview-offline": EnvironmentConfig(
-            description="Literature review with no network",
-            tools=["rag", "pdf", "zotero"],
-            skills=["lit-review", "citation-check", "references"],
-            effort_default="high",
-            privacy=PrivacyOverrides(network="off", hosted_backends="deny"),
-        ),
-        "litreview-online": EnvironmentConfig(
-            description="Literature review with academic APIs (approval per new host)",
-            tools=["rag", "pdf", "zotero", "scholar"],
-            skills=["lit-review", "citation-check", "references"],
-            effort_default="high",
-            privacy=PrivacyOverrides(
-                network="ask",
-                network_allow_hosts=[
-                    "export.arxiv.org",
-                    "api.semanticscholar.org",
-                    "api.openalex.org",
-                    "eutils.ncbi.nlm.nih.gov",
-                    "api.crossref.org",
-                ],
-            ),
         ),
         "scratch": EnvironmentConfig(
             description="Experiments with no protections in the way",

@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **The core no longer ships `litreview-offline` and `litreview-online`.** Plugins bring their own environments. Run `cairnward-research install-plugin` again to create them. `citation_style` is ignored if set.
 - **Research moved to a plugin** ([ADR-0017](docs/adr/0017-research-as-a-plugin.md)). `cairnward
   library`, `research`, `jobs` and `cite` are now `cairnward-research ...`, from its own package. Run
   `cairnward-research import` once. `[research]` in `cairnward.toml` and `research_sources` are

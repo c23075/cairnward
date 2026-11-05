@@ -1,4 +1,4 @@
-"""Artifacts: a git repository per conversation, research job or agent run (spec §4.7,
+"""Artifacts: a git repository per conversation, plugin job or agent run (spec §4.7,
 FR-ART-1). Every write is one commit; restoring an old version is a new commit, so
 history is never rewritten. Repositories live in `<data>/artifacts/<scope>/<id>/`
 (owner-only) and are deleted with their conversation when it is purged.
@@ -9,14 +9,14 @@ passphrase, recovery key and crypto-shredding all apply. While the conversation 
 each operation works on a temporary copy, which a write seals again. Plaintext is deleted
 normally: copies already in backups or left on the disk aren't reached by locking.
 
-A finished research job or a run's repository can be locked too, with a key of its own. A
+A finished job or a run's repository can be locked too, with a key of its own. A
 job's folder (its notes and result) is sealed with it, leaving a stub that says only that the
 job exists. These stay closed until the lock is removed: nothing writes to them afterwards,
 so there's no temporary unlocking. Run snapshots (`cairnward runs`) are kept per workspace,
 not per run, and aren't covered.
 
 Agent runs already get workspace snapshots (`cairnward runs`); this store holds what
-models produce in conversations (through the MCP tool) and research job results.
+models produce in conversations (through the MCP tool) and plugins' job results.
 """
 
 from __future__ import annotations

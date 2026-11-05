@@ -333,7 +333,7 @@ def test_model_info_stays_in_the_plugins_environment(tmp_path: Path) -> None:
     url = "/v1/cairnward/model-info"
     assert c.get(url, params={"model": "not-a-model"}).status_code == 400
     assert c.get(url, params={"model": "cw/coding:medium"}).status_code == 200
-    assert c.get(url, params={"model": "cw/litreview-offline:medium"}).status_code == 403
+    assert c.get(url, params={"model": "cw/scratch:medium"}).status_code == 403
 
 
 def test_a_port_that_isnt_a_number_is_refused(services: Any) -> None:

@@ -35,7 +35,7 @@ A new device's records aren't accepted until you approve it on an existing devic
 what blocking relies on too: a lost device still holds the sync key and can read what's in
 the folder, so to shut it out properly start a new folder (`leave`, then `init`).
 
-Research libraries, research jobs, settings and the audit log stay on each device.
+Plugins' data, settings and the audit log stay on each device.
 """
 
 from __future__ import annotations
