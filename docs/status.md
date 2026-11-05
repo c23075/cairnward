@@ -87,7 +87,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
 | I24 | The research repository's first Windows run found a Linux-only lock, a test checking POSIX file modes, and line endings breaking the citation files' hash check | Fixed in its PR 1, waiting on that PR's CI |
-| I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum. Details are in the handoff | Open: no fix written yet |
+| I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum | Fixed on the `fix-main-ci` branch, not yet run on GitHub. Windows may show more once those tests get past setup |
 
 ## Testing still to do
 ### Could reveal real bugs

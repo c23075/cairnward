@@ -114,6 +114,7 @@ async def test_prompts_and_resources(paths: Paths) -> None:
     audit.close()
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 async def test_artifact_tools(paths: Paths) -> None:
     (paths.config_dir / "environments" / "lit.toml").write_text(
         'tools = ["artifacts"]\n[privacy]\nisolation = "off"\n'
