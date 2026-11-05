@@ -22,6 +22,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -164,6 +165,7 @@ def dashboard_app(
     mcp: Any = None,
     isolated: bool = False,
     backup_now: Any = None,
+    edit_settings: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Cairnward dashboard", docs_url=None, redoc_url=None, openapi_url=None)
     port = cfg.main.server.dashboard_port
@@ -287,20 +289,17 @@ def dashboard_app(
         """Write one privacy setting to its file (takes effect on restart). Weakening
         needs `confirm`; every change goes to the audit log as settings.changed."""
         from cairnward.audit import record_settings
-        from cairnward.config.edit import EditError
-        from cairnward.config.edit import change_privacy as apply
+        from cairnward.config.edit import EditError, apply_edit
         from cairnward.config.loader import load_config
 
-        current = load_config(cfg.paths)  # the files as they are now, not as started
         try:
-            new, changes = apply(current, body.scope, body.setting, body.value,
-                                 confirm=body.confirm)  # fmt: skip
+            done = (edit_settings or partial(apply_edit, cfg.paths))("privacy", body.model_dump())
         except EditError as exc:
             code = 409 if str(exc).startswith("needs confirmation") else 400
             raise HTTPException(code, str(exc)) from None
         if audit is not None:
-            record_settings(new, audit, actor="user (dashboard)")
-        out = [dataclasses.asdict(c) for c in changes]
+            record_settings(load_config(cfg.paths), audit, actor="user (dashboard)")
+        out: list[dict[str, Any]] = done["changes"]
         saved.extend(out)
         return {"changes": out, "restart_needed": bool(out)}
 
@@ -462,14 +461,13 @@ def dashboard_app(
     @app.post("/api/backup/settings")
     def backup_settings(body: BackupSettingsIn) -> dict[str, Any]:
         """Write the backup mode and folder (takes effect on restart), audited."""
-        from cairnward.config.edit import EditError, change_backup
-        from cairnward.config.loader import load_config
+        from cairnward.config.edit import EditError, apply_edit
 
         try:
-            _new, changed = change_backup(load_config(cfg.paths), body.mode, body.repository,
-                                          body.interval_hours, body.access)  # fmt: skip
+            done = (edit_settings or partial(apply_edit, cfg.paths))("backup", body.model_dump())
         except EditError as exc:
             raise HTTPException(400, str(exc)) from None
+        changed = done["changed"]
         if changed:
             backup_job["saved"] = True
             if audit is not None:  # which fields, not the path

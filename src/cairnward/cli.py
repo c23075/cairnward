@@ -23,7 +23,7 @@ from cairnward.config.schema import render, schemas, write_schemas
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cairnward",
-        description="Local privacy gateway for AI clients and agents, with research workflows.",
+        description="Local privacy gateway for AI clients and agents.",
     )
     parser.add_argument("--version", action="version", version=f"cairnward {__version__}")
     parser.add_argument(

@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -28,6 +31,7 @@ import httpx
 import uvicorn
 
 from cairnward.audit import AuditLog, enabled_for, record_settings
+from cairnward.config.edit import apply_edit
 from cairnward.config.loader import Config
 from cairnward.egress import EgressProxy, Session, Sessions
 from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, control_app
@@ -54,6 +58,16 @@ def sockets(cfg: Config) -> dict[str, Path]:
         "egress": s / "egress.sock",
         "dashboard": s / "dashboard.sock",
     }
+
+
+def core_tmp(cfg: Config) -> Path:
+    """The isolated core's temporary folder, for the copies a locked conversation's artifacts are
+    worked on in: memory-backed when there is one, so plaintext stays off the disk."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime and Path(runtime).is_dir():
+        tag = hashlib.sha256(str(cfg.paths.state_dir).encode()).hexdigest()[:12]
+        return Path(runtime) / f"cairnward-{tag}"
+    return cfg.paths.state_dir / "tmp"
 
 
 def inbox_for(cfg: Config, log: Log) -> ApprovalInbox:
@@ -249,6 +263,7 @@ def _core_parts(
     launcher: Launcher,
     log: Log = lambda m: None,
     backup_now: Any = None,
+    edit_settings: Any = None,
 ) -> tuple[Any, Any, McpHub, Any]:
     from cairnward.core.management import management_app
     from cairnward.dashboard import DashboardAuth, dashboard_app
@@ -286,7 +301,8 @@ def _core_parts(
     )
     auth = DashboardAuth()
     dashboard = dashboard_app(cfg, auth=auth, audit=audit, vault=vault, inbox=inbox, mcp=hub,
-                              isolated=isolated, backup_now=backup_now)  # fmt: skip
+                              isolated=isolated, backup_now=backup_now,
+                              edit_settings=edit_settings)  # fmt: skip
     management = management_app(
         cfg,
         audit=audit,
@@ -479,7 +495,7 @@ def core_sandbox(cfg: Config) -> SandboxSpec:
     p = cfg.paths
     return SandboxSpec(
         allowed_hosts=srt_hosts(hosts),
-        allow_write=[p.data_dir, p.state_dir],
+        allow_write=[p.data_dir, p.state_dir, core_tmp(cfg)],
         deny_read=secret_dirs(),
         allow_all_unix_sockets=True,  # the core serves and calls Unix sockets
     )
@@ -523,7 +539,9 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
 
             return backup.run_now(cfg, log)
 
-        ctl = _uds_server(control_app(sessions, mcp=bridge, backup_now=backup_now), socks["egress"])
+        ctl = _uds_server(control_app(sessions, mcp=bridge, backup_now=backup_now,
+                                      edit_settings=partial(apply_edit, cfg.paths)),
+                          socks["egress"])  # fmt: skip
 
         with tempfile.TemporaryDirectory(prefix="cairnward-core-") as tmp:
             settings = core_sandbox(cfg).write(Path(tmp) / "srt.json")
@@ -536,6 +554,8 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
             }
             egress_url = f"http://cw:{core_token}@127.0.0.1:{server.egress_port}"
             env.update(HTTP_PROXY=egress_url, HTTPS_PROXY=egress_url)  # srt's parent proxy
+            shutil.rmtree(core_tmp(cfg), ignore_errors=True)  # what a crash left, maybe plaintext
+            private_dir(core_tmp(cfg))
             cmd = wrap(
                 srt,
                 settings,
@@ -547,6 +567,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                     "--egress-control",
                     str(socks["egress"]),
                 ],
+                tmp_dir=core_tmp(cfg),
             )
 
             async def run() -> int:
@@ -607,6 +628,23 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
 # ------------------------------------------------------------------ isolated: process B
 
 
+def remote_settings(control_socket: str) -> Any:
+    """The isolated core can't write the configuration folder: the outer process edits it."""
+
+    def edit(kind: str, body: dict[str, Any]) -> dict[str, Any]:
+        from cairnward.config.edit import EditError
+
+        transport = httpx.HTTPTransport(uds=control_socket)
+        with httpx.Client(transport=transport, base_url="http://egress", timeout=30) as c:
+            resp = c.post(f"/v1/settings/{kind}", json=body)
+        if resp.status_code != 200:
+            raise EditError(resp.json().get("detail", resp.text))
+        result: dict[str, Any] = resp.json()
+        return result
+
+    return edit
+
+
 def remote_backup(control_socket: str) -> Any:
     """The isolated core can't reach the backup folder: the outer process runs the backup."""
 
@@ -649,6 +687,7 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
             launcher=RemoteLauncher(str(egress_control)),
             log=log,
             backup_now=remote_backup(str(egress_control)),
+            edit_settings=remote_settings(str(egress_control)),
         )
         gw = _uds_server(gateway, socks["gateway"])
         mgmt = _uds_server(management, socks["management"])

@@ -105,15 +105,16 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 ### Never run for real
 - [ ] Replication between the desktop and laptop, through real Syncthing or a NAS, and on its
       schedule under an isolated server
-- [ ] Locking artifacts, jobs, runs and libraries through a live isolated server
+- [x] Locking a conversation and its artifacts from the dashboard on a live isolated server: found and fixed a bug (`tests/isolation/test_owner_flows.py`)
+- [ ] Locking jobs, runs and libraries through a live isolated server
 - [ ] Screening's disagreement path
 - [ ] The `cut_off` warning
-- [ ] Dashboard settings and "back up now" in isolated mode
+- [x] Dashboard settings and "back up now" in isolated mode: settings never worked there, now fixed (`tests/isolation/test_owner_flows.py`)
 - [ ] OAuth token refresh inside the sandbox
 - [ ] Start time on a large data folder
 
 ### Project-level
-- [ ] Clean install from the README on a fresh Debian VM
+- [x] Clean install from the public repositories, as a new user with an empty home on this machine, following the READMEs: the core worked, and the plugin's steps needed a fix. Not a fresh VM, so system packages weren't tested
 - [ ] Release workflow on GitHub (A8)
 - [x] Injection test corpus: written and run on the real model (I23). Six cases, so it shows that an attack works, not that the others are safe
 - [ ] `deploy/systemd/cairnward.service` under real systemd (only `systemd-analyze verify` so far)

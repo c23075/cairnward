@@ -10,18 +10,35 @@ audit log.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, get_args
 
 from cairnward.config.loader import Config, ConfigError, load_config
+from cairnward.config.paths import Paths
 from cairnward.config.privacy import SETTINGS, PrivacyOverrides
 
 
 class EditError(Exception):
     pass
+
+
+def apply_edit(paths: Paths, kind: str, body: dict[str, Any]) -> dict[str, Any]:
+    """One edit from the dashboard, from the files as they are now rather than as started. An
+    isolated core can't write the configuration folder, so the outer process runs this for it."""
+    cfg = load_config(paths)
+    if kind == "privacy":
+        _new, changes = change_privacy(cfg, body["scope"], body["setting"], body["value"],
+                                       confirm=body["confirm"])  # fmt: skip
+        return {"changes": [asdict(c) for c in changes]}
+    if kind == "backup":
+        _new2, changed = change_backup(cfg, body["mode"], body["repository"],
+                                       body["interval_hours"], body["access"])  # fmt: skip
+        return {"changed": changed}
+    raise EditError(f"unknown edit '{kind}'")
 
 
 def options() -> dict[str, list[str]]:
@@ -110,9 +127,10 @@ def change_backup(cfg: Config, mode: str, repository: str | None,
         undo()
         raise EditError(f"not saved, the configuration wouldn't load: {exc}") from None
     except OSError as exc:
-        undo()
+        with contextlib.suppress(OSError):  # the write failed, so there's probably nothing to undo
+            undo()
         raise EditError(f"can't write {path.name}: {exc.strerror or exc} (edit the file by "
-                        "hand, or use the CLI outside the sandbox)") from None  # fmt: skip
+                        "hand)") from None  # fmt: skip
     return new, [k for k, v in wanted.items() if getattr(b, k) != v]
 
 
@@ -205,9 +223,10 @@ def change_privacy(cfg: Config, scope: str, setting: str, value: str | None, *,
         undo()
         raise EditError(f"not saved, the configuration wouldn't load: {exc}") from None
     except OSError as exc:
-        undo()
+        with contextlib.suppress(OSError):  # the write failed, so there's probably nothing to undo
+            undo()
         raise EditError(f"can't write {path.name}: {exc.strerror or exc} (edit the file by "
-                        "hand, or use the CLI outside the sandbox)") from None  # fmt: skip
+                        "hand)") from None  # fmt: skip
     old, now = _effective(cfg), _effective(new)
     changed = [(s, k) for s in now if s in old for k in now[s] if now[s][k][0] != old[s][k][0]]
     changes = [Change(s, k, old[s][k][0], now[s][k][0]) for s, k in changed]
