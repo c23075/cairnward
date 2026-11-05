@@ -44,7 +44,7 @@ def paths(tmp_path: Path) -> Paths:
     if sys.platform != "win32":
         (sk / "escape.txt").symlink_to("/etc/hostname")
     (p.config_dir / "environments" / "lit.toml").write_text(
-        'skills = ["apa-review"]\ntools = ["research"]\n[privacy]\nisolation = "off"\n'
+        'skills = ["apa-review"]\ntools = ["fs"]\n[privacy]\nisolation = "off"\n'
     )
     return p
 

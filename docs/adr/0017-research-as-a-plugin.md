@@ -169,6 +169,8 @@ A plugin is an MCP server marked `kind = "plugin"` in `mcp.toml`. For a plugin:
 5. **Rules 1, 2, 4, 6, 7 and 8** in the MCP launcher, the policy engine and the test suite.
 
 ### What the core loses
+*Added 2026-11-05 (D76):* the default `litreview-offline` and `litreview-online` environments and `citation_style` left the core too. The plugin writes its environments at install.
+
 - The research hooks in `core/server.py`, `core/management.py`, `egress/control.py`,
   `mcp/hub.py`, `policy/engine.py` (the `lit_*` special cases), `cli.py`, `config/models.py`,
   `doctor.py`, `check.py` and `run/runner.py`.

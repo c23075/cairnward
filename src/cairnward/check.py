@@ -11,8 +11,7 @@ Runs, against the running `cairnward serve`:
 Writes Markdown and JSON (default `docs/bench/check-<date>.md` in a repository checkout,
 else `<data>/reports/`). The report holds no prompts, answers or host name: the machine
 is described by CPU, memory and OS only. Evals need a repository checkout (they live in
-`evals/`); without one they are reported as skipped. Research evals are in the plugin's
-repository (`literature-review-agent-plugin`).
+`evals/`); without one they are reported as skipped.
 """
 
 from __future__ import annotations

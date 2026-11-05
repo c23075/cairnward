@@ -13,7 +13,6 @@ dependencies = [
     "pydantic>=2.8",
     "pyrage>=1.2",
     "cryptography>=44",
-    "pyyaml>=6",
     "sqlalchemy>=2.0",
     "uvicorn>=0.30",
 ]
@@ -32,7 +31,6 @@ dev = [
     "pip-audit>=2.7",
     "pytest-asyncio>=0.24",
     "openai>=1.40",
-    "types-pyyaml>=6.0.12.20261103",
 ]
 
 [build-system]
@@ -67,7 +65,7 @@ ignore = []
 # Vector table names are vec_<integer library id>; no user text reaches SQL strings.
 
 [[tool.mypy.overrides]]
-module = ["paperqa", "paperqa.*", "citeproc", "citeproc.*", "docling", "docling.*", "presidio_analyzer", "presidio_analyzer.*"]  # optional engines, separate environments
+module = ["presidio_analyzer", "presidio_analyzer.*"]  # an optional engine, in its own environment
 ignore_missing_imports = true
 
 [tool.mypy]

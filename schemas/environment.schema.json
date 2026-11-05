@@ -338,11 +338,6 @@
       "description": "override the backend for all roles",
       "title": "Backend"
     },
-    "citation_style": {
-      "default": "apa",
-      "title": "Citation Style",
-      "type": "string"
-    },
     "context_overflow": {
       "default": "warn",
       "description": "a prompt larger than context_tokens: warn, or refuse it",

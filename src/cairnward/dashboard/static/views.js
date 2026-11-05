@@ -427,7 +427,7 @@ export async function backups(main) {
   const changeSettings = async () => {
     const modes = [{ value: "none", label: "Off" }, { value: "on_demand", label: "Only when asked" }, { value: "auto", label: "Automatic" }];
     const v = await ask("Backup settings", {
-      text: "Backups hold your chats, artifacts, research library, audit log and settings, encrypted. Leave the folder empty for ~/cairnward-backups, or pick one on another disk if you can, because a backup on the same disk won't survive that disk failing. Changes take effect when Cairnward restarts.",
+      text: "Backups hold your chats, artifacts, plugins' data, audit log and settings, encrypted. Leave the folder empty for ~/cairnward-backups, or pick one on another disk if you can, because a backup on the same disk won't survive that disk failing. Changes take effect when Cairnward restarts.",
       fields: [{ name: "mode", label: "Backups", options: [...modes.filter(m => m.value === b.mode), ...modes.filter(m => m.value !== b.mode)] },
                ...(b.remote ? [] : [{ name: "repository", label: "Folder (full path)", value: b.where || "" },
                  { name: "access", label: "Who can read the folder", options: b.access === "group" ? [{ value: "group", label: "Me and my group" }, { value: "owner", label: "Only me" }] : [{ value: "owner", label: "Only me" }, { value: "group", label: "Me and my group" }] }])],
@@ -443,7 +443,7 @@ export async function backups(main) {
     .flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]));
   const last = b.last;
   put(main, h("h1", {}, "Backups"),
-    h("p", { class: "muted" }, "restic backups of the vault, research library, artifacts and settings, always encrypted. Run or restore them in a terminal: `cairnward backup run`, `cairnward backup restore --at DATE`."),
+    h("p", { class: "muted" }, "restic backups of the vault, plugins' data, artifacts and settings, always encrypted. Run or restore them in a terminal: `cairnward backup run`, `cairnward backup restore --at DATE`."),
     b.mode === "none"
       ? h("div", { class: "warnbox", role: "status" }, "Backups are off. Use Change settings, or run `cairnward backup use`.")
       : null,
@@ -490,7 +490,7 @@ export async function artifacts(main, params) {
   const scope = params.get("scope"), owner = params.get("owner");
   if (!scope) {
     put(main, h("h1", {}, "Artifacts"),
-      h("p", { class: "muted" }, "Versioned files from conversations (MCP tool artifact_write), research jobs and runs. Each write is a version; restoring makes a new one."));
+      h("p", { class: "muted" }, "Versioned files from conversations (MCP tool artifact_write), plugins and runs. Each write is a version; restoring makes a new one."));
     const repos = await api("/api/artifacts");
     put(main, repos.length ? table([
       { label: "Kind", key: "scope" },

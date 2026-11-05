@@ -2,7 +2,7 @@
 
 Modes (the ways `serve` can actually run):
 - `isolated`: isolation on; the core runs inside the sandbox and the outer process runs
-  egress, forwarders, sandboxed agents, MCP servers and the PaperQA2 worker.
+  egress, forwarders, sandboxed agents, MCP servers.
 - `hybrid`: isolation off globally but on for the `coding` environment; a single process,
   with agents and MCP servers of that environment still sandboxed.
 - `off`: isolation off everywhere; a single process, nothing sandboxed.

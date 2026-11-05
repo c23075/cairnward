@@ -1,7 +1,0 @@
-{"status": "ok", "message": {"items": [
- {"DOI": "10.1111/jsr.99001", "type": "journal-article", "title": ["Sleep duration and working memory in older adults"], "container-title": ["Journal of Sleep Research"],
-  "author": [{"given": "Mara P.", "family": "Walker"}], "issued": {"date-parts": [[2022, 6]]}, "is-referenced-by-count": 39,
-  "abstract": "<jats:p>Longer sleep predicted <jats:italic>better</jats:italic> recall.</jats:p>", "URL": "https://doi.org/10.1111/jsr.99001",
-  "link": [{"URL": "https://publisher.example/jsr99001.pdf", "content-type": "application/pdf"}]},
- {"DOI": "10.1000/book.1", "type": "book", "title": ["Sleep: a very short introduction"], "author": [{"name": "Sleep Society"}], "issued": {"date-parts": [[2015]]}}
-]}}

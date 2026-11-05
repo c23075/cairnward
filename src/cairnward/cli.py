@@ -1,7 +1,7 @@
 """Command-line entry point.
 
 Subcommands so far: `config paths|check|schema` and `privacy show`. More (`serve`, `run`,
-`doctor`, `audit`, `research`, ...) arrive with the Phase 0 tasks in docs/plan/phase0.md.
+`doctor`, `audit`, ...) arrive with the Phase 0 tasks in docs/plan/phase0.md.
 """
 
 from __future__ import annotations

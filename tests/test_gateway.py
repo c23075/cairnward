@@ -124,7 +124,7 @@ async def test_api_key_required(gw: Callable[..., Any]) -> None:
 async def test_models_lists_virtual_models(gw: Callable[..., Any]) -> None:
     g = await gw()
     ids = [m["id"] for m in (await g.client.get("/v1/models", headers=g.auth)).json()["data"]]
-    assert "cw/coding:low" in ids and "cw/litreview-offline:high" in ids
+    assert "cw/coding:low" in ids and "cw/scratch:high" in ids
 
 
 # ------------------------------------------------------------------ routing and forwarding
@@ -186,7 +186,7 @@ def test_resolve_raw_and_defaults(tmp_path: Path) -> None:
     cfg = load_config(Paths(tmp_path, tmp_path / "d", tmp_path / "s"))
     r = resolve(cfg, "cw/raw/qwen3:8b")
     assert (r.environment, r.model, r.backend) == ("coding", "qwen3:8b", "local-ollama")
-    assert resolve(cfg, "cw/litreview-offline").effort == "high"  # environment default
+    assert resolve(cfg, "cw/scratch").effort == "low"  # environment default
     with pytest.raises(UnknownModel):
         resolve(cfg, "qwen3:30b")
 

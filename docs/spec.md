@@ -19,16 +19,16 @@ Name: **Cairnward**: cairns mark a trail (the audit trail); *ward* means to guar
 
 ## 1. Purpose
 
-Most local AI tools (chat apps, coding agents, research assistants) run on your machine but give you **no verifiable record of what they did and no enforced control over what leaves the machine**. Cairnward sits between those tools and the outside world:
+Most local AI tools (chat apps, coding agents) run on your machine but give you **no verifiable record of what they did and no enforced control over what leaves the machine**. Cairnward sits between those tools and the outside world:
 
 1. **Gateway:** one local endpoint for models (OpenAI-compatible) and tools (MCP). Every model call, tool call and outbound connection is checked against a policy, recorded in a tamper-evident audit log, and shown in an egress report.
 2. **Enforced isolation:** tools run inside a sandbox whose **only** network route is Cairnward's egress proxy. This is enforced by the operating system, not by the tools' good behaviour.
 3. **Transcript vault:** Cairnward keeps its own copy of every conversation that passes through it, which you can search, lock with a passphrase, sync and reliably delete, whichever client you used.
-4. **Research workflows, as a plugin (D75):** literature review (local PDFs, Zotero, academic APIs) as batch jobs that can run overnight on a CPU-only machine, with verified citations in APA/IEEE.
+4. **Plugins under a contract (D75):** other programs can run sandboxed with no network of their own, and ask Cairnward for models and outside requests. The first is a separate project for literature review.
 
-Primary use cases: **coding** (via existing coding agents run through the gateway) and **literature-review research**, equally.
+Primary use cases: **coding** (via existing coding agents run through the gateway) and **research** (through a plugin, or any client), equally.
 
-All of these protections are **optional** (§5.0). With everything switched off, Cairnward is a plain model router with virtual models and research workflows; each protection can be switched on globally or per environment.
+All of these protections are **optional** (§5.0). With everything switched off, Cairnward is a plain model router with virtual models; each protection can be switched on globally or per environment.
 
 ### 1.1 Goals
 - G0. **User choice:** every privacy and security feature can be switched on or off, globally or per environment, through presets or individually; weakening is visible and logged, never silent.
@@ -36,7 +36,7 @@ All of these protections are **optional** (§5.0). With everything switched off,
 - G2. **Enforced choke point (when isolation is on):** no tool, client or Cairnward component can reach the network except through the egress proxy (OS-enforced).
 - G3. Verifiable record: audit log with externally anchored checkpoints.
 - G4. Client-neutral: any OpenAI-compatible chat client or coding agent works; a tested set is documented.
-- G5. Research workflows are provided by a separate plugin (D75), under a contract any plugin follows.
+- G5. Anything beyond the gateway is a separate plugin (D75), under a contract any plugin follows.
 - G6. Pluggable model backends (local, LAN, hosted), with hosted denied by default.
 
 ### 1.2 Non-goals
@@ -55,7 +55,7 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 |---|---|---|---|
 | D42 | Product direction | **Gateway + research**: client-neutral privacy gateway (model endpoint, MCP proxy, egress proxy, policy, audit, vault, dashboard) + own literature-review workflows | [0009](adr/0009-gateway-pivot.md) |
 | D43 | Use cases | Coding and research equally; coding via existing agents (Qwen Code, opencode, Aider, Goose, any OpenAI-compatible agent) run through the gateway | 0009 |
-| D44 | Clients | Client-neutral; 2–3 chat clients documented and tested; Cairnward builds only a **dashboard** (audit, egress, approvals, vault, research jobs, settings) | 0009 |
+| D44 | Clients | Client-neutral; 2–3 chat clients documented and tested; Cairnward builds only a **dashboard** (audit, egress, approvals, vault, settings) | 0009 |
 | D45 | Egress enforcement | **OS-level**: sandboxed processes have no network except a bridged connection to the egress proxy; Cairnward's own components run the same way; only the small `cairnward-egress` process has real network access | [0010](adr/0010-os-level-egress-enforcement.md) |
 | D46 | User-only actions | Agent tools with a **confirmation dialog** in the dashboard/CLI that shows the action **and its provenance** (what content preceded the request) | — |
 | D47 | Chat data | **Transcript vault**: Cairnward stores every conversation passing through it; lockable, syncable, purgeable | [0011](adr/0011-transcript-vault.md) |
@@ -64,7 +64,7 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D50 | Backup purge | Purging a conversation also **rewrites restic snapshots** to remove it, then prunes | [0007](adr/0007-sync-restic-backup-and-event-log-replication.md) (amended) |
 | D51 | Name, license | **Cairnward** (`cairnward`, alias `cw`), **Apache-2.0** | — |
 | D52 | Platforms | **Linux (Debian family) first**; Windows via WSL2 (D74); CI keeps unit tests on Windows | — |
-| D53 | Heavy dependencies | Lean core; Docling, Presidio and other heavy libraries run as **optional workers**; pypdfium2 is the default PDF parser | — |
+| D53 | Heavy dependencies | Lean core; Presidio and other heavy libraries run as **optional workers** | — |
 | D54 | Approvals | Risk-tiered, batched approvals with an approvals inbox, to avoid approval fatigue | — |
 | D55 | Optional protections | **Every** privacy/security feature can be switched off, including isolation, network blocking, approvals, redaction, vault, audit log, anchoring, crypto-shredding, backup purge rewrite and MCP pinning | [0012](adr/0012-optional-privacy-controls-and-presets.md) |
 | D56 | Defaults | **Preset chosen at first run** (`cairnward setup`): Open, Balanced or Strict; changeable any time; Custom when individual settings differ | 0012 |
@@ -74,12 +74,12 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D60 | Default context | **8K** tokens (16K allowed with a warning; 32K only on machines with more RAM/speed) | — |
 | D61 | Default models | Main: `qwen3:30b` (30B-A3B MoE); **fast: `qwen3:1.7b`** (2.3 GB, loads in 2 s, reads 2.5× faster). `qwen3:4b` measured: no faster than the 30B MoE on CPU, so it's only offered as a low-memory main model | — |
 | D62 | Cache-aware gateway | Never alter a conversation's prompt prefix; keep the main model loaded while in use; **conversation affinity** so follow-up turns reuse the cache (measured 18.6× faster); save/restore caches per conversation where the backend supports it (llama.cpp slots) | — |
-| D63 | Tiered research pipeline | Main model screens titles/abstracts (changed 2026-11-03: on the reference machine the fast model excluded every relevant paper, see `docs/bench/results-2026-11-03-screening.md`) and reads only included papers; full-text reading is an overnight job (~5–8 papers/hour) | — |
+| D63 | Tiered research pipeline | Moved to the research plugin with ADR-0017: see the plugin's `docs/design.md` | [0017](adr/0017-research-as-a-plugin.md) |
 | D64 | Coding agents on this hardware | Lean agents first (**Aider**); heavy-prompt agents (Qwen Code, opencode, Goose) supported but flagged as slow on CPU (first turn of a ~10K-token prompt ≈ 8 min) | — |
 | D65 | MCP protocol layer (2026-11-02) | The proxy's protocol plumbing is the **official MCP Python SDK** (typed layer, both directions; client endpoint stateless); Cairnward's policy, approvals, pinning and audit stay as they are; only standard fields reach clients (non-standard ones dropped and audited); pins hash the canonical JSON of what clients get, old pins carried over only when unchanged | [0015](adr/0015-mcp-proxy.md) (amended) |
 | D66 | Dashboard code (2026-11-02) | **Keep plain ES modules without a build step** (no npm supply chain in the page where approvals happen); revisit only if the dashboard grows a lot | [0016](adr/0016-dashboard-without-a-build-step.md) |
-| D67 | Reference formatting (revised 2026-11-02) | **Selectable CSL engine**, `[research] citation_engine = auto | builtin | citeproc-js | pandoc`; auto = citeproc-js (Zotero's engine, Node, installed pinned) if installed, else pandoc, else the built-in APA/IEEE formatter (always available, the fallback). Official APA 7 and IEEE CSL files and the en-US locale vendored unmodified (CC BY-SA 3.0), hash-checked. citeproc-py was tested and rejected: wrong sorting of accented names, capitalisation, conference papers and punctuation in quotes | — |
-| D68 | Richer PDF parsing | Optional sandboxed workers with **split roles**: **Docling** for body text, tables and OCR; **GROBID** for title/authors/DOI and the reference list; pypdfium2 stays the default and fallback; switched on per library | — (extends D53) |
+| D67 | Reference formatting | Moved to the research plugin with ADR-0017: see the plugin's `docs/design.md` | [0017](adr/0017-research-as-a-plugin.md) |
+| D68 | Richer PDF parsing | Moved to the research plugin with ADR-0017: see the plugin's `docs/design.md` | [0017](adr/0017-research-as-a-plugin.md) |
 | D69 | Third-party timestamps | Audit checkpoints can also be timestamped by an **RFC 3161 timestamp authority** (opt-in; only the checkpoint's hash leaves the machine) | 0008 |
 | D70 | Hosted providers | OpenRouter, DeepSeek API, Alibaba Model Studio, Groq, Cerebras, Gemini; denied by default, never for locked conversations. Backends that **may train on prompts** (most free tiers) are marked so and by default allowed **only in environments marked scratch**; the restriction can be switched off (visible and audited, like every weakening) | — |
 | D71 | M3 scope and order (2026-11-02) | Hardening first (server-mode test matrix, fuzzing, one-command eval/checklist runner, OpenShell review), then MCP SDK + citeproc-py, restic backups, Zotero + academic APIs, full review pipeline, Docling/GROBID, hosted providers, Drive mirror. Presidio and OpenTelemetry export included. **Deferred:** multi-device replication, multi-agent YAML workflows | [plan/m3.md](plan/m3.md) |
@@ -87,9 +87,10 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 | D73 | What agent runs can read (2026-11-04) | `home_access`: with `hidden`, the default in Balanced and Strict, a run sees only the parts of the home folder it needs, because a list of secret folders can't cover documents and other projects; `readable` is the opt-out, shown as a weakening. A run key is also pinned to its environment, because the environment selects the privacy level | — |
 | D74 | Windows (2026-11-04, NFR-PORT-2) | The owner uses a Windows laptop, so WSL2 moves from Won't to Should. Cairnward runs inside WSL2 with the Linux sandbox; WSL1 is refused. Under WSL every sandbox hides the Windows drives (from the mount table) and `/init` and `/run/WSL`, because a Windows program would run outside the sandbox. Cairnward's own folders may not be on a Windows drive. No native Windows isolation | — |
 | D75 | Research as a plugin (2026-11-05, [ADR-0017](adr/0017-research-as-a-plugin.md)) | Accepted: research moved to its own repository and runs under a general plugin contract. D42 and D43 are amended: coding and research stay equally important uses, but research is a consumer of the gateway. Choices the ADR left open: the workflow runner moved with research (it only runs research steps); backups stay in the outer process for now; no job page in the dashboard (the plugin's tools and CLI report jobs); plugins come only from a path the user names | — |
+| D76 | Plugins bring their environments (2026-11-05) | The core ships only `coding` and `scratch`. `litreview-offline` and `litreview-online` moved out: `cairnward-research install-plugin` writes them as ordinary files in `environments/`, and keeps any already there | [0017](adr/0017-research-as-a-plugin.md) |
 | D5, D19 | Model backends | Pluggable: Ollama (default), llama.cpp, any OpenAI-compatible server; per role / environment / effort | [0004](adr/0004-pluggable-backends.md) |
 | D29 | Hosted providers | Denied by default; tested first: Alibaba Model Studio, DeepSeek API, OpenRouter; Claude API later (separate API key) | 0004 |
-| D7, D25 | Literature sources, citations | Local PDFs, Zotero, arXiv/Semantic Scholar/OpenAlex/PubMed/Crossref; CSL styles (APA, IEEE default) | — |
+| D7, D25 | Literature sources, citations | Moved to the research plugin with ADR-0017: see the plugin's `docs/design.md` | [0017](adr/0017-research-as-a-plugin.md) |
 | D9 | Stack | Python now; egress proxy and audit log are first candidates for Rust | [0003](adr/0003-python-now-rust-later.md) |
 | D11, D21 | Hardware | 32 GB RAM, CPU only; 32K default context, adjustable | — |
 | D12, D20 | Effort levels | 3 defaults + user-defined levels in `effort.toml` | — |
@@ -121,9 +122,9 @@ Current decisions. Superseded decisions are listed at the end with what replaced
  │                   │ POLICY ENGINE  │                                                       │
  │                   └───────┬────────┘                                                       │
  │     ┌──────────┬──────────┼───────────┬─────────────┬──────────────┐                       │
- │  AUDIT LOG  TRANSCRIPT  REDACTOR   RESEARCH     ARTIFACTS     SYNC/BACKUP                  │
- │  (hash chain) VAULT      (light +  WORKFLOWS    (git repos)   (restic, event logs)         │
- │               (age)     optional   (jobs queue)                                            │
+ │  AUDIT LOG  TRANSCRIPT  REDACTOR   PLUGIN       ARTIFACTS     SYNC/BACKUP                  │
+ │  (hash chain) VAULT      (light +  SERVICES     (git repos)   (restic, event logs)         │
+ │               (age)     optional   (brokered)                                              │
  │                          worker)                                                           │
  │  Dashboard (loopback, hardened)                                                            │
  └──────────────┬──────────────────────────────────────────────────────────────┬──────────────┘
@@ -135,7 +136,7 @@ Current decisions. Superseded decisions are listed at the end with what replaced
         └─────────────────┘                                           └──────────────────┘
 ```
 
-The diagram shows the **Strict** configuration. Each box below the policy engine, and the sandboxing itself, can be switched off (§5.0); the endpoints, routing, virtual models and research workflows always work.
+The diagram shows the **Strict** configuration. Each box below the policy engine, and the sandboxing itself, can be switched off (§5.0); the endpoints, routing and virtual models always work.
 
 **Rules** (when the corresponding protections are on)
 1. Clients and agents talk only to Cairnward (model endpoint, MCP proxy) and, if allowed, to the egress proxy. The OS enforces this when isolation is on (§3.2); with isolation off, the proxy settings are advisory and tools can connect directly.
@@ -175,7 +176,7 @@ Linux mechanism: Anthropic's open-source **sandbox-runtime** (`srt`, pinned) wra
 |---|---|
 | `cw/coding:low` | fast model (`qwen3:1.7b`), no thinking, low limits |
 | `cw/coding:high` | main model (`qwen3:30b`), thinking on, larger budgets |
-| `cw/litreview-offline:medium` | main model, thinking on (it can't be turned off on this model), research tools allowed, network off |
+| `cw/coding:medium` | main model, thinking on (it can't be turned off on this model) |
 | `cw/raw/qwen3:30b` | pass-through to a specific model with the environment `default` |
 
 Picking a virtual model in any client selects effort (thinking mode and budget, sampling, context size, per-request token/time limits) and environment (allowed tools, network policy, redaction, backend). Effort levels and environments remain user-definable TOML (`effort.toml`, `environments/*.toml`; schemas as in v0.5).
@@ -191,15 +192,15 @@ Picking a virtual model in any client selects effort (thinking mode and budget, 
 - **Context reporting:** every response carries standard `usage` counts (shown by most clients), and the dashboard's live view shows context used vs limit per conversation. Expected waiting time is estimated from the stored benchmark profile (new, uncached prompt tokens ÷ measured reading speed); requests expected to take more than 60 s before the first token (≈ 1,300 new tokens on the reference machine's main model) are flagged.
 
 - **Resolution and fallback (implemented in T1.7):** a virtual model resolves its backend and model in this order: the request itself (`cw/raw/<model>`), the effort level's own `model`/`backend`, the client (`backend`, `[clients.<name>.models]` in clients.toml), the environment, the global roles. A backend may name a `fallback` (and `fallback_model`); config validation refuses a fallback that isn't local (FR-BACK-3). When the backend is unreachable or answers 5xx before anything reached the client, the request is retried once on the fallback, recorded as `model.fallback` and in the call's audit record, and flagged in `X-Cairnward-Warning` (non-streaming); client errors (4xx) aren't retried.
-- **A run is pinned to its environment:** an environment also selects the privacy level (D57), so an agent must not be able to pick a more open one. A run key from `cairnward run --env X` (or a PaperQA2 run) can only make model calls in `X`, as on the MCP routes: `/v1/chat/completions` and `/v1/embeddings` answer `403` (`run_environment`) to a `cw/<other>:<effort>` and audit it as a denied `model.call` under `X`, with `requested_environment` in the details; nothing reaches a backend. `cw/raw/<model>` uses the run's environment instead of the client's default. `cairnward run` refuses a `--model` from another environment before starting the agent. A client's own key isn't pinned and may name any environment. Listing models isn't filtered: `/v1/models` still shows a run every environment.
+- **A run is pinned to its environment:** an environment also selects the privacy level (D57), so an agent must not be able to pick a more open one. A run key from `cairnward run --env X` (or a plugin's key) can only make model calls in `X`, as on the MCP routes: `/v1/chat/completions` and `/v1/embeddings` answer `403` (`run_environment`) to a `cw/<other>:<effort>` and audit it as a denied `model.call` under `X`, with `requested_environment` in the details; nothing reaches a backend. `cw/raw/<model>` uses the run's environment instead of the client's default. `cairnward run` refuses a `--model` from another environment before starting the agent. A client's own key isn't pinned and may name any environment. Listing models isn't filtered: `/v1/models` still shows a run every environment.
 - **Disabled clients:** a client with `enabled = false` in clients.toml gets `401` with any of its keys, its run keys included, on chat, embeddings, models and MCP. Its keys start working again when it is switched back on. These refusals aren't audited.
 
 ### 4.2 MCP proxy and tools
 - Clients connect to one MCP endpoint (streamable HTTP, or `cairnward mcp` as a stdio shim). Cairnward aggregates the MCP servers enabled for the client's environment and applies policy, audit and redaction to every call.
 - Third-party MCP servers run in their own sandboxes (§3.2) with only their declared permissions.
 - Pinning (v0.5 D38): pinned versions and hashes; tool name/description/schema hashed at approval; any change disables the tool until re-approved; descriptions scanned for instruction-like text.
-- Built-in Cairnward tools (exposed via the proxy): `vault.search`, `artifact.write`, `cite.format`, `citation.check`, `encrypt` (user-only, §5.3).
-- Skills: SKILL.md folders are served to clients that support them and used by Cairnward's own research workflows.
+- Built-in Cairnward tools (exposed via the proxy): `vault.search`, `artifact.write`, `encrypt` (user-only, §5.3).
+- Skills: SKILL.md folders are served to clients that support them.
 - **Implemented (T2.10):** skills are folders `<config>/skills/<name>/SKILL.md` (front matter `name`, `description`); an environment offers those in its `skills = [...]` as MCP prompts (`prompts/list`, `prompts/get`, audited as `skill.use`) and their other files as read-only resources `skill://<name>/<path>` (hidden files and links out of the folder are not served; scripts are never run). `cairnward__lit_search` (opt-in with `tools = ["research"]`) searches the environment's indexed libraries and returns passages with titles and pages (also as structured content); its output counts as untrusted content for provenance. `cairnward__lit_ask` (same opt-in) answers with page citations (T1.3); `cairnward__lit_review_start` queues a review job (T1.4). `cairnward__lit_find` (environments with `research_sources` and the `research` or `scholar` tool, e.g. `litreview-online`) searches the academic APIs for the model through the same checks as `cairnward research search` (each host as `net.connect`, the query scanned as model-initiated outgoing text, audited by digest); results are untrusted content; adding papers stays with the user (`research add`). **Remote MCP servers** (`url` in `mcp.toml`, streamable HTTP through egress): see the ADR-0015 amendment.
 - **Implemented (M2, 2026-11-01, [ADR-0015](adr/0015-mcp-proxy.md)):** `mcp.toml` declares stdio servers with a permission manifest (hosts through egress, writable folders inside the workspace or the server's own folder, optional readable folders, passed-through variables), per-tool `allow / ask / deny`, and optional `pin_file` + `sha256`. Environments list `mcp_servers`. The gateway serves `/mcp/<environment>` (streamable HTTP, JSON responses, per-client sessions, Origin check); `cairnward mcp` is the stdio bridge; `cairnward run` passes the endpoint to agents (opencode's per-run config includes it). Tools appear as `<server>__<tool>`; each call is a `tool.call` action (policy, approvals, audit pre/post with argument and result digests). Pinning hashes whole definitions and offers only approved ones (`cairnward mcp tools | approve`); changes are audited (`mcp.tool_changed`) and disable the tool; descriptions are scanned for instruction-like text. Servers start on first use in their own sandbox; with the core isolated the outer process starts them (srt can't nest) and hands the core a socket. Not yet: remote MCP servers, built-in `lit.*`/`vault.*` tools on this endpoint, redaction of tool traffic, idle shutdown.
 - **OAuth for remote MCP servers:** `auth = "oauth"` in `mcp.toml`. `cairnward mcp login <server>` signs in once, in a terminal, on the MCP SDK's client: discovery, dynamic registration and PKCE, the answer coming back to a one-time listener on 127.0.0.1, and the login's requests going through an egress session in the environment. Tokens are kept owner-only in `<state>/mcp-oauth/<server>.json`, never in config or the audit log; `mcp logout` forgets them. The core only uses and refreshes tokens and never starts a sign-in: when a token can't be refreshed, connecting fails with a message to log in again. Every host it talks to, the sign-in server's included, is checked by policy on every request. Tested with the real SDK against a fake authorization server on real sockets; no real provider tried yet.
@@ -250,14 +251,14 @@ A plugin is an MCP server with `kind = "plugin"`. It gets no capability that a p
 - **Versioned:** `contract_min` and `contract_max` must include the core's contract version (now 1).
 - **Commands:** `cairnward plugin add | list | pin | verify | run | allow-read | helper | remove`. `plugin run` starts a command in the plugin's sandbox with your terminal. `plugin helper` starts a program that can't use fetch (rclone) outside the sandbox with its traffic through egress.
 
-Research workflows are one such plugin, in their own repository (`literature-review-agent-plugin`, package `cairnward-research`), with their design, requirements (FR-RES-*) and evals there. Old settings (`[research]`, `research_sources`, `include_research`) still load, so a config file doesn't break: the first two are ignored and belong in the plugin's `research.toml`.
+Literature research is one such plugin, a separate project (`literature-review-agent-plugin`, package `cairnward-research`) with its own design, requirements, threat model, status and evals. The core knows nothing about it beyond two kinds of leftovers that keep an older setup working: commands that moved print where they went, and old settings (`[research]`, `research_sources`, `include_research`, `citation_style`) still load, with all but `include_research` ignored. A plugin brings its own environments if it needs them (D76): the core ships only `coding` and `scratch`.
 
 ### 4.7 Artifacts
-Git repo per conversation, research job and agent run (one commit per write; restore = new commit). Previews of HTML/SVG in the dashboard use a sandboxed origin with no network.
+Git repo per conversation, plugin job and agent run (one commit per write; restore = new commit). Previews of HTML/SVG in the dashboard use a sandboxed origin with no network.
 - **Implemented (T1.9):** repositories in `<data>/artifacts/<conversation|job|run>/<id>/` (owner-only); a write that changes nothing makes no commit; restore writes the old content as a new commit; paths are confined to the repository (no `..`, absolute paths or `.git`), 2 MB per file. Conversations' artifacts are deleted when the conversation is purged; research job results are committed to the job's repository. Models write through MCP tools (`cairnward__artifact_write | read | list`, opt-in with `tools = ["artifacts"]`, policy-checked and audited, scoped to the client's current conversation). Agent runs keep using workspace snapshots (`cairnward runs`). `cairnward artifacts list | files | log | show | restore` and the dashboard's Artifacts view (versions, restore). **Previews (FR-ART-4):** HTML and SVG open in an `<iframe sandbox>` served with `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:` (opaque origin, no scripts, no network); a browser test checks that a preview's script doesn't run and its external image isn't fetched. **Locking (FR-ENC-1):** locking a conversation seals its whole artifact repository, history and file names included, into one file (`sealed.age`) encrypted with the conversation's own age key, so its passphrase, recovery key and crypto-shredding all apply. While it's locked nothing can read or write its artifacts; `cairnward artifacts` and the dashboard show it as locked. While it's unlocked in the server, each operation works on a temporary copy (in `$XDG_RUNTIME_DIR` when there is one, else the system's temporary folder) that's deleted afterwards, and a write seals the repository again. Removing the lock restores the plain repository. A repository under a conversation locked before this existed is closed at once and sealed at its next unlock. Limits: earlier plaintext isn't erased from the disk's free space or from old backups (`purge` removes it from backups). `cairnward artifacts lock job|run <id>` locks a finished job (its artifact repository and its folder, leaving a stub with only its id, kind, status and times) or a run's artifact repository, with a new key under its own passphrase, covered by the recovery key; `unlock` removes the lock and restores the files. Run snapshots (`cairnward runs`) are kept per workspace, not per run, and can't be locked.
 
 ### 4.8 Sync and backup (D27, D30, D40, D50)
-As v0.5 ([ADR-0007](adr/0007-sync-restic-backup-and-event-log-replication.md)), now covering the **vault, research library and artifacts**:
+As v0.5 ([ADR-0007](adr/0007-sync-restic-backup-and-event-log-replication.md)), now covering the **vault, plugins' data and artifacts**:
 - Modes `none` (default), `on_demand`, `auto` (on change and/or schedule) for every job.
 - `backup` jobs: restic (always encrypted), retention policies.
 - **Purge rewrites backups (D50):** purging a conversation runs `restic rewrite --exclude` for its records and key across all snapshots, then `restic prune`. Until that completes the dashboard shows "pending removal from N backups"; failures are retried and reported.
@@ -269,7 +270,7 @@ As v0.5 ([ADR-0007](adr/0007-sync-restic-backup-and-event-log-replication.md)), 
 - **From the dashboard:** the Backups view has **Back up now**, which sets up the repository the first time (in isolated mode the outer process runs it, because the core can't reach the folder), and **Change settings** for the mode and a folder. A remote repository stays a change made in `cairnward.toml`. Settings take effect on restart. Both are audited (`backup.requested`, `backup.settings`: which fields changed, not the path).
 
 ### 4.9 Dashboard
-Loopback web app (hardened as §3.1), the only UI Cairnward builds: **approvals inbox**, live activity, audit browser (per client/run/conversation), egress report, vault browser, research jobs, artifacts, sync status, settings (backends, environments, effort, clients, MCP servers). Plus a terminal equivalent for key flows: `cairnward approvals`, `cairnward audit`, `cairnward vault`. Accessibility target WCAG 2.2 AA.
+Loopback web app (hardened as §3.1), the only UI Cairnward builds: **approvals inbox**, live activity, audit browser (per client/run/conversation), egress report, vault browser, artifacts, sync status, settings (backends, environments, effort, clients, MCP servers). Plus a terminal equivalent for key flows: `cairnward approvals`, `cairnward audit`, `cairnward vault`. Accessibility target WCAG 2.2 AA.
 
 **Implemented (T2.7):** `cairnward dashboard` asks the running core for a single-use sign-in link (2 minutes) and opens it; the link becomes an HttpOnly, SameSite=Strict session cookie and leaves the address bar. Served on 127.0.0.1:`dashboard_port` (in isolated mode the core serves a Unix socket and the outer process forwards the port). Host allowlist, CSRF token header plus Origin check on every change, strict CSP, no CORS, `no-store` on the API. Views: approvals (live; provenance warning; passphrase dialog for user-only actions; "yes to all like it"; late answers), activity (live audit tail), audit (filters, chain check, JSON-lines export), egress (filters, CSV), vault (search, trash, pin, folders, lock/unlock dialogs, export, delete with undo; shortcuts `j k Enter / d f L p x l ?`, switchable in Settings), MCP tools (permissions, review and approve definitions with warnings), settings (read-only privacy per environment with weaker-than-Strict values highlighted, backends, roles, clients). Tested with request-level security tests and a Chromium end-to-end test (sign-in, live approval, vault shortcuts, an XSS probe, locking, no CSP violations, labelled controls, skip link). Since added (2026-11-02): research jobs and artifacts views; a **Backups** view (mode, where (a remote's host only), its egress environment, retention, last backup, purged conversations still in older backups with retries and errors); **editing privacy settings** in Settings: the preset and each enumerated setting globally or per environment (not allow-lists or backends), written to the same TOML file a person edits (comments kept; a built-in environment is written out with its settings first), only if the whole configuration still loads; a change that leaves a setting weaker than Strict asks first (the server answers 409 until confirmed); recorded as `settings.changed` by "user (dashboard)"; takes effect on restart, shown as "saved, not yet in effect" until then (if the process serving the dashboard can't write the config folder, as may be the case for the sandboxed core in isolated mode, nothing is changed and the dashboard says to edit the file; not yet tried with the sandbox, which isn't installed in the build environment). Settings also shows the vault recovery key's status. The browser test now runs **axe-core 4.14.0** (WCAG 2.0/2.1/2.2 A and AA plus best practices) on all ten views in light and dark mode and requires zero violations; dialogs and the sandboxed preview's contents aren't audited.
 
@@ -299,7 +300,7 @@ Every protection in this section and in §3.2/§4.5/§4.8 is a setting. A **pres
 | `mcp_pinning`: tool pinning and rug-pull checks (§4.2) | `off` / `on` | off | on | on |
 | `egress_report`: per-conversation report (§4.9) | `off` / `on` | off | on | on |
 
-- **Open** keeps the audit log on because it costs nothing in daily use; it can still be switched off. With every setting off, Cairnward is a plain router: virtual models, backends, research workflows and the dashboard's model/job views keep working.
+- **Open** keeps the audit log on because it costs nothing in daily use; it can still be switched off. With every setting off, Cairnward is a plain router: virtual models, backends and the dashboard's model views keep working.
 - **Opt-in features stay opt-in in every preset:** locking a conversation with a passphrase, encrypting a sync target, TLS interception. Presets never lock or encrypt anything on their own.
 - **Not switchable** (they are functional, not protective): the passphrase dialog when you lock/unlock something; the local-only binding and Host/Origin checks of the dashboard and endpoints (§3.1), because turning them off would expose Cairnward to any web page or network peer rather than reduce friction. *(If you want these switchable too, say so; see §12.)*
 
@@ -314,7 +315,7 @@ approvals = "tiered"         # individual override → shows as "balanced (custo
 [privacy]
 preset = "open"
 
-# environments/thesis-confidential.toml
+# environments/confidential.toml
 [privacy]
 preset = "strict"
 vault = "digests"            # keep only digests of conversations
@@ -348,7 +349,7 @@ See [threat-model.md](threat-model.md) (updated for v0.6). Key changes: third-pa
 - **Implemented (T2.6, CLI):** the provenance tracker notes tool results after the user's last message (from chat requests) and tool outputs relayed by the MCP proxy, per client and run; model-started user-only actions carry it into the confirmation, which says prominently that untrusted content came first. First user-only tool: `cairnward__lock_conversation` (opt-in with `tools = ["vault"]` in an environment), which locks the client's current conversation after confirmation; the passphrase is typed in `cairnward approvals` (twice, hidden) and passes to the vault without being stored, logged or audited. Similar pending requests can be answered together (`a`). A request whose client stopped waiting stays listed for 10 minutes as "gave up"; answering yes approves the client's next identical request once, so retries don't ask again (FR-POL-5).
 
 ### 5.4 Redaction
-- Applies to traffic Cairnward terminates: model calls to non-local backends, MCP tool calls, research API calls.
+- Applies to traffic Cairnward terminates: model calls to non-local backends, MCP tool calls, plugins' fetches.
 - Built-in light scanner (secret patterns, emails, phone numbers, ID-like numbers, custom regexes) in the core; **Presidio** as an optional worker for richer personal-data detection (D53).
 - Defaults: secrets **block**, personal data **ask** (batched; see §5.3).
 - **Implemented (T2.1):** built-in patterns for secrets (private keys, AWS/GitHub/OpenAI/Anthropic/Slack/Google/Stripe/Hugging Face tokens, JWTs, Cairnward keys, password assignments) and personal data (emails, phone numbers, payment cards with Luhn check, IBANs with checksum, US SSNs, NRIC-style ID numbers), plus `[redaction] custom` patterns and `ignore` rules in cairnward.toml. Scanned: messages and embedding inputs to non-local backends, MCP tool arguments. `warn`: sent, flagged in `X-Cairnward-Warning`, audited; `enforce`: secrets refused (`403 redaction_blocked`, or a tool error), personal data asks (`data.send`, rememberable per conversation or environment). Audit records hold kinds and counts, never the matched text; content is never altered. Presidio stays optional (later).
@@ -375,13 +376,9 @@ As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Sc
 | Store | SQLite (WAL, FTS5, sqlite-vec), Alembic migrations | Public domain / MIT |
 | Crypto | age via pyrage | MIT / Apache-2.0 |
 | MCP | own minimal JSON-RPC layer for the tool proxy ([ADR-0015](adr/0015-mcp-proxy.md)); MCP Python SDK if resources/sampling are needed later | MIT |
-| PDF | pypdfium2 (default); Docling (optional worker) | Apache-2.0/BSD; MIT |
 | Redaction | built-in rules; Presidio (optional worker) | —; MIT |
-| Citations | citeproc-py + CSL styles | BSD / CC BY-SA |
-| Research engine | own pipeline; PaperQA2 evaluated | Apache-2.0 |
 | Backup / sync transport | restic, rclone, git | BSD-2 / MIT / GPL-2.0 (separate processes) |
 | Dashboard | plain ES modules, no build step ([ADR-0016](adr/0016-dashboard-without-a-build-step.md)) | — |
-| Agent loop for research workflows | evaluate PydanticAI (MCP + OpenTelemetry built in) vs own loop | MIT |
 
 ---
 
@@ -394,7 +391,7 @@ As v0.5 §5.7: hash-locked deps, pip-audit, license check, pinned CI actions, Sc
   - Load time of the 30B model: 33 s when cached by the OS, 74 s cold.
   - Follow-up turns with an unchanged prompt start: 18.6× faster (11.7 s vs 217 s at 4K).
   - Main + fast model fit together at 8K context only when heavy desktop apps are closed (~9 GB left).
-- Consequences: 8K default context (D60); first turns of long prompts take minutes, follow-ups seconds (D62); heavy coding agents are slow (D64); research runs as overnight batch jobs (D63).
+- Consequences: 8K default context (D60); first turns of long prompts take minutes, follow-ups seconds (D62); heavy coding agents are slow (D64).
 - **Upgrade paths** (documented for users, not required): an 8-core AM4 CPU (e.g. Ryzen 7 5700X, if the motherboard BIOS supports it) for roughly 2–3× faster prompt reading; a GPU with ≥ 12 GB VRAM for many times faster reading using llama.cpp's MoE offload (experts on CPU, rest on GPU); 64 GB RAM for larger contexts and keeping more models loaded (not faster).
 - Performance targets are fixed from `scripts/bench_backend.py` results (§8).
 - **Linux first** (Debian 12+, Ubuntu 22.04+, Mint, Pop!_OS). **Windows via WSL2** (D74, [guide](wsl2.md): Cairnward and sandboxed agents run inside WSL2; Windows-native clients connect to it over loopback). CI runs unit tests on Windows throughout so nothing becomes harder to port.
@@ -413,7 +410,7 @@ Full list in [requirements.md](requirements.md).
 | Waiting-time warning | Requests expected to need > 60 s before the first token are flagged, using the stored benchmark profile |
 | Footprint | Core ≤ 500 MB RAM without optional workers |
 | Isolation | With `isolation = on`: direct connections from any sandbox fail (`cairnward doctor` and CI tests) |
-| Reliability | No data loss on crash; audit record before every effect (when audit is on); research jobs resume after restart |
+| Reliability | No data loss on crash; audit record before every effect (when audit is on) |
 | Privacy | Strict preset: zero outbound connections unless allowlisted; Balanced: none without approval; Open: as configured |
 | Optionality | Every protection can be switched off independently and Cairnward still works; with all off, gateway overhead ≤ 10 ms per request |
 | Accessibility | Dashboard WCAG 2.2 AA; single-key shortcuts can be turned off |
@@ -422,7 +419,7 @@ Full list in [requirements.md](requirements.md).
 ## 9. Delivery plan (summary)
 Details in [plan/phase0.md](plan/phase0.md).
 - **M0 — Gateway skeleton:** privacy settings model with presets and per-environment overrides (each protection added later plugs into it); model endpoint pass-through to Ollama with policy + audit + vault write; `cairnward run` sandbox with no direct network; `cairnward-egress`; one coding agent and one chat client working through it.
-- **M1 — Research core:** PDF library, `lit.ask` with page citations, citation check, CSL formatting, research job queue; PaperQA2 spike.
+- **M1 — Research core (moved to the plugin since):** PDF library, `lit.ask` with page citations, citation check, CSL formatting, research job queue; PaperQA2 spike.
 - **M2 — Security features and dashboard:** approvals inbox, risk tiers, provenance dialog, redaction, egress report, vault browser, locking, audit anchoring, MCP proxy with pinning, all four coding agents and 2–3 clients tested.
 - **M3 — Sync, connectors, orchestration:** hardening, MCP SDK and CSL formatting, backup with purge rewrite, Zotero, academic APIs, full review pipeline, Docling/GROBID, hosted backends, Drive mirror ([plan/m3.md](plan/m3.md)). Multi-device replication (D72) and multi-agent workflows, deferred by D71, since built.
 - **Later:** Ollama-compatible endpoint, Rust egress proxy, Merkle checkpoints.

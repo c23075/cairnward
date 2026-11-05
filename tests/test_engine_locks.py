@@ -31,13 +31,13 @@ def test_presidio_lock_is_complete() -> None:
 
 def test_shipped_and_export(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(locks, "LOCK_DIR", tmp_path / "locks")
-    assert locks.shipped("docling") is None
+    assert locks.shipped("other-engine") is None
     recorded = tmp_path / "requirements.lock.txt"
     with pytest.raises(FileNotFoundError):
-        locks.export("docling", recorded)
-    recorded.write_text("docling==2.140.0 --hash=sha256:00\n")
-    dest = locks.export("docling", recorded)
-    assert dest.name == f"docling-{locks.platform_tag()}.txt"
-    assert locks.shipped("docling") == dest
-    (tmp_path / "locks" / "docling.txt").write_text("x")
-    assert locks.shipped("docling") == dest  # a platform-specific lock comes first
+        locks.export("other-engine", recorded)
+    recorded.write_text("other-engine==2.140.0 --hash=sha256:00\n")
+    dest = locks.export("other-engine", recorded)
+    assert dest.name == f"other-engine-{locks.platform_tag()}.txt"
+    assert locks.shipped("other-engine") == dest
+    (tmp_path / "locks" / "other-engine.txt").write_text("x")
+    assert locks.shipped("other-engine") == dest  # a platform-specific lock comes first

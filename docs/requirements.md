@@ -71,7 +71,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-MCP-1 | MCP proxy (streamable HTTP + stdio shim) aggregating enabled servers per environment | M | M2 | integration |
 | FR-MCP-2 | Permissions = manifest ∩ environment; third-party servers sandboxed | M | M2 | `tests/test_mcp.py`, `tests/isolation/test_mcp_sandbox.py` |
 | FR-MCP-3 | Version/hash pinning; tool-definition hashes; change → disabled until re-approved | M | M2 | `tests/test_mcp.py::test_rug_pull_disables_the_tool` |
-| FR-MCP-4 | Skills (SKILL.md) served to clients and used by research workflows | S | M2 | integration |
+| FR-MCP-4 | Skills (SKILL.md) served to clients | S | M2 | integration |
 
 ### Coding agents
 | ID | Requirement | Pri | MS | Verification |
@@ -135,7 +135,7 @@ FR-RES-1 to FR-RES-13 moved to the `literature-review-agent-plugin` repository w
 | ID | Requirement | Pri | MS | Verification |
 |---|---|---|---|---|
 | FR-SYNC-1 | Modes none/on_demand/auto for every job | M | M3 | `test_backup.py` |
-| FR-SYNC-3 | restic backups of vault, artifacts, research library; retention; restore to date | M | M3 | local restic repo |
+| FR-SYNC-3 | restic backups of vault, artifacts, plugins' data; retention; restore to date | M | M3 | local restic repo |
 | FR-SYNC-4 | Replication via per-device event logs + git history for artifacts, through a shared folder; deterministic merge; fork on concurrent turns | S | M3 | Hypothesis convergence (`test_replication.py`) |
 | FR-SYNC-6 | Locked items only written encrypted; cloud warning; "encrypt this sync target" | M | M3 | `test_backup.py` (backups encrypted, cloud warning) |
 | FR-SYNC-8 | Purge rewrites restic snapshots and prunes; pending state shown; retries | M | M3 | `test_backup.py` (content absent from all snapshots) |
@@ -163,7 +163,7 @@ FR-RES-1 to FR-RES-13 moved to the `literature-review-agent-plugin` repository w
 | NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | `bench_backend.py --cache-test` through the gateway: 19.6× |
 | NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | `bench_backend.py` through the gateway: 11 to 14 s fast, 22 s main |
 | NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | `docs/bench/results-2026-11-03-measurements.md`: 122 MB meets; start about 3.5 s isolated on 2026-11-05, misses, and no slower with 3,000 conversations; earlier about 2.8 s by another script; see `docs/status.md` I15. |
-| NFR-R1 | No data loss on crash; research jobs resumable | M | kill tests |
+| NFR-R1 | No data loss on crash | M | kill tests |
 | NFR-R2 | Audit record before every effect | M | FR-AUD-1 |
 | NFR-S1 | Strict: zero outbound connections unless allowlisted; Balanced: none without approval | M | isolation suite per preset |
 | NFR-S2 | Threat model reviewed each milestone | M | PR template; recorded in `docs/reviews/` |

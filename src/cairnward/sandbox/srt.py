@@ -32,7 +32,7 @@ CLI_REL = Path("node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js")
 
 # Never readable from inside a sandbox (relative to the home directory). Runs hide the whole
 # home folder by default; this list still applies inside what they re-allow, and it's all the
-# core, MCP servers and research engines have.
+# core, MCP servers and plugins have.
 SECRET_DIRS = (
     # keys and cloud or code-host credentials
     ".ssh",

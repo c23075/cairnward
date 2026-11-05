@@ -59,11 +59,11 @@ def test_change_rules(paths: Paths) -> None:
     assert "redaction" not in paths.main_config.read_text()
     # a built-in environment is written out first, keeping its other settings
     cfg = load_config(paths)
-    builtin_tools = cfg.environments["litreview-online"].tools
-    new, _ = change_privacy(cfg, "litreview-online", "network", "off")
-    env_file = paths.environments_dir / "litreview-online.toml"
-    assert env_file.exists() and new.environments["litreview-online"].tools == builtin_tools
-    assert new.privacy("litreview-online").settings["network"].value == "off"
+    builtin_tools = cfg.environments["coding"].tools
+    new, _ = change_privacy(cfg, "coding", "network", "off")
+    env_file = paths.environments_dir / "coding.toml"
+    assert env_file.exists() and new.environments["coding"].tools == builtin_tools
+    assert new.privacy("coding").settings["network"].value == "off"
     # a change that would make the configuration invalid isn't written
     (paths.environments_dir / "bad.toml").write_text('[privacy]\nnetwork = "off"\n')
     cfg = load_config(paths)

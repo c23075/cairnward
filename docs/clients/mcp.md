@@ -47,7 +47,7 @@ Warnings such as "hidden-instruction tag" or "asks for secrecy" mean the descrip
 Tools appear as `<server>__<tool>`, e.g. `notes__delete_note`. Server logs: `logs/mcp-<server>-<environment>.log` in the state folder.
 
 ## Cairnward's own tools and skills
-- The research plugin adds `research__lit_search`, `research__lit_ask` and others in the environments it's on: see [Plugins](../plugins.md).
+- A plugin adds its tools as `<plugin>__<tool>` in the environments it's on: see [Plugins](../plugins.md).
 - `tools = ["vault"]` adds `cairnward__lock_conversation`, which you confirm (and give the passphrase) in Cairnward, never in the chat.
 - Skills: put a folder with a `SKILL.md` under `~/.config/cairnward/skills/<name>/` and list it in the environment's `skills = [...]`. Clients that support MCP prompts show it as a prompt; its other files are MCP resources.
 

@@ -10,6 +10,5 @@ max_tool_steps = 40
 subagents = { max = 6, max_parallel = 1, effort = "medium" }
 context_tokens = 16384
 temperature = 0.6
-wall_clock_limit = "8h"          # e.g. an overnight literature review
-skills = ["lit-review", "citation-check"]
+wall_clock_limit = "8h"          # e.g. an overnight batch job
 order = 40

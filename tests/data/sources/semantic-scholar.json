@@ -1,6 +1,0 @@
-{"total": 2, "data": [
- {"paperId": "s2a1", "title": "Sleep Duration and Working Memory in Older Adults", "year": 2022, "venue": "J. Sleep Res.", "citationCount": 44,
-  "externalIds": {"DOI": "10.1111/JSR.99001", "PubMed": "35000001"}, "authors": [{"name": "M. P. Walker"}], "abstract": "Longer sleep predicted better recall.", "openAccessPdf": null, "url": "https://www.semanticscholar.org/paper/s2a1"},
- {"paperId": "s2a2", "title": "Slow-wave sleep and memory consolidation", "year": 2021, "venue": "", "citationCount": 12,
-  "externalIds": {"ArXiv": "2101.00001"}, "authors": [{"name": "Lena Ito"}], "abstract": null, "openAccessPdf": {"url": "https://arxiv.org/pdf/2101.00001"}}
-]}

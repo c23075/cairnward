@@ -17,5 +17,5 @@ browser ──► 127.0.0.1:3000 ──► ui (socat) ──► client container
 - Pin image versions in `.env` (tags, or better digests); the templates refuse to start without them.
 - Rootless Podman maps the container's root to your user, so the owner-only socket works as is. With rootful Docker, the container's root can open it too; that is what the mount is for.
 - If Cairnward restarts, the socket is recreated in the same folder; the folder (not the file) is mounted, so the link keeps working.
-- Plugins that fetch from the internet (web search, URL readers) simply fail inside such a container; use Cairnward's own research tools instead.
+- Plugins that fetch from the internet (web search, URL readers) simply fail inside such a container.
 - Desktop clients (Jan) run on the host: they can't be confined this way; see [jan.md](jan.md).

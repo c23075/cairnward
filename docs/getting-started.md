@@ -104,13 +104,8 @@ uv run cairnward audit anchor --setup
 uv run cairnward audit verify --anchors
 ```
 
-## 6. A literature library (a plugin)
-Questions over a folder of PDFs and reviews come from the `cairnward-research` plugin. See [Plugins](plugins.md) to install it. Its commands are `cairnward-research library`, `research`, `jobs` and `cite`, and its README covers the rest.
-
-If you used `cairnward library` before the split, copy your libraries over once. The originals stay where they are:
-```bash
-cairnward-research import
-```
+## 6. Plugins (optional)
+A plugin adds tools to Cairnward and runs under its protections. See [Plugins](plugins.md). If you used `cairnward library` before research moved out, [`literature-review-agent-plugin`](https://github.com/c23075/literature-review-agent-plugin) has it now, and its README says how to bring your libraries over.
 
 ## 7. Hosted models (optional)
 Cairnward runs local models by default; hosted providers are off until you add one. List the ready-made templates and print one to paste into `backends.toml`:
@@ -123,7 +118,7 @@ uv run cairnward backend template openrouter-free
 Keys come from environment variables (e.g. `export OPENROUTER_API_KEY=...`), never from config files. Hosted backends are still refused until an environment allows them (`hosted_backends = "ask"` or `"allow"`), never get locked conversations, and free tiers that may train on your prompts only answer in environments marked `scratch = true`.
 
 ## 8. Back up
-Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. They hold your chats, artifacts, research library, job results, audit log and settings. To turn them on:
+Backups use [restic](https://restic.net) (`sudo apt install restic`), always encrypted. They hold your chats, artifacts, plugins' data, audit log and settings. To turn them on:
 ```bash
 uv run cairnward backup use /media/backup/cairnward
 ```
@@ -161,7 +156,7 @@ uv run cairnward replicate approve <id>
 If both devices reply in the same conversation before syncing, both replies are kept, as a fork. Purging a conversation purges it everywhere, once each device has synced. Turn off version history for this folder in Syncthing or your cloud drive, or old files outlive purges and locks. Research libraries and settings aren't shared. If you lose a device, `replicate block <id>` stops its changes being accepted, but it can still read the folder with the key it holds: to shut it out, run `replicate leave` then `init` on a new folder, and `join` from the others.
 
 ## 10. Check everything on your machine
-With `cairnward serve` running and your models pulled, one command runs the doctor and the coding eval (the research evals are in the plugin's repository):
+With `cairnward serve` running and your models pulled, one command runs the doctor and the coding eval:
 ```bash
 uv run cairnward check
 ```

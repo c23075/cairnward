@@ -24,7 +24,7 @@ def test_no_files_gives_spec_defaults(paths: Paths) -> None:
     assert cfg.backends.roles["fast"].model == "qwen3:1.7b"
     assert cfg.effort_levels_ordered() == ["low", "medium", "high"]
     assert cfg.effort["low"].model_role == "fast"
-    assert set(cfg.environments) == {"coding", "litreview-offline", "litreview-online", "scratch"}
+    assert set(cfg.environments) == {"coding", "scratch"}
     assert cfg.environments["coding"].context_tokens == 8192
     assert cfg.privacy().label == "Balanced"
     assert cfg.privacy("scratch").label == "Open"
@@ -40,7 +40,7 @@ schema_version = 1
 preset = "strict"
 approvals = "high_only"
 [defaults]
-environment = "thesis"
+environment = "client"
 effort = "deep-review"
 """,
     )
@@ -74,9 +74,9 @@ order = 40
 """,
     )
     write(
-        c / "environments" / "thesis.toml",
+        c / "environments" / "client.toml",
         """
-workspace = "~/research/thesis"
+workspace = "~/work/client"
 effort_default = "deep-review"
 [privacy]
 vault = "digests"
@@ -88,7 +88,7 @@ vault = "digests"
 [clients.open-webui]
 kind = "chat"
 profile = "open-webui"
-default_environment = "thesis"
+default_environment = "client"
 [clients.aider]
 kind = "agent"
 profile = "aider"
@@ -97,8 +97,8 @@ profile = "aider"
     cfg = load_config(paths)
     assert len(cfg.files_loaded) == 5
     assert cfg.effort_levels_ordered() == ["low", "medium", "high", "deep-review"]
-    assert cfg.environments["thesis"].workspace[0] == Path("~/research/thesis").expanduser()
-    eff = cfg.privacy("thesis")
+    assert cfg.environments["client"].workspace[0] == Path("~/work/client").expanduser()
+    eff = cfg.privacy("client")
     assert eff.value("approvals") == "high_only"
     assert eff.value("vault") == "digests"
     assert eff.label == "Strict (custom: approvals, vault)"
@@ -240,5 +240,5 @@ def test_example_configs_load(tmp_path: Path) -> None:
     shutil.copytree(example, cfg_dir)
     cfg = load_config(Paths(cfg_dir, tmp_path / "d", tmp_path / "s"))
     assert "deep-review" in cfg.effort
-    assert cfg.privacy("thesis-confidential").label == "Strict (custom: vault)"
+    assert cfg.privacy("confidential").label == "Strict (custom: vault)"
     assert set(cfg.clients.clients) == {"open-webui", "aider"}

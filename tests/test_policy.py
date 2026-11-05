@@ -332,8 +332,11 @@ def test_cli_explain(paths: Paths, capsys: pytest.CaptureFixture[str]) -> None:
     from cairnward.cli import main
 
     base = ["--config-dir", str(paths.config_dir), "policy", "explain"]
-    assert main([*base, "net.connect", "pypi.org", "--env", "litreview-offline"]) == 0
+    paths.environments_dir.mkdir(parents=True, exist_ok=True)
+    (paths.environments_dir / "offline.toml").write_text('[privacy]\nnetwork = "off"\n')
+    (paths.environments_dir / "online.toml").write_text('[privacy]\nnetwork = "ask"\n')
+    assert main([*base, "net.connect", "pypi.org", "--env", "offline"]) == 0
     assert capsys.readouterr().out.startswith("DENY")
-    assert main([*base, "net.connect", "new.example", "--env", "litreview-online"]) == 0
+    assert main([*base, "net.connect", "new.example", "--env", "online"]) == 0
     assert capsys.readouterr().out.startswith("ASK")
     assert main([*base, "teleport", "x"]) == 2
