@@ -1,6 +1,6 @@
 # Project status
 
-Last updated 2026-11-05. This is the owner's view of where Cairnward stands. Detail on each
+Last updated 2026-11-05, after CI first ran on the merged code. This is the owner's view of where Cairnward stands. Detail on each
 requirement is in [requirements-status.md](plan/requirements-status.md), and the
 [handoff](plan/) is working notes for agents.
 
@@ -8,8 +8,7 @@ requirement is in [requirements-status.md](plan/requirements-status.md), and the
 The planned code is built, and most of what remains is testing or needs you. **It isn't production
 ready yet:** the code and its tests are in good order, but the backup has never been restored, it
 has never run on real WSL2 or real papers, and nobody but the assistant that wrote it has reviewed
-it. CI has also never checked the merged code, because GitHub isn't starting its jobs (A11). Those
-are in the actions below.
+it. CI on `main` is also failing, on tests and the coverage gate (I25). Those are below.
 
 Research now lives in its own package, as a plugin ([ADR-0017](adr/0017-research-as-a-plugin.md)).
 Of the 104 requirements tracked (91 here and 13 in the research repository):
@@ -45,9 +44,8 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | A4 | Keep the backup password somewhere off this machine | Without it, backups can't be restored after a disk failure |
 | A5 | Try one real restore | The real repository has never been restored |
 | A7 | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
-| A8 | Decide whether the repository goes public | Release signing writes its name to a public log, so the workflow stops before signing while it's private |
+| A8 | Run the first signed release | Both repositories are now public, so the workflow should get as far as signing. It has never run on GitHub |
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
-| A11 | Fix GitHub billing, then re-run CI on both repositories | GitHub won't start any job until a failed payment or the spending limit is fixed. PR 22 was merged without CI, and its code has never run on Windows |
 
 ## Known issues
 ### Security and privacy
@@ -88,7 +86,8 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I17 | Question q5's failure in the first eval. I22 could be the cause, but those answers weren't kept | Unexplained |
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
-| I24 | The research test `test_cache_key_is_kept_owner_only` failed on Windows because it checked POSIX file modes, which Windows doesn't have; the code skips them there on purpose. The test is fixed and the research CI gets a Windows job, on the `windows-ci` branch there. Neither has run on Windows yet | Fix waiting on A11 |
+| I24 | The research repository's first Windows run found a Linux-only lock, a test checking POSIX file modes, and line endings breaking the citation files' hash check | Fixed in its PR 1, waiting on that PR's CI |
+| I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum | Fixed on the `fix-main-ci` branch, not yet run on GitHub. Windows may show more once those tests get past setup |
 
 ## Testing still to do
 ### Could reveal real bugs
@@ -115,7 +114,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 
 ### Project-level
 - [ ] Clean install from the README on a fresh Debian VM
-- [ ] Release workflow on GitHub (needs A8 for signing)
+- [ ] Release workflow on GitHub (A8)
 - [x] Injection test corpus: written and run on the real model (I23). Six cases, so it shows that an attack works, not that the others are safe
 - [ ] `deploy/systemd/cairnward.service` under real systemd (only `systemd-analyze verify` so far)
 - [ ] A plugin other than research and a test plugin running the contract
@@ -151,7 +150,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 
 ## Recent changes
 - **PR 22:** ADR-0017 accepted, and research moved to a plugin, with a plugin contract in the core
-  (merged without CI, A11)
+  (merged before CI could run, I25)
 - Operations guide, security policy, changelog and a systemd unit added (in PR 22)
 - Real-model evals and the injection corpus run through the plugin; a rule against following paper
   text added to every prompt over papers

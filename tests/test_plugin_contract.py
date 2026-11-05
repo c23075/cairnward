@@ -2,6 +2,7 @@
 tests/isolation/test_plugin_contract.py)."""
 
 import base64
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,7 +42,7 @@ def configured(tmp_path: Path, extra: str = "", privacy: str = "") -> Any:
 [servers.demo]
 kind = "plugin"
 command = ["x"]
-pin_dir = "{code}"
+pin_dir = '{code}'
 sha256 = "{contract.tree_digest(code)}"
 environments = ["coding"]
 fetch_hosts = ["api.example.org"]
@@ -244,6 +245,7 @@ def test_a_revoked_key_stops_working(services: Any) -> None:
     assert services.client.get("/v1/cairnward/contract").status_code == 403
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 def test_artifacts_stay_in_the_plugins_area(services: Any) -> None:
     content = base64.b64encode(b"notes").decode()
     assert services.client.post("/v1/cairnward/artifacts", json={
@@ -316,3 +318,112 @@ def test_a_name_that_resolves_here_is_refused_without_egress(tmp_path: Path) -> 
     c = TestClient(app, headers={"Authorization": f"Bearer {key}"})
     got = c.post("/v1/cairnward/fetch", json={"url": "http://localhost:9/"})
     assert got.status_code == 403
+
+
+def _client(cfg: Any, **kw: Any) -> TestClient:
+    sessions = PluginSessions(RunKeys())
+    key, _ = sessions.issue(cfg, "demo", "coding")
+    app = FastAPI()
+    app.include_router(plugin_router(cfg, PolicyEngine(cfg), None, sessions, **kw))
+    return TestClient(app, headers={"Authorization": f"Bearer {key}"})
+
+
+def test_model_info_stays_in_the_plugins_environment(tmp_path: Path) -> None:
+    c = _client(configured(tmp_path, privacy='approvals = "off"\n'))
+    url = "/v1/cairnward/model-info"
+    assert c.get(url, params={"model": "not-a-model"}).status_code == 400
+    assert c.get(url, params={"model": "cw/coding:medium"}).status_code == 200
+    assert c.get(url, params={"model": "cw/litreview-offline:medium"}).status_code == 403
+
+
+def test_a_port_that_isnt_a_number_is_refused(services: Any) -> None:
+    got = services.client.post("/v1/cairnward/fetch", json={"url": "https://api.example.org:x/"})
+    assert got.status_code == 400 and "port" in got.text
+
+
+def test_a_name_that_doesnt_resolve_is_reported(tmp_path: Path) -> None:
+    cfg = configured(tmp_path, privacy='network = "open"\napprovals = "off"\n')
+    (cfg.paths.config_dir / "mcp.toml").write_text(
+        (cfg.paths.config_dir / "mcp.toml").read_text().replace("api.example.org", "x.invalid")
+    )
+    got = _client(load_config(cfg.paths)).post("/v1/cairnward/fetch",
+                                               json={"url": "https://x.invalid/"})  # fmt: skip
+    assert got.status_code == 502 and "resolve" in got.text
+
+
+def _origin(reply: Any) -> httpx.MockTransport:
+    return httpx.MockTransport(reply)
+
+
+def test_policy_can_still_refuse_a_listed_host(tmp_path: Path) -> None:
+    cfg = configured(tmp_path, privacy='network = "off"\napprovals = "off"\n')
+
+    def never(_: httpx.Request) -> httpx.Response:
+        raise AssertionError("the request went out")
+
+    c = _client(cfg, transport=_origin(never))
+    got = c.post("/v1/cairnward/fetch", json={"url": "https://api.example.org/"})
+    assert got.status_code == 403 and "refused" in got.text
+
+
+def test_a_connection_that_fails_is_reported(tmp_path: Path) -> None:
+    cfg = configured(tmp_path, privacy='network = "open"\napprovals = "off"\n')
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route", request=request)
+
+    c = _client(cfg, transport=_origin(down))
+    got = c.post("/v1/cairnward/fetch", json={"url": "https://api.example.org/"})
+    assert got.status_code == 502 and "ConnectError" in got.text
+
+
+def test_an_answer_over_the_limit_is_refused(tmp_path: Path, monkeypatch: Any) -> None:
+    from cairnward.plugins import services as module
+
+    monkeypatch.setattr(module, "MAX_RESPONSE", 4)
+    cfg = configured(tmp_path, privacy='network = "open"\napprovals = "off"\n')
+    big = _origin(lambda _: httpx.Response(200, stream=httpx.ByteStream(b"too many bytes")))
+    got = _client(cfg, transport=big).post("/v1/cairnward/fetch",
+                                           json={"url": "https://api.example.org/"})  # fmt: skip
+    assert got.status_code == 502 and "over" in got.text
+
+
+def test_item_keys_need_a_vault(tmp_path: Path) -> None:
+    c = _client(configured(tmp_path, privacy='approvals = "off"\n'))
+    got = c.post("/v1/cairnward/item-keys", json={"op": "status", "item": "x"})
+    assert got.status_code == 503
+
+
+def test_item_key_status_remove_and_recover(tmp_path: Path) -> None:
+    from cairnward.store import Vault
+
+    cfg = configured(tmp_path, privacy='approvals = "off"\n')
+    url = "/v1/cairnward/item-keys"
+    with Vault.open(cfg.paths) as vault:
+        c = _client(cfg, vault=vault)
+        assert c.post(url, json={"op": "status", "item": "x"}).json() == {"locked": False}
+        made = c.post(url, json={"op": "lock", "item": "x", "secret": "a long passphrase"})
+        assert made.status_code == 200, made.text
+        assert c.post(url, json={"op": "status", "item": "x"}).json() == {"locked": True}
+        bad = c.post(url, json={"op": "recover", "item": "x", "secret": "not\na recovery key"})
+        assert bad.status_code == 400
+        assert c.post(url, json={"op": "remove", "item": "x"}).json() == {"ok": True}
+        assert c.post(url, json={"op": "status", "item": "x"}).json() == {"locked": False}
+
+
+def test_a_new_plugin_has_no_artifacts(services: Any) -> None:
+    assert services.client.get("/v1/cairnward/artifacts").json() == {"files": []}
+
+
+def test_weakened_plugins_are_named() -> None:
+    open_one = McpServer(kind="plugin", command=["x"], unsandboxed=True, unpinned_tools=True,
+                         permissions={"read": [], "network": ["127.0.0.1:8070"]})  # type: ignore[arg-type]  # fmt: skip
+    found = " ".join(contract.weakenings(McpConfig(servers={"p": open_one})))
+    assert "outside the sandbox" in found and "aren't held" in found and "127.0.0.1:8070" in found
+
+
+def test_code_with_no_pin_or_folder_doesnt_start(tmp_path: Path) -> None:
+    missing = plugin()
+    assert "needs pin_dir" in (contract.pin_problem("p", missing) or "")
+    gone = plugin(pin_dir=tmp_path / "gone", sha256="0" * 64)
+    assert "isn't a folder" in (contract.pin_problem("p", gone) or "")
