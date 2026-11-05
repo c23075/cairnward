@@ -304,6 +304,58 @@ class ReasoningLeaks:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(sorted([*known, model])), encoding="utf-8")
 
+    @property
+    def _clean_path(self) -> Path:
+        return self.path.with_name("reasoning_clean.json")
+
+    def clean_models(self) -> list[str]:
+        """Models seen answering a streamed reply with thinking off and no reasoning in it."""
+        try:
+            data: list[str] = json.loads(self._clean_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return data
+
+    def note_clean(self, model: str) -> None:
+        known = self.clean_models()
+        if model not in known:
+            self._clean_path.parent.mkdir(parents=True, exist_ok=True)
+            self._clean_path.write_text(json.dumps(sorted([*known, model])), encoding="utf-8")
+
+
+class StreamGuard:
+    """Holds back a streamed answer until it's known not to start with reasoning (I5, T-26).
+
+    A model not yet known to answer cleanly may write its reasoning into the answer, ending in
+    a stray `</think>`. Once streamed, that can't be taken back, so the answer text of such a
+    model's first streamed reply is held here. When `</think>` arrives, what came before it is
+    released as reasoning and the rest of the answer streams live from then on. When the reply
+    ends without one, the held text is released before the finish. Everything else in the
+    stream (tool calls, separate reasoning, finish signals) is never held."""
+
+    def __init__(self) -> None:
+        self._held: list[str] = []
+        self.holding = True
+        self.leaked = False
+
+    def content(self, text: str) -> tuple[str, str]:
+        """(reasoning, answer) to send now for this piece of answer text."""
+        if not self.holding:
+            return "", text
+        self._held.append(text)
+        joined = "".join(self._held)
+        if THINK_END not in joined:
+            return "", ""
+        self.holding, self.leaked, self._held = False, True, []
+        reasoning, _, answer = joined.partition(THINK_END)
+        # only the start is trimmed: more of the answer is still to come
+        return reasoning.removeprefix("<think>").strip(), answer.lstrip()
+
+    def release(self) -> str:
+        """The held answer text, when the reply ends without `</think>`."""
+        text, self._held, self.holding = "".join(self._held), [], False
+        return text
+
 
 class ClientUsage:
     """Each client's requests and tokens today, for its daily budget (FR-GW-4). Kept in

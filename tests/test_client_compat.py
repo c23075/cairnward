@@ -65,6 +65,25 @@ async def test_streaming(sdk: tuple[openai.AsyncOpenAI, FakeOllama, Vault]) -> N
     assert text == "Hi from Cairnward "
 
 
+async def test_streamed_leak_reaches_the_sdk_as_reasoning(
+    sdk: tuple[openai.AsyncOpenAI, FakeOllama, Vault],
+) -> None:
+    """I5 through the real SDK: the held-back chunks still parse, the answer has no reasoning
+    in it, and the reasoning arrives in `reasoning_content`, where clients that show it look."""
+    client, fake, _ = sdk
+    fake.reply = "Let me think. 2+2 is 4.\n</think>\n\nIt is 4."
+    stream = await client.chat.completions.create(
+        model="cw/coding:low", messages=[{"role": "user", "content": "2+2?"}], stream=True
+    )
+    content, reasoning = "", ""
+    async for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta
+            content += delta.content or ""
+            reasoning += (delta.model_extra or {}).get("reasoning_content") or ""
+    assert content.strip() == "It is 4." and reasoning == "Let me think. 2+2 is 4."
+
+
 async def test_tool_calls(sdk: tuple[openai.AsyncOpenAI, FakeOllama, Vault]) -> None:
     client, fake, _ = sdk
     fake.tool_call = {"name": "get_weather", "arguments": {"city": "Kuala Lumpur"}}

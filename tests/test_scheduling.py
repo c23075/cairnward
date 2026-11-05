@@ -576,3 +576,32 @@ async def test_slot_cache_saves_and_restores_per_conversation(tmp_path: Path) ->
         assert actions == ["restore", "save", "restore", "save", "restore"]
         posts = [x for x in audit.records() if x.phase == "post"]
         assert [p.details.get("slot_restored") for p in posts] == [False, False, True]
+
+
+def test_stream_guard_finds_think_split_across_pieces() -> None:
+    """Real tokens split `</think>` (`</`, `think`, `>`): nothing is released until it's whole."""
+    from cairnward.gateway.scheduling import StreamGuard
+
+    g = StreamGuard()
+    sent = [g.content(p) for p in ["Hmm, 2", "+2.\n</", "think", ">\n\nIt is", " 4."]]
+    assert sent[:2] == [("", ""), ("", "")]
+    assert sent[2] == ("", "")
+    assert sent[3] == ("Hmm, 2+2.", "It is")
+    assert sent[4] == ("", " 4.") and g.leaked and not g.holding
+
+
+def test_stream_guard_releases_a_clean_answer_whole() -> None:
+    from cairnward.gateway.scheduling import StreamGuard
+
+    g = StreamGuard()
+    assert [g.content(p) for p in ["It ", "is 4."]] == [("", ""), ("", "")]
+    assert g.release() == "It is 4." and not g.leaked
+
+
+def test_clean_models_are_remembered(tmp_path: Path) -> None:
+    from cairnward.gateway.scheduling import ReasoningLeaks
+
+    leaks = ReasoningLeaks.at(tmp_path)
+    leaks.note_clean("m")
+    leaks.note_clean("m")
+    assert leaks.clean_models() == ["m"] and leaks.models() == []

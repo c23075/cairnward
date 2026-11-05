@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **Reasoning in streamed answers (I5):** a model's first streamed reply with thinking off no
+  longer reaches the client with its reasoning in the answer. The answer is held until it's
+  clear, and the reasoning goes out as `reasoning_content`. That one reply per model arrives all
+  at once; after it, a clean model streams word by word as before.
 - **Plain HTTP through egress (I28):** a keep-alive client's second `http://` request no longer
   fails. Egress now says `Connection: close`. A request pipelined after the first is no longer
   passed to the host unchecked. A request with two `Host` headers gets 400.

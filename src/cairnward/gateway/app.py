@@ -38,6 +38,7 @@ from cairnward.gateway.scheduling import (
     ClientUsage,
     ReasoningLeaks,
     Scheduler,
+    StreamGuard,
     conversation_key,
     estimate_tokens,
     memory_warning,
@@ -663,19 +664,45 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             await finish(reply, result.get("usage") or {}, None)
             return JSONResponse(result, headers=headers)
 
+        # I5: a model not yet seen answering cleanly with thinking off may put reasoning in its
+        # answer. Its first streamed reply is held until that's known (StreamGuard).
+        guard_stream = options.thinking is False and resolved.model not in await asyncio.to_thread(
+            reasoning_leaks.clean_models
+        )
+
         async def events() -> AsyncIterator[bytes]:
             content: list[str] = []
             reasoning: list[str] = []
             calls: dict[int, dict[str, Any]] = {}
             usage: dict[str, Any] = {}
             error = None
+            guards: dict[int, StreamGuard] = {}
+            last: dict[str, Any] | None = None
+
+            def guarded(choice: dict[str, Any]) -> None:
+                """Apply the guard to one choice's delta, in place."""
+                delta = choice.setdefault("delta", {})
+                guard = guards.setdefault(choice.get("index", 0), StreamGuard())
+                held_reasoning, answer = guard.content(delta.pop("content", None) or "")
+                if choice.get("finish_reason") and guard.holding:
+                    answer += guard.release()
+                if held_reasoning:
+                    delta["reasoning_content"] = held_reasoning + (
+                        delta.get("reasoning_content") or ""
+                    )
+                if answer:
+                    delta["content"] = answer
+
             try:
                 async with scheduler.slot(resolved.backend, conv_key) as waited:
                     queued["s"] = waited
                     await switch_slot()
                     async for chunk in stream_with_fallback(chat_req):
                         chunk["model"] = body.model
+                        last = chunk
                         for choice in chunk.get("choices") or []:
+                            if guard_stream:
+                                guarded(choice)
                             delta = choice.get("delta") or {}
                             if delta.get("content"):
                                 content.append(delta["content"])
@@ -697,6 +724,17 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                         if chunk.get("usage"):
                             usage = chunk["usage"]
                         yield f"data: {json.dumps(chunk)}\n\n".encode()
+                    # a stream that ended without a finish signal: release what's still held
+                    for index, guard in guards.items():
+                        if guard.holding and (text := guard.release()):
+                            content.append(text)
+                            tail = {**(last or {}), "choices": [
+                                {"index": index, "delta": {"content": text},
+                                 "finish_reason": None}]}  # fmt: skip
+                            tail.pop("usage", None)
+                            yield f"data: {json.dumps(tail)}\n\n".encode()
+                if guard_stream and guards and not any(g.leaked for g in guards.values()):
+                    await asyncio.to_thread(reasoning_leaks.note_clean, resolved.model)
                 yield b"data: [DONE]\n\n"
             except BackendError as exc:
                 error = str(exc)[:300]
@@ -713,7 +751,12 @@ def create_app(deps: GatewayDeps) -> FastAPI:
                         reply["tool_calls"] = [calls[i] for i in sorted(calls)]
                     if reasoning:
                         reply["reasoning_content"] = "".join(reasoning)
-                    separate_reasoning(reply)  # too late for this client: the next call is clean
+                    if any(g.leaked for g in guards.values()):
+                        slot_info["reasoning_leak"] = True  # held back and separated (I5)
+                        reasoning_leaks.note(resolved.model)
+                    # a model already seen answering cleanly that leaks now: too late for this
+                    # client, but it's asked for reasoning from the next call on
+                    separate_reasoning(reply)
                 await asyncio.shield(finish(reply, usage, error))
 
         return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
