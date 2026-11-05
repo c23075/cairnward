@@ -136,7 +136,7 @@ Research requirements (FR-RES-*) are tracked in the `literature-review-agent-plu
 |---|---|---|
 | NFR-P2 gateway overhead ≤ 75 ms, ≤ 150 ms isolated | ✅ | `scripts/bench_gateway.py`: Strict 105 ms isolated, 59 ms not; all off 7 ms. Target raised from 50 ms by owner decision, 2026-11-05 |
 | NFR-P3 cache reuse ≥ 10× | ✅ | measured through the gateway: 19.6× |
-| NFR-P5 core ≤ 500 MB, starts ≤ 3 s | ◐ | measured: 122 MB meets; start about 3.5 s isolated on 2026-11-05, **misses**, the same with 3,000 conversations; an earlier script read about 2.8 s (`docs/status.md` I15) |
+| NFR-P5 core ≤ 500 MB, starts ≤ 3 s | ◐ | measured: 122 MB meets. Start was about 3.5 s isolated on the desktop on 2026-11-05 (misses). After the I15 changes, a cloud session measured 2.1–2.2 s (empty data) and 1.9–2.3 s (existing data), down from 2.6–2.9 s on the same machine; not yet re-measured on the desktop (`scripts/bench_startup.py`) |
 | NFR-P6 first token within 15 s / 30 s | ✅ | measured through the gateway, model loaded: 11 to 14 s fast, 22 s main; loading the main model first adds about 70 s |
 | NFR-R1 no data loss, jobs resumable | ✅ | `test_jobs_resume.py`, atomic writes |
 | NFR-R2 audit before every effect | ✅ | as FR-AUD-1 |

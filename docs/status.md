@@ -87,7 +87,7 @@ Done on 2026-11-05:
 | # | Issue | State |
 |---|---|---|
 | I14 | Strict overhead missed its 50 ms target | Closed: target raised to 75 ms, or 150 ms with isolation. Measured 59 ms and 105 ms |
-| I15 | Start time misses the 3 s target when isolated: about 3.5 s until `/health` answers on 2026-11-05 (3.3 to 3.8 on empty data, 3.1 to 3.8 with 3,000 conversations). Data size makes no difference. An earlier script read 2.8 s, and why this one reads higher wasn't looked into | Open: small miss, the owner decides |
+| I15 | Start time missed the 3 s target when isolated: about 3.5 s until `/health` answers on the desktop on 2026-11-05 | Fixed in code, to be confirmed on the desktop: the core no longer imports the MCP SDK until an MCP server or `/mcp` is used, and databases already up to date skip alembic. In a cloud session (a different machine, isolated, Strict), the median fell from 2.6–2.9 s to 2.1–2.2 s on empty data, and from 2.8 s to 1.9–2.3 s on existing data. Run `scripts/bench_startup.py --existing` on the desktop to confirm |
 
 ### Unexplained or uncovered
 | # | Issue | State |

@@ -248,3 +248,30 @@ def test_cli_store_info(
     assert main(["--config-dir", str(paths.config_dir), "store", "info"]) == 0
     out = capsys.readouterr().out
     assert "vault_0002 (up to date)" in out and "keys_0002 (up to date)" in out
+
+
+def test_known_heads_match_the_migration_scripts() -> None:
+    """upgrade() skips alembic when a database is at HEADS (start time, I15). A new migration
+    must update HEADS too, or databases would never be migrated to it."""
+    from cairnward.store.db import HEADS, head_revision
+
+    assert {db: head_revision(db) for db in HEADS} == HEADS
+
+
+def test_upgrade_skips_alembic_only_when_already_current(tmp_path: Path) -> None:
+    from alembic import command
+
+    from cairnward.store import db as store_db
+
+    engine = store_db.make_engine(tmp_path / "v.db")
+    assert store_db.stored_revisions(engine) == []
+    cfg = store_db.alembic_config("vault")
+    with engine.begin() as conn:  # a database left at the first migration, as by an old release
+        cfg.attributes["connection"] = conn
+        command.upgrade(cfg, "vault_0001")
+    assert store_db.stored_revisions(engine) == ["vault_0001"]
+    store_db.upgrade(engine, "vault")  # behind: alembic runs and brings it up to date
+    assert store_db.stored_revisions(engine) == [store_db.HEADS["vault"]]
+    store_db.upgrade(engine, "vault")  # current: nothing to do
+    assert store_db.stored_revisions(engine) == [store_db.HEADS["vault"]]
+    engine.dispose()

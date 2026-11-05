@@ -19,7 +19,6 @@ written out below, so no library is needed.
 from __future__ import annotations
 
 import ctypes
-import ctypes.util
 import errno
 import os
 import platform
@@ -101,8 +100,9 @@ def apply() -> None:
         raise Unsupported("seccomp is Linux-only")
     arch = machine()
     code = program(arch)
-    libc_name = ctypes.util.find_library("c") or "libc.so.6"
-    libc = ctypes.CDLL(libc_name, use_errno=True)
+    # The running process already has libc loaded: no find_library, which would start
+    # `ldconfig -p` inside the sandbox on every start.
+    libc = ctypes.CDLL(None, use_errno=True)
 
     class SockFprog(ctypes.Structure):
         _fields_ = (("len", ctypes.c_ushort), ("filter", ctypes.c_void_p))

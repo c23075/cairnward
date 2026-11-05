@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **Faster start (I15):**
+  - The isolated core no longer imports the MCP SDK (about half a second) until an MCP server or
+    the `/mcp` endpoint is first used.
+  - Databases already at the newest migration skip loading alembic.
+  - The VM-socket filter no longer runs `ldconfig`.
+  - About 0.5 to 0.9 s faster to `/health` on the machine measured. `scripts/bench_startup.py`
+    measures it.
 - **VM sockets refused in the isolated core (I1):** the core's sandbox allows Unix sockets, which
   turned off srt's VM-socket block there. Under WSL2 that could reach Windows past egress. The core
   now refuses VM sockets (and io_uring) itself, won't start under WSL2 without that, and `doctor`
