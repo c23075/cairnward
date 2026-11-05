@@ -1,6 +1,6 @@
 # Project status
 
-Last updated 2026-11-05, after CI first ran on the merged code. This is the owner's view of where Cairnward stands. Detail on each
+Last updated 2026-11-05, after the real runs that followed `main`'s CI going green. This is the owner's view of where Cairnward stands. Detail on each
 requirement is in [requirements-status.md](plan/requirements-status.md), and the
 [handoff](plan/) is working notes for agents.
 
@@ -8,7 +8,7 @@ requirement is in [requirements-status.md](plan/requirements-status.md), and the
 The planned code is built, and most of what remains is testing or needs you. **It isn't production
 ready yet:** the code and its tests are in good order, but the backup has never been restored, it
 has never run on real WSL2 or real papers, and nobody but the assistant that wrote it has reviewed
-it. CI on `main` is also failing, on tests and the coverage gate (I25). Those are below.
+it. Those are below.
 
 Research now lives in its own package, as a plugin ([ADR-0017](adr/0017-research-as-a-plugin.md)).
 Of the 104 requirements tracked (91 here and 13 in the research repository):
@@ -87,7 +87,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
 | I24 | The research repository's first Windows run found a Linux-only lock, a test checking POSIX file modes, and line endings breaking the citation files' hash check | Fixed in its PR 1, waiting on that PR's CI |
-| I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum | Fixed on the `fix-main-ci` branch, not yet run on GitHub. Windows may show more once those tests get past setup |
+| I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum | Fixed in PR 25: `main` passes CI, including Windows |
 
 ## Testing still to do
 ### Could reveal real bugs
