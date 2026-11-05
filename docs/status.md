@@ -63,7 +63,7 @@ Done on 2026-11-05:
 | I2 | Under WSL2, any program running as you on Windows can read your Linux files | Accepted: only locking protects them |
 | I3 | Backends on the local network can use plain `http://`, so prompts cross the network unencrypted | Allowed, with a warning from `doctor`, `config check`, `serve` and the dashboard |
 | I4 | A third-party tool can send plain `http://` to a host you've allowed. Cairnward allows and audits it, but doesn't require encryption | Accepted |
-| I5 | The first streamed reply from a model not yet known to leak reasoning still reaches the client (T-26) | Open |
+| I5 | The first streamed reply from a model not yet known to leak reasoning still reaches the client (T-26) | Fixed: with thinking off, a model's first streamed reply holds back its answer text until `</think>` shows it was reasoning, which then goes out as `reasoning_content`. A model that answers cleanly is recorded and streams directly from then on. Remaining: a model recorded as clean that leaks later still reaches the client once, and that first reply per model arrives all at once instead of word by word |
 | I7 | Run snapshots can't be locked, and locking doesn't erase earlier plaintext from disks or old backups | Accepted |
 | I8 | Presidio's small spaCy model misses some names, so redaction isn't complete | Accepted |
 | I26 | With TLS inspection on, the local CA's key could impersonate any site to tools that trust it | Accepted: off by default, owner-only file outside every sandbox, `cairnward egress-ca rotate` |

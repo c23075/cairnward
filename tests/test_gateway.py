@@ -384,17 +384,57 @@ async def test_reasoning_written_into_the_answer_is_separated(gw: Any) -> None:
     assert g.ollama.requests[-1]["think"] is True  # remembered, so it comes back separately
 
 
-async def test_streamed_leak_is_remembered_for_the_next_call(gw: Any) -> None:
+def stream_parts(resp: httpx.Response) -> tuple[str, str]:
+    """(content, reasoning_content) a client assembles from a stream."""
+    content, reasoning = "", ""
+    for line in resp.text.splitlines():
+        if not line.startswith("data: {"):
+            continue
+        for choice in json.loads(line[6:]).get("choices") or []:
+            delta = choice.get("delta") or {}
+            content += delta.get("content") or ""
+            reasoning += delta.get("reasoning_content") or ""
+    return content, reasoning
+
+
+async def test_first_streamed_leak_never_reaches_the_client(gw: Any) -> None:
+    """I5: the first streamed reply of a model not yet known to leak used to reach the client
+    with its reasoning in the answer. That reply's answer is now held until `</think>` shows
+    whether it was reasoning, which then goes out as reasoning_content."""
     g = await gw()
     g.ollama.reply = LEAK
     resp = await g.chat("cw/coding:low", USER, stream=True)
-    assert resp.status_code == 200 and "4." in resp.text  # a stream can't be taken back
-    assert g.ollama.requests[-1]["think"] is False
+    content, reasoning = stream_parts(resp)
+    assert resp.status_code == 200 and g.ollama.requests[-1]["think"] is False
+    assert content.strip() == "The answer is 4." and "Maybe 3" not in content
+    assert reasoning == "We are given a question. Maybe 3? No, 4."
     conv = g.vault.list_conversations()[0]
     stored = g.vault.messages(conv.id)[-1].body
-    assert stored["content"] == "The answer is 4." and "Maybe 3" in stored["reasoning_content"]
+    assert (
+        stored["content"].strip() == "The answer is 4." and "Maybe 3" in stored["reasoning_content"]
+    )
+    post = [r for r in g.audit.records() if r.action == "model.call" and r.phase == "post"][-1]
+    assert post.details["reasoning_leak"] is True
     await g.chat("cw/coding:low", USER)
-    assert g.ollama.requests[-1]["think"] is True
+    assert g.ollama.requests[-1]["think"] is True  # remembered, so it comes back separately
+
+
+async def test_a_clean_model_is_held_once_then_streams_directly(gw: Any) -> None:
+    g = await gw()
+    g.ollama.reply = "The answer is 4."
+    first = await g.chat("cw/coding:low", USER, stream=True)
+    assert stream_parts(first) == ("The answer is 4. ", "")
+    lines = [ln for ln in first.text.splitlines() if ln.startswith("data: {")]
+    # held: no answer text in any chunk before the one carrying the finish
+    texts = [json.loads(ln[6:])["choices"][0]["delta"].get("content")
+             for ln in lines if json.loads(ln[6:]).get("choices")]  # fmt: skip
+    assert [t for t in texts if t] == ["The answer is 4. "]
+    second = await g.chat("cw/coding:low", USER, stream=True)
+    texts = [json.loads(ln[6:])["choices"][0]["delta"].get("content")
+             for ln in second.text.splitlines()
+             if ln.startswith("data: {") and json.loads(ln[6:]).get("choices")]  # fmt: skip
+    assert [t for t in texts if t] == ["The ", "answer ", "is ", "4. "]  # streamed word by word
+    assert g.ollama.requests[-1]["think"] is False
 
 
 async def test_a_normal_answer_is_left_alone(gw: Any) -> None:
