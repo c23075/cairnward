@@ -177,6 +177,7 @@ locking doesn't erase earlier plaintext from disks or old backups. Read the
 - [Specification](docs/spec.md): the design and its decisions
 - [Requirements](docs/requirements.md) and [architecture decisions](docs/adr/)
 - [Threat model](docs/threat-model.md)
+- [Agent security and privacy today](docs/landscape.md): the state of the industry, and how Cairnward compares
 - [Benchmarks and results](docs/bench/)
 
 ## Development
