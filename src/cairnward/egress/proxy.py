@@ -33,15 +33,25 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
+import h11
+
 from cairnward.audit.log import digest
 from cairnward.config.loader import Config
 from cairnward.config.models import TlsInspection
 from cairnward.egress.addresses import is_ip_literal, special_reason
-from cairnward.egress.inspect import Exchange, Inspector, Verdict, check_request, request_path
+from cairnward.egress.inspect import (
+    Exchange,
+    Inspector,
+    MalformedRequest,
+    Verdict,
+    _Closed,
+    check_request,
+    forward_once,
+    request_path,
+)
 from cairnward.policy.engine import Action, Decision, PolicyEngine, host_matches
 
 MAX_HEAD = 64 * 1024
-HOP_BY_HOP = {"proxy-authorization", "proxy-connection", "connection", "keep-alive"}
 
 
 @dataclass(frozen=True)
@@ -492,17 +502,17 @@ class EgressProxy:
                     await writer.drain()
                     await self._pipe(reader, writer, up_reader, up_writer, counts)
                 else:
-                    # Host comes from the URL that was checked, never from the client: on a
-                    # shared address, another Host would reach a site policy never saw.
-                    out = [f"{method} {path} {version}", f"Host: {host_header}"]
-                    out += [f"{k}: {v}" for k, v in headers
-                            if k.lower() not in HOP_BY_HOP and k.lower() != "host"]  # fmt: skip
-                    out.append("Connection: close")
-                    first = ("\r\n".join(out) + "\r\n\r\n").encode()
-                    up_writer.write(first)
-                    counts["bytes_up"] += len(first)
-                    await self._pipe(reader, writer, up_reader, up_writer, counts)
-            except (ConnectionError, TimeoutError) as exc:
+                    # One request, then close (I28); Host from the checked URL (forward_once).
+                    sent = await forward_once(head, reader, writer, up_reader, up_writer,
+                                              target=path, host_header=host_header,
+                                              idle_s=self.limits.idle_timeout_s)  # fmt: skip
+                    counts["bytes_up"] += sent.bytes_up
+                    counts["bytes_down"] += sent.bytes_down
+                    details_extra["status"] = sent.status
+            except MalformedRequest as exc:
+                outcome, error = "error", f"malformed request: {exc}"[:200]
+                await self._reply(writer, 400, "Bad Request", f"cairnward-egress: {error}\n")
+            except (ConnectionError, TimeoutError, h11.ProtocolError, _Closed) as exc:
                 outcome, error = "error", type(exc).__name__
             finally:
                 with contextlib.suppress(Exception):

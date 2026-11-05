@@ -80,7 +80,7 @@ Done on 2026-11-05:
 | I10 | Scheduled backups and replication stop when WSL goes idle | Accepted: documented |
 | I11 | `keyring:` references usually fail under WSL. Use `env:` | Accepted: documented |
 | I13 | Audit anchoring is off, so there's no outside proof of the audit log | Your choice |
-| I28 | Egress serves one plain-HTTP request per connection but doesn't tell the client, so a keep-alive client's second `http://` request on that connection fails. HTTPS (CONNECT) isn't affected. Found while testing TLS inspection | Open |
+| I28 | Egress serves one plain-HTTP request per connection but didn't tell the client, so a keep-alive client's second `http://` request on that connection failed. Worse, bytes after the first request were piped to its host unread, so a pipelined second request could reach that host without its own policy check. HTTPS (CONNECT) wasn't affected | Fixed: egress passes exactly one request and its response through h11, answers `Connection: close`, and drops anything after it. A request with two `Host` headers gets 400. Tested with a keep-alive client and a raw origin that records every byte |
 | I29 | With `sandbox = "openshell"` the agent works on a copy: large workspaces are slow to copy, and a failed copy back leaves the work in the kept sandbox | Accepted (ADR-0018) |
 
 ### Performance

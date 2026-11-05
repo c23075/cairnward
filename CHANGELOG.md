@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- **Plain HTTP through egress (I28):** a keep-alive client's second `http://` request no longer
+  fails. Egress now says `Connection: close`. A request pipelined after the first is no longer
+  passed to the host unchecked. A request with two `Host` headers gets 400.
 - **TLS inspection fixes** (threat-model review of 2026-11-05):
   - Only `cairnward run` agents are decrypted. MCP servers, remote restic backups, `mcp login`,
     plugin commands and downloads would otherwise have failed TLS in an inspecting environment.

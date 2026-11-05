@@ -273,9 +273,112 @@ def test_host_header_comes_from_the_checked_url(start: Callable[..., Running], o
     """On a shared address another Host would reach a site the policy never checked."""
     r = start(allow_local(origin))
     req = (f"GET http://127.0.0.1:{origin}/ HTTP/1.1\r\nHost: not-allowed.example\r\n"
-           f"host: second.example\r\nProxy-Authorization: {r.auth}\r\n\r\n")  # fmt: skip
+           f"Proxy-Authorization: {r.auth}\r\n\r\n")  # fmt: skip
     assert r.raw(req.encode()).endswith(b"hello from origin")
     assert Origin.seen[0]["host"] == f"127.0.0.1:{origin}"
+
+
+def test_two_host_headers_are_refused(start: Callable[..., Running], origin: int) -> None:
+    """RFC 9112: a request with two Host headers gets 400. Servers that disagree on which one
+    counts are how requests get smuggled, so it's never sent on."""
+    r = start(allow_local(origin))
+    req = (f"GET http://127.0.0.1:{origin}/ HTTP/1.1\r\nHost: not-allowed.example\r\n"
+           f"host: second.example\r\nProxy-Authorization: {r.auth}\r\n\r\n")  # fmt: skip
+    assert r.raw(req.encode()).startswith(b"HTTP/1.1 400")
+    assert Origin.seen == []
+
+
+class KeepAlive(BaseHTTPRequestHandler):
+    """An HTTP/1.1 origin that keeps connections open, as real servers do."""
+
+    protocol_version = "HTTP/1.1"
+    seen: list[tuple[str, str, bytes]] = []  # noqa: RUF012
+
+    def log_message(self, *a: Any) -> None:
+        pass
+
+    def _body(self) -> bytes:
+        if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
+            out = b""
+            while size := int(self.rfile.readline().strip(), 16):
+                out += self.rfile.read(size)
+                self.rfile.readline()
+            self.rfile.readline()
+            return out
+        return self.rfile.read(int(self.headers.get("Content-Length") or 0))
+
+    def _answer(self) -> None:
+        KeepAlive.seen.append((self.command, self.path, self._body()))
+        body = f"{self.command} {self.path}".encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    do_GET = do_POST = _answer
+
+
+@pytest.fixture
+def keep_alive() -> Iterator[int]:
+    KeepAlive.seen = []
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), KeepAlive)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield srv.server_address[1]
+    srv.shutdown()
+
+
+def test_keep_alive_client_gets_every_request_through(
+    start: Callable[..., Running], keep_alive: int
+) -> None:
+    """I28: egress serves one plain-HTTP request per connection. It used to pass the origin's
+    keep-alive on, so a client's second request on that connection failed."""
+    import httpx
+
+    r = start(allow_local(keep_alive))
+    proxy = f"http://cw:{r.token}@127.0.0.1:{r.proxy.port}"
+    with httpx.Client(proxy=proxy, timeout=10) as c:
+        first = c.get(f"http://127.0.0.1:{keep_alive}/one")
+        second = c.get(f"http://127.0.0.1:{keep_alive}/two")
+        posted = c.post(f"http://127.0.0.1:{keep_alive}/three", content=iter([b"a", b"b"]))
+    assert first.headers["connection"] == "close"
+    assert (first.text, second.text, posted.text) == ("GET /one", "GET /two", "POST /three")
+    assert KeepAlive.seen[2] == ("POST", "/three", b"ab")  # a chunked body, re-framed intact
+    posts = [x for x in wait_records(r.log, 6) if x.phase == "post"]
+    assert len(posts) == 3 and all(x.details["status"] == 200 for x in posts)
+
+
+def test_pipelined_request_never_reaches_the_origin(start: Callable[..., Running]) -> None:
+    """A second request sent on the same connection used to be piped to the first host
+    unchecked: a server that ignores `Connection: close` would answer it. Now only the first
+    request's bytes leave this machine, and the connection closes after its response."""
+    received = bytearray()
+    srv = socket.create_server(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+
+    def origin() -> None:  # records everything, and answers once
+        conn, _ = srv.accept()
+        with conn:
+            conn.settimeout(1.0)
+            try:
+                while chunk := conn.recv(4096):
+                    received.extend(chunk)
+                    if b"\r\n\r\nbody" in received and b"200" not in bytes(received[-1:]):
+                        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                        received.extend(b"<answered>")
+            except OSError:
+                pass
+
+    t = threading.Thread(target=origin, daemon=True)
+    t.start()
+    r = start(allow_local(port))
+    one = (f"POST http://127.0.0.1:{port}/checked HTTP/1.1\r\nHost: x\r\n"
+           f"Proxy-Authorization: {r.auth}\r\nContent-Length: 4\r\n\r\nbody")  # fmt: skip
+    two = "GET http://elsewhere.example/unchecked HTTP/1.1\r\nHost: elsewhere.example\r\n\r\n"
+    resp = r.raw((one + two).encode())
+    t.join(5)
+    srv.close()
+    assert resp.startswith(b"HTTP/1.1 200") and resp.endswith(b"ok")
+    assert b"/checked" in received and b"unchecked" not in received
 
 
 def test_late_approval_is_dropped_and_prompts_dont_overlap(start: Callable[..., Running]) -> None:
@@ -374,7 +477,7 @@ def test_isolated_core_session_and_listed_local_addresses(
     shared = r.proxy.sessions.create(Session(environment="coding", trusted_core=True,
                                              any_environment=True))  # fmt: skip
     per_env = r.proxy.sessions.create(Session(environment="coding", trusted_core=True))
-    for token, expect in ((shared, b"HTTP/1.0 200"), (per_env, b"HTTP/1.1 403")):
+    for token, expect in ((shared, b"HTTP/1.1 200"), (per_env, b"HTTP/1.1 403")):
         r.token = token
         assert r.get(f"http://127.0.0.1:{origin}/").startswith(expect)
     r.token = shared

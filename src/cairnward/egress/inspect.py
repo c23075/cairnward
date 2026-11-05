@@ -130,6 +130,98 @@ class _Closed(Exception):
     pass
 
 
+class MalformedRequest(Exception):
+    """The request isn't valid HTTP/1.1 (e.g. two Host headers): answered 400, never sent on."""
+
+
+async def _next(conn: h11.Connection, reader: asyncio.StreamReader, idle_s: float) -> object:
+    while True:
+        ev = conn.next_event()
+        if ev is not h11.NEED_DATA:
+            return ev
+        data = await asyncio.wait_for(reader.read(65536), idle_s)
+        conn.receive_data(data)  # b"" is end of stream
+
+
+async def _send_event(conn: h11.Connection, writer: asyncio.StreamWriter, ev: h11.Event) -> None:
+    data = conn.send(ev)
+    if data:
+        writer.write(data)
+        await writer.drain()
+
+
+# Headers about this hop only: never passed on (the proxy token above all).
+HOP_HEADERS = {b"proxy-authorization", b"proxy-connection", b"connection", b"keep-alive",
+               b"host", b"expect", b"te", b"trailer", b"upgrade"}  # fmt: skip
+
+
+@dataclass
+class Forwarded:
+    status: int | None = None
+    bytes_up: int = 0
+    bytes_down: int = 0
+
+
+async def forward_once(head: bytes, c_reader: asyncio.StreamReader,
+                       c_writer: asyncio.StreamWriter, u_reader: asyncio.StreamReader,
+                       u_writer: asyncio.StreamWriter, *, target: str, host_header: str,
+                       idle_s: float) -> Forwarded:  # fmt: skip
+    """Pass exactly one plain-HTTP request and its response, then end (I28).
+
+    The request's own body is forwarded and nothing after it: a second request pipelined on the
+    connection would otherwise reach the host without its own policy check. The response says
+    `Connection: close`, so a keep-alive client opens a new connection, and is checked again,
+    for its next request. `Host` comes from the URL that was checked, never from the client."""
+    out = Forwarded()
+    client = h11.Connection(h11.SERVER, max_incomplete_event_size=MAX_HEADERS)
+    upstream = h11.Connection(h11.CLIENT, max_incomplete_event_size=MAX_HEADERS)
+    client.receive_data(head)
+    try:
+        req = await _next(client, c_reader, idle_s)
+    except h11.RemoteProtocolError as exc:
+        raise MalformedRequest(str(exc)) from None
+    if not isinstance(req, h11.Request):
+        raise MalformedRequest("no request")
+    headers = [(b"host", host_header.encode())]
+    headers += [(k, v) for k, v in req.headers if k.lower() not in HOP_HEADERS]
+    headers.append((b"connection", b"close"))
+    if client.they_are_waiting_for_100_continue:
+        await _send_event(client, c_writer, h11.InformationalResponse(status_code=100,
+                                                                      headers=[]))  # fmt: skip
+    await _send_event(upstream, u_writer, h11.Request(method=req.method, target=target.encode(),
+                                                      headers=headers))  # fmt: skip
+    out.bytes_up += len(head)
+    while True:
+        ev = await _next(client, c_reader, idle_s)
+        if isinstance(ev, h11.Data):
+            out.bytes_up += len(ev.data)
+            await _send_event(upstream, u_writer, ev)
+        elif isinstance(ev, h11.EndOfMessage):
+            await _send_event(upstream, u_writer, ev)
+            break
+        else:
+            raise _Closed
+    while True:
+        ev = await _next(upstream, u_reader, idle_s)
+        if isinstance(ev, h11.InformationalResponse):
+            continue  # 100 was answered here; nothing else asked to switch protocols
+        if isinstance(ev, h11.Response):
+            out.status = ev.status_code
+            hop = (b"connection", b"keep-alive", b"proxy-connection")
+            kept = [(k, v) for k, v in ev.headers if k.lower() not in hop]
+            await _send_event(client, c_writer, h11.Response(
+                status_code=ev.status_code, reason=ev.reason,
+                headers=[*kept, (b"connection", b"close")]))  # fmt: skip
+        elif isinstance(ev, h11.Data):
+            out.bytes_down += len(ev.data)
+            await _send_event(client, c_writer, ev)
+        elif isinstance(ev, h11.EndOfMessage):
+            await _send_event(client, c_writer, ev)
+            return out
+        else:
+            raise _Closed
+
+
 class Inspector:
     def __init__(self, check: Check, record: Record, pipe: Pipe, idle_s: float,
                  tunnel_host: str | None = None):  # fmt: skip
@@ -140,19 +232,9 @@ class Inspector:
         self.idle_s = idle_s
 
     async def _next(self, conn: h11.Connection, reader: asyncio.StreamReader) -> object:
-        while True:
-            ev = conn.next_event()
-            if ev is not h11.NEED_DATA:
-                return ev
-            data = await asyncio.wait_for(reader.read(65536), self.idle_s)
-            conn.receive_data(data)  # b"" is end of stream
+        return await _next(conn, reader, self.idle_s)
 
-    @staticmethod
-    async def _send(conn: h11.Connection, writer: asyncio.StreamWriter, ev: h11.Event) -> None:
-        data = conn.send(ev)
-        if data:
-            writer.write(data)
-            await writer.drain()
+    _send = staticmethod(_send_event)
 
     async def _refuse(
         self,

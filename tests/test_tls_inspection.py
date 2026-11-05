@@ -477,10 +477,8 @@ def test_plain_http_requests_follow_the_same_rules(
     port = srv.server_address[1]
     try:
         p = start(port, None, RULES)
-        # one client each: the plain-HTTP proxy serves one request per connection
-        with httpx.Client(proxy=p.url(), timeout=10) as c:
+        with httpx.Client(proxy=p.url(), timeout=10) as c:  # one client: I28 is fixed
             ok = c.get(f"http://127.0.0.1:{port}/repos/a")
-        with httpx.Client(proxy=p.url(), timeout=10) as c:
             no = c.get(f"http://127.0.0.1:{port}/admin")
         assert ok.status_code == 200 and no.status_code == 403
         assert [s[1] for s in Handler.seen] == ["/repos/a"]
