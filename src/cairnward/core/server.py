@@ -663,11 +663,30 @@ def remote_backup(control_socket: str) -> Any:
     return run
 
 
+def refuse_vm_sockets(log: Log) -> None:
+    """The core's sandbox allows Unix sockets, which makes srt skip the filter that also refuses
+    VM sockets. Refuse them here (I1, T-28). Under WSL2 a VM socket can reach Windows, so the core
+    doesn't start without the filter there; elsewhere a missing filter is reported."""
+    from cairnward.sandbox import vmsock
+    from cairnward.sysinfo import wsl_version
+
+    try:
+        vmsock.apply()
+    except (vmsock.Unsupported, OSError) as exc:
+        if wsl_version():
+            raise SystemExit(
+                f"cairnward core: can't refuse VM sockets ({exc}); under WSL2 they would reach "
+                "Windows past egress, so the core won't start"
+            ) from None
+        log(f"cairnward core: warning: VM sockets aren't refused ({exc})")
+
+
 def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     """Inside the sandbox: gateway and management on Unix sockets."""
     from cairnward.backends import Backends
     from cairnward.mcp.launch import RemoteLauncher
 
+    refuse_vm_sockets(log)
     socks = sockets(cfg)
     srt_proxy = os.environ.get("HTTP_PROXY", "")
     if srt_proxy and "://" not in srt_proxy:

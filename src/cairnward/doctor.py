@@ -301,6 +301,17 @@ print(json.dumps(got))
 """
 
 
+CORE_PROBE = """
+from cairnward.sandbox import vmsock
+try:
+    vmsock.apply()
+except Exception as exc:
+    print("filter failed:", exc)
+else:
+    print("refused" if vmsock.vm_sockets_refused() else "open")
+"""
+
+
 def self_test(srt: list[str]) -> Check:
     with tempfile.TemporaryDirectory(prefix="cairnward-doctor-") as tmp:
         base = Path(tmp)
@@ -328,6 +339,22 @@ def self_test(srt: list[str]) -> Check:
                 check=False,
             )
             got = json.loads(res.stdout.strip().splitlines()[-1])
+            # The core's sandbox allows Unix sockets, so srt's own filter is off there and the
+            # core refuses VM sockets itself (I1, T-28). Check that in the same kind of sandbox.
+            core = SandboxSpec(allowed_hosts=[], allow_write=[base / "ws"], deny_read=[hidden],
+                               allow_all_unix_sockets=True)  # fmt: skip
+            (base / "core_probe.py").write_text(CORE_PROBE)
+            argv = [sys.executable, str(base / "core_probe.py")]
+            res = subprocess.run(
+                wrap(srt, core.write(base / "srt-core.json"), argv),
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=env,
+                cwd=base / "ws",
+                check=False,
+            )
+            got["core_vm_socket"] = res.stdout.strip().splitlines()[-1:] == ["refused"]
         except (OSError, subprocess.SubprocessError, ValueError, IndexError):
             return Check(
                 "isolation self-test",
@@ -343,7 +370,7 @@ def self_test(srt: list[str]) -> Check:
             f"NOT blocked inside the sandbox: {', '.join(leaks)}",
             "don't rely on isolation until this passes; report it",
         )
-    blocked_here = "direct network, DNS, hidden folder and Unix sockets"
+    blocked_here = "direct network, DNS, hidden folder and Unix sockets; VM sockets in the core's"
     if "windows_paths" in got:
         blocked_here += ", Windows drives, Windows programs and VM sockets"
     return Check("isolation self-test", "ok", f"{blocked_here} blocked")

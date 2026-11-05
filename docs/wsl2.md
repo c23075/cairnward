@@ -104,7 +104,8 @@ Run these inside WSL. Each is something the Linux tests can't show.
    reference machine, and crossing the VM boundary may change them.
 
 ## Known gaps
-- **VM sockets from the core:** ordinary sandboxes block them, but the core's doesn't, because it
-  has to allow Unix sockets (tested in the real sandbox on Linux). Under WSL2 a VM socket can reach
-  the Windows side, past the network rules. What's listening there hasn't been checked.
+- **VM sockets from the core** (fixed 2026-11-05, I1): the core's sandbox has to allow Unix
+  sockets, which turns srt's VM-socket block off there. The core now refuses VM sockets itself and
+  won't start under WSL2 if it can't. `cairnward doctor` checks it. This was shown in a real sandbox
+  on Linux, not yet on WSL2.
 - CI doesn't run WSL2, so a change that breaks it would only show up on a real machine.

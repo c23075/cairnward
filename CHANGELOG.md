@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **VM sockets refused in the isolated core (I1):** the core's sandbox allows Unix sockets, which
+  turned off srt's VM-socket block there. Under WSL2 that could reach Windows past egress. The core
+  now refuses VM sockets (and io_uring) itself, won't start under WSL2 without that, and `doctor`
+  checks it.
 - **Reasoning in streamed answers (I5):** a model's first streamed reply with thinking off no
   longer reaches the client with its reasoning in the answer. The answer is held until it's
   clear, and the reasoning goes out as `reasoning_content`. That one reply per model arrives all

@@ -59,7 +59,7 @@ Done on 2026-11-05:
 ### Security and privacy
 | # | Issue | State |
 |---|---|---|
-| I1 | The core's sandbox can open VM sockets. Under WSL2 these could reach Windows past the network rules (T-28) | Open: what they can reach is unchecked |
+| I1 | The core's sandbox could open VM sockets. Under WSL2 these could reach Windows past the network rules (T-28) | Fixed: the core installs its own seccomp filter at start, refusing VM sockets and io_uring, and won't start under WSL2 without it. Shown in a real srt sandbox on Linux, where a VM socket opened before the fix and is refused after; `doctor` now checks it. Not yet run on real WSL2 (A1) |
 | I2 | Under WSL2, any program running as you on Windows can read your Linux files | Accepted: only locking protects them |
 | I3 | Backends on the local network can use plain `http://`, so prompts cross the network unencrypted | Allowed, with a warning from `doctor`, `config check`, `serve` and the dashboard |
 | I4 | A third-party tool can send plain `http://` to a host you've allowed. Cairnward allows and audits it, but doesn't require encryption | Accepted |
