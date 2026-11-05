@@ -1,6 +1,7 @@
 # Project status
 
-Last updated 2026-11-05, after adding TLS inspection and the OpenShell sandbox (ADR-0018). This is the owner's view of where Cairnward stands. Detail on each
+Last updated 2026-11-05, after PR 28 (TLS inspection and the OpenShell sandbox, ADR-0018) was
+merged. This is the owner's view of where Cairnward stands. Detail on each
 requirement is in [requirements-status.md](plan/requirements-status.md), and the
 [handoff](plan/) is working notes for agents.
 
@@ -48,6 +49,12 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | A11 | If you want the OpenShell sandbox: install OpenShell, set `OPENSHELL_TELEMETRY_ENABLED=false` for its gateway, and try one run with `sandbox = "openshell"` | It has only run against a stand-in. Whether a sandbox can reach Cairnward's loopback-only ports is unknown |
 | A12 | If you turn on TLS inspection: try it with your real agents and the sites they use | Only tested with httpx and curl against a local server. Agents that pin certificates will fail |
 
+Done on 2026-11-05:
+- **A13:** your personal email addresses stay in the public commit history, by your decision: they're
+  public information anyway. History won't be rewritten.
+- **A14:** PR 28 reviewed and merged.
+- **A15:** the temp eval folders and old worktrees on the desktop are deleted.
+
 ## Known issues
 ### Security and privacy
 | # | Issue | State |
@@ -61,6 +68,8 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I8 | Presidio's small spaCy model misses some names, so redaction isn't complete | Accepted |
 | I26 | With TLS inspection on, the local CA's key could impersonate any site to tools that trust it | Accepted: off by default, owner-only file outside every sandbox, `cairnward egress-ca rotate` |
 | I27 | TLS inspection passes request bodies on unredacted, offers only HTTP/1.1, and doesn't read WebSocket messages after the upgrade | Accepted (ADR-0018) |
+| I32 | PR 28 changed trust boundaries (a local CA that decrypts HTTPS, OpenShell as a sandbox) without updating `docs/threat-model.md` or recording a review in `docs/reviews/`, as NFR-S2 and the PR checklist require. T-17 still says TLS interception is off and unbuilt | Open |
+| I30 | On native Windows, curl ignores Cairnward's CA bundle (it uses the Windows certificate store), so TLS inspection would break it there. Found by CI | Accepted: runs on Windows go through WSL, where curl uses the bundle |
 
 ### Functionality
 | # | Issue | State |
@@ -85,6 +94,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
 | I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum | Fixed in PR 25: `main` passes CI, including Windows |
+| I31 | PR 28's first CI run failed: its new tests assumed git, Unix sockets and curl's CA handling | Fixed in PR 28 before it merged: the second run passes on Linux and Windows |
 
 ## Testing still to do
 ### Could reveal real bugs
@@ -110,6 +120,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 ### Project-level
 - [x] Clean install from the public repositories, as a new user with an empty home on this machine, following the READMEs: the core worked, and the plugin's steps needed a fix. Not a fresh VM, so system packages weren't tested
 - [ ] Release workflow on GitHub (A8)
+- [ ] Moving your server and data to the research plugin (see In progress): the import has only run in tests
 - [ ] `deploy/systemd/cairnward.service` under real systemd (only `systemd-analyze verify` so far)
 - [ ] A plugin other than research and a test plugin running the contract
 - [ ] Outside review (A10)
@@ -135,12 +146,13 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Cairnward to a hosted model | HTTPS required, with certificates verified |
 | Cairnward to a remote MCP server | HTTPS required; `http` only on this machine |
 | Cairnward to the academic APIs | HTTPS |
-| Agents and tools to the internet | Only through the egress proxy, to allowed hosts. HTTPS passes through encrypted, so Cairnward sees the host but not the content. Plain HTTP to an allowed host is also passed on (I4) |
+| Agents and tools to the internet | Only through the egress proxy, to allowed hosts. HTTPS passes through encrypted, so Cairnward sees the host but not the content, unless the environment turns on TLS inspection (off by default; then egress decrypts and re-encrypts it, I26). Plain HTTP to an allowed host is also passed on (I4) |
 | Cairnward to a model on your network | HTTP is allowed but warned about (I3). HTTPS or a tunnel keeps it encrypted |
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
-- TLS inspection in egress and OpenShell as a second sandbox (ADR-0018, D77 and D78), both opt-in per environment
+- **PR 28 (merged):** TLS inspection in egress and OpenShell as a second sandbox (ADR-0018, D77 and
+  D78), both opt-in per environment. They were "not planned" in the handoff until you asked for them
 - Research issues, its checklists and A2 moved to the plugin's status page, and the core no longer ships its environments (D76)
 - **PR 22:** ADR-0017 accepted, and research moved to a plugin, with a plugin contract in the core
   (merged before CI could run, I25)
