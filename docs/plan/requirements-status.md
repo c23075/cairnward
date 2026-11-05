@@ -1,7 +1,7 @@
 # Requirements status
 
 Every requirement in [requirements.md](../requirements.md), checked against the tests that exist
-and the measurements, as of 2026-11-04. Current work and next steps are in the newest
+and the measurements, as of 2026-11-05. Current work and next steps are in the newest
 `handoff-*.md` here.
 
 **Key:**
