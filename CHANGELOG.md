@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **TLS inspection** ([ADR-0018](docs/adr/0018-openshell-sandbox-and-tls-inspection.md)): per
+  environment, off by default. With `[tls_inspection] enabled = true`, cairnward-egress decrypts
+  runs' HTTPS with a local CA, checks each request against method and path rules, and audits it
+  (the path only as a digest). `cairnward egress-ca show|rotate` manage the CA.
+- **OpenShell as a second sandbox** ([ADR-0018](docs/adr/0018-openshell-sandbox-and-tls-inspection.md)):
+  `sandbox = "openshell"` runs agents in an OpenShell sandbox that can reach only Cairnward. The
+  agent works on a copy of the workspace, copied back at the end. Not yet run with a real OpenShell.
 - **The core no longer ships `litreview-offline` and `litreview-online`.** Plugins bring their own environments. Run `cairnward-research install-plugin` again to create them. `citation_style` is ignored if set.
 - **Research moved to a plugin** ([ADR-0017](docs/adr/0017-research-as-a-plugin.md)). `cairnward
   library`, `research`, `jobs` and `cite` are now `cairnward-research ...`, from its own package. Run

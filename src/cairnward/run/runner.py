@@ -5,8 +5,9 @@
 2. Build a clean environment: a few basics plus what the agent profile needs.
 3. With isolation on: wrap the command in srt (network only to the gateway and allowed
    hosts, via egress; writes only to the workspace; the home folder hidden except what the
-   run needs, secrets and Cairnward's own data hidden always). With isolation off: run
-   directly (advisory: the agent could bypass egress).
+   run needs, secrets and Cairnward's own data hidden always), or, with sandbox = "openshell",
+   start it in an OpenShell sandbox on a copy of the workspace (sandbox/openshell.py). With
+   isolation off: run directly (advisory: the agent could bypass egress).
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from cairnward.run.snapshots import SnapshotError, Snapshots
 from cairnward.sandbox import (
     SandboxSpec,
     SandboxUnavailable,
+    openshell,
     require,
     secret_dirs,
     srt_hosts,
@@ -166,6 +168,17 @@ def _home_hidden(workspace: Path, tmp_dir: Path, writable: list[Path], profile: 
     return [p for p in dict.fromkeys(reads) if p in kept and not kept.intersection(p.parents)]
 
 
+def trust_files(cfg: Config, folder: Path) -> dict[str, str]:
+    """Write the run's CA files into `folder` (the run's private temporary folder) and return
+    the variables that point tools at them (TLS inspection, FR-NET-2)."""
+    from cairnward.egress import tls
+
+    bundle = tls.trust_bundle(cfg.paths.data_dir, folder / "cairnward-ca-bundle.pem")
+    ca_only = folder / "cairnward-ca.pem"
+    ca_only.write_bytes(tls.ca_cert_pem(cfg.paths.data_dir))
+    return tls.trust_env(bundle, ca_only)
+
+
 @dataclass(frozen=True)
 class Plan:
     """Everything needed to start the agent (built without side effects, for testing)."""
@@ -175,6 +188,9 @@ class Plan:
     sandboxed: bool
     spec: SandboxSpec | None
     warnings: list[str]
+    # sandbox = "openshell": the sandbox to create; argv is made once it exists
+    openshell: openshell.OpenShellRun | None = None
+    sandbox_env: dict[str, str] | None = None  # what the agent gets inside it
 
 
 def management(cfg: Config) -> httpx.Client:
@@ -184,6 +200,60 @@ def management(cfg: Config) -> httpx.Client:
     return httpx.Client(
         transport=httpx.HTTPTransport(uds=str(sock)), base_url="http://cairnward", timeout=30
     )
+
+
+def uses_openshell(cfg: Config, environment: str) -> bool:
+    return (cfg.privacy(environment).value("isolation") == "on"
+            and cfg.environments[environment].sandbox == "openshell")  # fmt: skip
+
+
+def _plan_openshell(cfg: Config, *, environment: str, profile: Profile, model: str,
+                    workspace: Path, run: dict[str, Any], tmp_dir: Path,
+                    cli: list[str] | None) -> Plan:  # fmt: skip
+    """An OpenShell sandbox for the run (ADR-0018): Cairnward's two ports are its only network,
+    and the agent works on a copy of the workspace."""
+    if cli is None:
+        raise RunError(
+            'sandbox = "openshell" but the openshell command wasn\'t found: install OpenShell '
+            '(or set CAIRNWARD_OPENSHELL), or set sandbox = "srt" for this environment'
+        )
+    opts = cfg.environments[environment].openshell
+    host = opts.host_name
+    gw_port, eg_port = run["gateway_port"], run["egress_port"]
+    base_url = f"http://{host}:{gw_port}/v1"
+    fast = f"cw/{environment}:low"
+    stage = tmp_dir / openshell.RUN_DIR
+    stage.mkdir(mode=0o700)
+    env = {k: os.environ[k] for k in ("TERM", "LANG", "LC_ALL", "TZ", "COLORTERM")
+           if k in os.environ}  # fmt: skip
+    env.update(profile.env(base_url, run["gateway_key"], model, fast))
+    if profile.config is not None:
+        env.update(profile.config(base_url, run["gateway_key"], model, fast, stage))
+    env.update(CAIRNWARD_RUN_ID=run["run_id"], CAIRNWARD_MCP_URL=f"http://{host}:{gw_port}/mcp",
+               CAIRNWARD_API_KEY=run["gateway_key"])  # fmt: skip
+    ports = [gw_port]
+    warnings = [
+        f"sandbox = openshell: the agent works on a copy of {workspace.name}, copied back when "
+        "it finishes; OpenShell's gateway sends anonymous telemetry unless "
+        "OPENSHELL_TELEMETRY_ENABLED=false is set for it"
+    ]
+    if run.get("egress_token"):
+        proxy = f"http://cw:{run['egress_token']}@{host}:{eg_port}"
+        env.update(HTTP_PROXY=proxy, HTTPS_PROXY=proxy, http_proxy=proxy, https_proxy=proxy,
+                   NO_PROXY=host, no_proxy=host)  # fmt: skip
+        ports.append(eg_port)
+        if cfg.environments[environment].tls_inspection.enabled:
+            env.update(trust_files(cfg, stage))
+            warnings.append("tls_inspection is on: Cairnward decrypts this run's HTTPS to check "
+                            "each request")  # fmt: skip
+    else:
+        warnings.append("this server runs without egress: the agent can only reach the gateway")
+    policy_file = openshell.write_policy(tmp_dir / "openshell-policy.yaml", host, ports)
+    sandbox = openshell.OpenShellRun(
+        cli=cli, name=f"cw-{run['run_id'][:12]}", workspace=workspace, stage=stage,
+        image=opts.image, policy_file=policy_file,
+    )  # fmt: skip
+    return Plan([], dict(os.environ), True, None, warnings, sandbox, env)
 
 
 def plan_run(
@@ -199,7 +269,12 @@ def plan_run(
     settings_file: Path,
     tmp_dir: Path,
     ask_socket: Path | None = None,
+    openshell_cli: list[str] | None = None,
 ) -> Plan:
+    if uses_openshell(cfg, environment):
+        return _plan_openshell(cfg, environment=environment, profile=profile, model=model,
+                               workspace=workspace, run=run, tmp_dir=tmp_dir,
+                               cli=openshell_cli)  # fmt: skip
     eff = cfg.privacy(environment)
     gw_port, eg_port = run["gateway_port"], run["egress_port"]
     base_url = f"http://127.0.0.1:{gw_port}/v1"
@@ -219,6 +294,12 @@ def plan_run(
         f"http://cw:{run['egress_token']}@127.0.0.1:{eg_port}" if run.get("egress_token") else None
     )
     warnings: list[str] = []
+    if cfg.environments[environment].tls_inspection.enabled and egress:
+        env.update(trust_files(cfg, tmp_dir))
+        warnings.append(
+            "tls_inspection is on: Cairnward decrypts this run's HTTPS to check each request; "
+            "tools that pin certificates or ignore SSL_CERT_FILE will fail to connect"
+        )
 
     if eff.value("isolation") == "on":
         if srt is None:
@@ -425,9 +506,16 @@ def run_agent(
         raise RunError(f"unknown profile '{profile_name}' (known: {', '.join(PROFILES)})")
     if model:
         check_model_environment(cfg, env_name, model)
-    if shutil.which(command[0]) is None and not Path(command[0]).exists():
+    in_openshell = uses_openshell(cfg, env_name)
+    if in_openshell:
+        # The program is in the sandbox's image, not on this machine: OpenShell records each
+        # executable's hash itself and refuses one that changes.
+        os_cli = openshell.locate()
+    elif shutil.which(command[0]) is None and not Path(command[0]).exists():
         raise RunError(f"command not found: {command[0]}")
-    check_program(cfg, env_name, command, trust_change=trust_program_change, log=log)
+    else:
+        os_cli = None
+        check_program(cfg, env_name, command, trust_change=trust_program_change, log=log)
     env_cfg = cfg.environments[env_name]
     effort = env_cfg.effort_default or cfg.main.defaults.effort
     model = model or f"cw/{env_name}:{effort}"
@@ -435,7 +523,7 @@ def run_agent(
         log(f"cairnward: {w}")
     workspace = (workspace or Path.cwd()).resolve()
     srt = None
-    if cfg.privacy(env_name).value("isolation") == "on":
+    if cfg.privacy(env_name).value("isolation") == "on" and not in_openshell:
         try:
             srt = require(cfg.paths)
         except SandboxUnavailable:
@@ -451,7 +539,7 @@ def run_agent(
                 "workspace": str(workspace),
                 "program": Path(command[0]).name,
                 "arg_count": len(command) - 1,
-                "sandbox": "srt" if srt else "none",
+                "sandbox": "openshell" if in_openshell else "srt" if srt else "none",
                 **{k: v for k, v in (budget or {}).items() if v},
             },
         )
@@ -481,14 +569,18 @@ def run_agent(
                     settings_file=Path(tmp) / "srt.json",
                     tmp_dir=Path(tmp),
                     ask_socket=sockets(cfg)["management"],
+                    openshell_cli=os_cli,
                 )
                 for w in plan.warnings:
                     log(f"cairnward: {w}")
+                argv = plan.argv
+                if plan.openshell is not None:
+                    argv = _start_openshell(plan, command, log)
                 log(
                     f"cairnward: run {run['run_id'][:8]} in '{env_name}' with {model} "
                     f"({'sandboxed' if plan.sandboxed else 'NOT sandboxed'})"
                 )
-                proc = subprocess.Popen(plan.argv, env=plan.env, cwd=workspace,
+                proc = subprocess.Popen(argv, env=plan.env, cwd=workspace,
                                         start_new_session=os.name != "nt")  # fmt: skip
                 stop = threading.Event()
                 watcher = threading.Thread(target=_watch_server,
@@ -502,6 +594,8 @@ def run_agent(
                     code = proc.wait()
                 finally:
                     stop.set()
+                    if plan.openshell is not None:
+                        _finish_openshell(plan.openshell, Path(tmp), log)
         finally:
             if snaps is not None:
                 try:
@@ -525,6 +619,42 @@ def run_agent(
             f"Undo: cairnward runs revert {short}"
         )
     return code
+
+
+def _start_openshell(plan: Plan, command: list[str], log: Any) -> list[str]:
+    """Create the sandbox and copy the run in; the argv that starts the agent there."""
+    sandbox = plan.openshell
+    assert sandbox is not None and plan.sandbox_env is not None  # noqa: S101 (narrowing)
+    try:
+        log(f"cairnward: creating OpenShell sandbox {sandbox.name}")
+        sandbox.create(sandbox.policy_file)
+        sandbox.upload(plan.sandbox_env)
+    except (openshell.OpenShellError, OSError, subprocess.TimeoutExpired) as exc:
+        sandbox.delete()
+        raise RunError(str(exc)) from None
+    return sandbox.agent_argv(command, tty=openshell.stdin_is_tty())
+
+
+def _finish_openshell(sandbox: openshell.OpenShellRun, tmp: Path, log: Any) -> None:
+    """Copy the work back, then delete the sandbox; keep it if the copy didn't come back."""
+    try:
+        copy = sandbox.download(tmp)
+        written, deleted, refused = openshell.mirror_back(copy, sandbox.workspace,
+                                                          sandbox.before)  # fmt: skip
+    except (openshell.OpenShellError, OSError, subprocess.TimeoutExpired) as exc:
+        log(f"cairnward: couldn't copy the work back from the sandbox ({exc}); the workspace "
+            f"is unchanged and sandbox {sandbox.name} is kept: fetch it with `openshell "
+            f"sandbox download {sandbox.name} {sandbox.workspace.name} <folder>`, then delete "
+            "it")  # fmt: skip
+        return
+    log(f"cairnward: copied back from the sandbox: {written} written, {deleted} deleted")
+    if refused:
+        more = f" and {len(refused) - 5} more" if len(refused) > 5 else ""
+        log(f"cairnward: not copied back, because a symlinked folder is on the way or a folder "
+            f"would become a symlink: {', '.join(refused[:5])}{more}; sandbox {sandbox.name} "
+            "is kept so you can look")  # fmt: skip
+        return
+    sandbox.delete()
 
 
 @contextlib.contextmanager

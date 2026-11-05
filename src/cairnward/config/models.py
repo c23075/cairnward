@@ -521,6 +521,73 @@ class RunBudget(_Strict):
     max_minutes: float | None = Field(default=None, gt=0)
 
 
+_HTTP_METHOD = re.compile(r"^(\*|[A-Z]{1,20})$")
+
+
+class HttpRule(_Strict):
+    """One method/path rule for inspected traffic (FR-NET-2). The first matching rule wins."""
+
+    host: str = Field(description="host pattern, as in network_allow_hosts ('*.example.org')")
+    method: str = Field(default="*", description="HTTP method, or '*' for any")
+    path: str = Field(default="/**", description="path glob: '*' within a segment, '**' across")
+    decision: Literal["allow", "deny"]
+
+    @field_validator("method")
+    @classmethod
+    def _method(cls, value: str) -> str:
+        value = value.upper()
+        if not _HTTP_METHOD.match(value):
+            raise ValueError(f"method '{value}' must be an HTTP method like GET, or '*'")
+        return value
+
+    @field_validator("path")
+    @classmethod
+    def _path(cls, value: str) -> str:
+        if not value.startswith("/"):
+            raise ValueError(f"path '{value}' must start with '/'")
+        return value
+
+
+class TlsInspection(_Strict):
+    """Decrypting third-party HTTPS in cairnward-egress (FR-NET-2, ADR-0018). Off by default and
+    never set by a preset: tools in this environment must trust Cairnward's local CA, and
+    Cairnward then sees their requests."""
+
+    enabled: bool = False
+    skip_hosts: list[str] = Field(
+        default_factory=list,
+        description="hosts tunnelled without inspection (clients that pin certificates)",
+    )
+    rules: list[HttpRule] = Field(default_factory=list)
+    unmatched: Literal["allow", "deny"] = Field(
+        default="allow", description="requests no rule matches (the host itself is allowed)"
+    )
+
+
+Sandbox = Literal["srt", "openshell"]
+
+
+class OpenShellOptions(_Strict):
+    """How `cairnward run` uses OpenShell when sandbox = 'openshell' (ADR-0018)."""
+
+    image: str | None = Field(
+        default=None, description="image the agent runs in (--from); default: the gateway's"
+    )
+    gateway: str | None = Field(default=None, description="openshell gateway name (-g)")
+    host_name: str = Field(
+        default="host.openshell.internal",
+        description="the name a sandbox uses for this machine",
+    )
+    workdir: str = Field(default="/sandbox/work", description="where the workspace is copied")
+
+    @field_validator("workdir")
+    @classmethod
+    def _abs(cls, value: str) -> str:
+        if not value.startswith("/") or ".." in value.split("/") or value.rstrip("/") == "":
+            raise ValueError("workdir must be an absolute path without '..', not '/'")
+        return value.rstrip("/")
+
+
 class EnvironmentConfig(_Strict):
     @model_validator(mode="before")
     @classmethod
@@ -556,6 +623,12 @@ class EnvironmentConfig(_Strict):
         default="warn", description="a prompt larger than context_tokens: warn, or refuse it"
     )
     privacy: PrivacyOverrides = PrivacyOverrides()
+    sandbox: Sandbox = Field(
+        default="srt",
+        description="the sandbox `cairnward run` uses when isolation = on: srt or openshell",
+    )
+    openshell: OpenShellOptions = OpenShellOptions()
+    tls_inspection: TlsInspection = TlsInspection()
 
     @field_validator("workspace", mode="before")
     @classmethod
