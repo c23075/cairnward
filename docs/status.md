@@ -1,7 +1,7 @@
 # Project status
 
-Last updated 2026-11-05, after adding TLS inspection and the OpenShell sandbox (ADR-0018, PR 28,
-CI passing, not yet merged). This is the owner's view of where Cairnward stands. Detail on each
+Last updated 2026-11-05, after PR 28 (TLS inspection and the OpenShell sandbox, ADR-0018) was
+merged. This is the owner's view of where Cairnward stands. Detail on each
 requirement is in [requirements-status.md](plan/requirements-status.md), and the
 [handoff](plan/) is working notes for agents.
 
@@ -48,9 +48,12 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
 | A11 | If you want the OpenShell sandbox: install OpenShell, set `OPENSHELL_TELEMETRY_ENABLED=false` for its gateway, and try one run with `sandbox = "openshell"` | It has only run against a stand-in. Whether a sandbox can reach Cairnward's loopback-only ports is unknown |
 | A12 | If you turn on TLS inspection: try it with your real agents and the sites they use | Only tested with httpx and curl against a local server. Agents that pin certificates will fail |
-| A13 | Decide whether to remove your two personal email addresses from the public commit history | Both repositories are public, so the addresses are visible. Removing them means rewriting history and force-pushing, which breaks every existing clone |
-| A14 | Review and merge PR 28 (TLS inspection and the OpenShell sandbox) | CI passes. Both features are off unless an environment turns them on |
-| A15 | Clean up on the desktop: delete `/tmp/cw-qraS`, `/tmp/cwf-skmp`, `/tmp/cwh-u9Ji` and `/tmp/cw-eG5X` (about 650 MB, left by evals), and remove the old worktrees for merged branches (`git worktree list`, then `git worktree remove <path>` and `git worktree prune`) | Disk space only. They're on your machine, so a cloud session can't remove them |
+
+Done on 2026-11-05:
+- **A13:** your personal email addresses stay in the public commit history, by your decision: they're
+  public information anyway. History won't be rewritten.
+- **A14:** PR 28 reviewed and merged.
+- **A15:** the temp eval folders and old worktrees on the desktop are deleted.
 
 ## Known issues
 ### Security and privacy
@@ -90,7 +93,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | I18 | `core/server.py` isn't in the coverage count. Only the isolation job runs it | Accepted |
 | I19 | CI doesn't run WSL2, so a change that breaks it only shows up on a real machine | Accepted |
 | I25 | `main`'s CI fails: a Windows path in a test's TOML, git missing in the Debian job, and `redaction_engines` and `plugins` under the 80% coverage minimum | Fixed in PR 25: `main` passes CI, including Windows |
-| I31 | PR 28's first CI run failed: its new tests assumed git, Unix sockets and curl's CA handling | Fixed in PR 28: the second run passes on Linux and Windows |
+| I31 | PR 28's first CI run failed: its new tests assumed git, Unix sockets and curl's CA handling | Fixed in PR 28 before it merged: the second run passes on Linux and Windows |
 
 ## Testing still to do
 ### Could reveal real bugs
@@ -147,7 +150,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
-- **PR 28 (open):** TLS inspection in egress and OpenShell as a second sandbox (ADR-0018, D77 and
+- **PR 28 (merged):** TLS inspection in egress and OpenShell as a second sandbox (ADR-0018, D77 and
   D78), both opt-in per environment. They were "not planned" in the handoff until you asked for them
 - Research issues, its checklists and A2 moved to the plugin's status page, and the core no longer ships its environments (D76)
 - **PR 22:** ADR-0017 accepted, and research moved to a plugin, with a plugin contract in the core
