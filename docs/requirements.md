@@ -162,7 +162,7 @@ FR-RES-1 to FR-RES-13 moved to the `literature-review-agent-plugin` repository w
 | NFR-P2 | Gateway adds ≤ 75 ms, or ≤ 150 ms with isolation per request excluding model time (Strict); ≤ 10 ms with all protections off. Raised from 50 ms on 2026-11-05 by owner decision: the cost is audit writes waiting for the disk and the sandbox's route to the model, and a model call takes minutes on the reference machine | M | `scripts/bench_gateway.py`, `test_bench_gateway.py`; Strict 105 ms isolated, 59 ms not (meets), all off 7 ms (meets) |
 | NFR-P3 | Follow-up turns reuse the prompt cache: ≥ 10× faster first token than cold (reference machine measured 18.6×) | M | `bench_backend.py --cache-test` through the gateway: 19.6× |
 | NFR-P6 | 512-token prompt: first token ≤ 15 s on the fast model, ≤ 30 s on the main model (reference machine) | S | `bench_backend.py` through the gateway: 11 to 14 s fast, 22 s main |
-| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | `docs/bench/results-2026-11-03-measurements.md`: 122 MB meets; start about 2.8 s isolated on empty data, not yet tried on a large data folder |
+| NFR-P5 | Core ≤ 500 MB RAM without optional workers; starts ≤ 3 s | S | `docs/bench/results-2026-11-03-measurements.md`: 122 MB meets; start about 3.5 s isolated on 2026-11-05, misses, and no slower with 3,000 conversations; earlier about 2.8 s by another script; see `docs/status.md` I15. |
 | NFR-R1 | No data loss on crash; research jobs resumable | M | kill tests |
 | NFR-R2 | Audit record before every effect | M | FR-AUD-1 |
 | NFR-S1 | Strict: zero outbound connections unless allowlisted; Balanced: none without approval | M | isolation suite per preset |

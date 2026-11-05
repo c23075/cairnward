@@ -74,6 +74,7 @@ def one(task: dict, profile: str, agent_cmd: str, model: str | None, env: str) -
         "profile": profile,
         "passed": check.returncode == 0 and tests_untouched,
         "tests_untouched": tests_untouched,
+        "check_output": (check.stdout + check.stderr)[-500:],
         "agent_exit": res.returncode,
         "seconds": round(elapsed, 1),
         "model_calls": len(posts),
@@ -112,6 +113,8 @@ def main() -> int:
             f"{r['model_calls']} calls  {r['prompt_tokens']} prompt + {r['completion_tokens']} "
             f"completion tokens  (run {r['run_id']})"
         )
+        if not r["passed"]:
+            print(f"  tests untouched: {r['tests_untouched']}; check said: {r['check_output']}")
     passed = sum(r["passed"] for r in results)
     print(f"\n{args.profile} on {args.task}: {passed}/{len(results)} passed")
     if args.out:
