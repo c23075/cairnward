@@ -13,7 +13,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from cairnward.audit.log import AuditLog, canonical, digest
@@ -21,10 +21,14 @@ from cairnward.config.loader import Config
 from cairnward.mcp.jsonrpc import McpError
 from cairnward.mcp.launch import Launcher, LaunchError, Started
 from cairnward.mcp.pins import PinStore, ToolState
-from cairnward.mcp.upstream import Connection, HttpTarget
 from cairnward.policy.engine import Action, PolicyEngine
 from cairnward.policy.provenance import ProvenanceTracker
 from cairnward.redaction import check_outbound, value_texts
+
+if TYPE_CHECKING:
+    # The MCP SDK takes about half a second to import, and the core only needs it once an MCP
+    # server is used, so it's imported there (start time, I15).
+    from cairnward.mcp.upstream import Connection
 
 SEP = "__"
 BUILTIN = "cairnward"  # prefix of Cairnward's own tools
@@ -104,6 +108,8 @@ class McpHub:
 
             if plugin_run:
                 started = self._revoking(started, plugin_run)
+            from cairnward.mcp.upstream import Connection
+
             conn = Connection(started.reader, started.writer, on_notification=on_note)
             try:
                 await conn.initialize(timeout=min(spec.call_timeout_s, 120))
@@ -198,6 +204,8 @@ class McpHub:
                 await asyncio.to_thread(self.engine.audit_deny, dec)
                 raise McpError(f"{server}: {host} refused ({dec.reason})")
             checked.add(target_)
+
+        from cairnward.mcp.upstream import Connection, HttpTarget
 
         target = HttpTarget(url, headers, proxy, auth=auth, check_host=check_host)
 

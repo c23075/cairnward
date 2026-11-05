@@ -29,6 +29,34 @@ table's method read 5.3 s, so the two aren't directly comparable, and a large ex
 wasn't tried. What's left is mostly the core's own imports (about 1.3 s) and Python starting twice;
 opening the databases and checking migrations takes under 150 ms, and the sandbox itself about 0.3 s.
 
+**Start time, 2026-11-05 (I15).** Measured in a cloud session, not on the reference machine, with
+`scripts/bench_startup.py`: isolated, Strict, time until `/health` answers, eight counted runs
+after one warm-up. "Before" is `main` with I1's filter. "After" adds the I15 changes. Each pair
+was run in both orders, because this machine drifts.
+
+| | Before (median) | After (median) |
+|---|---|---|
+| Empty data, each run creates its databases | 2.63 to 2.92 s | 2.14 to 2.23 s |
+| Existing data, as a server that has run before | 2.77 s | 1.86 to 2.30 s |
+
+**Where the time went before,** from `strace` and Python's import timing:
+- The outer process: about 0.9 s of imports.
+- srt starting Node and bubblewrap: about 0.5 s.
+- The core: about 1.7 s of imports.
+  - Of those, 0.73 s was the MCP SDK, which the core imported at start although it's only used
+    once an MCP server or `/mcp` is used.
+  - Alembic was imported and the migration scripts loaded on every start in both processes, even
+    with nothing to migrate.
+
+**The changes:**
+- The SDK now loads on first use: `mcp/hub.py`, and `mcp/http_sdk.py` behind `mcp/http.py`.
+- A database at the newest migration skips alembic: `store/db.py` `HEADS`, with a test against
+  alembic's own view.
+- The VM-socket filter stopped running `ldconfig -p` through `ctypes.util.find_library`.
+
+**What's left** is Python and its framework imports (FastAPI, SQLAlchemy, pydantic) in both
+processes, and srt's own start.
+
 ## Where Strict's overhead goes
 
 Time for a chat request, with a stand-in that answers in under 1 ms:
