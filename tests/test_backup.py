@@ -276,3 +276,52 @@ def test_same_disk_warning(cfg_paths: Paths, monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(Path, "stat", other_disk)
     assert backup.same_disk_warning(cfg) is None
+
+
+def test_restore_brings_back_files_without_overwriting_or_undoing_a_purge(
+    cfg_paths: Paths, tmp_path: Path
+) -> None:
+    """Real restic, as `backup restore` does it, onto a fresh data folder and then the same one."""
+    from dataclasses import replace
+
+    (cfg_paths.config_dir / "mcp.toml").write_text(
+        '[servers.research]\nkind = "plugin"\ncommand = ["x"]\nunsandboxed = true\n'
+        "[servers.research.permissions]\nread = []\n"
+    )
+    cfg = load_config(cfg_paths)
+    data = cfg_paths.data_dir
+    with Vault.open(cfg_paths) as v:
+        kept = v.create_conversation(environment="coding", client="aider", title="Kept")
+        gone = v.create_conversation(environment="coding", client="aider", title="Gone")
+    for name in (kept, gone):
+        (data / "artifacts" / "conversation" / name).mkdir(parents=True)
+        (data / "artifacts" / "conversation" / name / "a.txt").write_text(name)
+    (data / "artifacts" / "run" / "r1").mkdir(parents=True)
+    (data / "artifacts" / "run" / "r1" / "sealed.age").write_bytes(b"sealed")
+    (data / "jobs" / "j1").mkdir(parents=True)
+    (data / "jobs" / "j1" / "job.json").write_text("{}")
+    plugin = data / "mcp" / "research"
+    (plugin / "engines").mkdir(parents=True)
+    (plugin / "engines" / "big").write_text("installed")
+    (plugin / "notes.txt").write_text("mine")
+    backup.init(cfg, log=lambda m: None)
+    backup.run(cfg, log=lambda m: None)
+    _snap, export = backup.restore(cfg, tmp_path / "restored")
+
+    fresh = replace(cfg_paths, data_dir=tmp_path / "new-data", state_dir=tmp_path / "new-state")
+    new_cfg = load_config(fresh)
+    backup.import_conversations(new_cfg, export)
+    with Vault.open(fresh) as v:
+        v.purge(gone, force=True)
+    new = fresh.data_dir
+    assert backup.import_files(new_cfg, export) == {"added": 4, "skipped": 0}
+    assert (new / "artifacts" / "conversation" / kept / "a.txt").read_text() == kept
+    assert not (new / "artifacts" / "conversation" / gone).exists()  # purged stays purged
+    assert (new / "artifacts" / "run" / "r1" / "sealed.age").read_bytes() == b"sealed"
+    assert (new / "jobs" / "j1" / "job.json").exists()
+    assert (new / "mcp" / "research" / "notes.txt").read_text() == "mine"
+    assert not (new / "mcp" / "research" / "engines").exists()  # installed again, not restored
+
+    (new / "mcp" / "research" / "notes.txt").write_text("newer")
+    assert backup.import_files(new_cfg, export) == {"added": 0, "skipped": 4}
+    assert (new / "mcp" / "research" / "notes.txt").read_text() == "newer"

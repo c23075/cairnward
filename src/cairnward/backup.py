@@ -613,6 +613,38 @@ def import_conversations(cfg: Config, export: Path) -> dict[str, int]:
     return {"added": added, "skipped": skipped}
 
 
+def import_files(cfg: Config, export: Path) -> dict[str, int]:
+    """Bring back the artifacts, jobs and plugins' data in a restored export. Each comes back whole
+    or not at all: what's already here is left alone, and a purged conversation's artifacts stay
+    gone, even from a backup taken before the purge."""
+    data = cfg.paths.data_dir
+    with contextlib.closing(sqlite3.connect(data / "vault.db")) as v:
+        kept = {r[0] for r in v.execute("SELECT id FROM conversations WHERE purged_at IS NULL")}
+    wanted: list[tuple[Path, Path]] = []
+    for folder in sorted((export / "artifacts").glob("*/*")):
+        if folder.parent.name != "conversation" or folder.name in kept:
+            wanted.append((folder, data / "artifacts" / folder.parent.name / folder.name))
+    wanted += [(f, data / "jobs" / f.name) for f in sorted((export / "jobs").glob("*"))]
+    wanted += [(f, data / "mcp" / f.name) for f in sorted((export / "plugins").glob("*"))]
+    added = skipped = 0
+    for source, target in wanted:
+        if _has_own_data(target):
+            skipped += 1
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, target, dirs_exist_ok=True)
+        added += 1
+    _audit(cfg, "backup.import_files", added=added, skipped=skipped)
+    return {"added": added, "skipped": skipped}
+
+
+def _has_own_data(folder: Path) -> bool:
+    """True if this holds anything but what a plugin can install again (see _copy_plugin)."""
+    if not folder.is_dir():
+        return False
+    return any(p.name not in ("engines", "home", "tmp") for p in folder.iterdir())
+
+
 def _insert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> None:
     cols = list(row)
     conn.execute(f"INSERT OR IGNORE INTO {table} ({', '.join(cols)}) "  # noqa: S608 - own schema

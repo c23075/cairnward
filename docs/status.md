@@ -65,7 +65,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 ### Functionality
 | # | Issue | State |
 |---|---|---|
-| I9 | Restoring locked job, run and library files is by hand. Only conversations are imported automatically | Open |
+| I9 | Restoring locked job, run and library files was by hand | Fixed: `backup restore` brings them back, tested with real restic |
 | I10 | Scheduled backups and replication stop when WSL goes idle | Accepted: documented |
 | I11 | `keyring:` references usually fail under WSL. Use `env:` | Accepted: documented |
 | I12 | Only the built-in APA and IEEE citation styles work until pandoc or citeproc-js is installed | Your choice |
