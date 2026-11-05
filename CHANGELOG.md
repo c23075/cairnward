@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **TLS inspection fixes** (threat-model review of 2026-11-05):
+  - Only `cairnward run` agents are decrypted. MCP servers, remote restic backups, `mcp login`,
+    plugin commands and downloads would otherwise have failed TLS in an inspecting environment.
+  - A request naming another site than its tunnel is refused (domain fronting).
 - **TLS inspection** ([ADR-0018](docs/adr/0018-openshell-sandbox-and-tls-inspection.md)): per
   environment, off by default. With `[tls_inspection] enabled = true`, cairnward-egress decrypts
   runs' HTTPS with a local CA, checks each request against method and path rules, and audits it

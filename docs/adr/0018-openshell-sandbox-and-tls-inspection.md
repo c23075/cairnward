@@ -62,8 +62,12 @@ set by a preset (spec §5.0 lists it as opt-in).
 - **CA:** an EC P-256 key, valid for two years, in `<data_dir>/egress-ca/` (0600), which sandboxed
   agents can't read. Host certificates are made on demand, valid for seven days, and kept in
   memory only. `cairnward egress-ca show|rotate` manage it, and a rotation is audited.
-- **Who is inspected:** runs in that environment get a bundle (public roots plus the CA) through
-  `SSL_CERT_FILE` and similar variables. Hosts in `skip_hosts` are tunnelled unread, for clients
+- **Who is inspected:** only `cairnward run` agents in that environment. They get a bundle
+  (public roots plus the CA) through `SSL_CERT_FILE` and similar variables, and their egress
+  session is marked as given the CA. Other programs in the environment (MCP servers, restic,
+  `mcp login`, plugin commands, downloads) are tunnelled unread. Amended 2026-11-05 after the
+  threat-model review found that inspecting them broke their HTTPS.
+- **Domain fronting:** a request naming another site than its tunnel is refused. Hosts in `skip_hosts` are tunnelled unread, for clients
   that pin certificates. The core's own connections are never inspected.
 - **Audit:** one `net.request` record per request: method, status, bytes, the deciding rule, and
   a digest of the path and query, never the text. A plain-HTTP request to an inspecting

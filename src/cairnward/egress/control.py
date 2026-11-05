@@ -43,6 +43,7 @@ class SessionIn(BaseModel):
     run_id: str | None = None
     actor: str = "cairnward"
     trusted_core: bool = False
+    inspect: bool = False  # the program was given Cairnward's CA (TLS inspection)
 
 
 class RevokeIn(BaseModel):

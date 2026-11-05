@@ -32,7 +32,7 @@ from cairnward.config.models import HttpRule, TlsInspection
 from cairnward.config.paths import Paths
 from cairnward.egress import EgressProxy, Session, Sessions
 from cairnward.egress import tls as cwtls
-from cairnward.egress.inspect import check_request, path_matches, request_path
+from cairnward.egress.inspect import check_request, fronted, path_matches, request_path
 from cairnward.policy import ApprovalAnswer, PolicyEngine, ScriptedApprover
 
 # ------------------------------------------------------------------ an HTTPS origin
@@ -161,7 +161,10 @@ def https_origin(tmp_path: Path) -> Iterator[tuple[int, Path]]:
 class Proxy:
     def __init__(self, proxy: EgressProxy, sessions: Sessions, log: AuditLog, paths: Paths):
         self.proxy, self.sessions, self.log, self.paths = proxy, sessions, log, paths
-        self.token = sessions.create(Session(environment="e", client="test", actor="agent:t"))
+        # a `cairnward run` agent that was given the CA
+        self.token = sessions.create(
+            Session(environment="e", client="test", actor="agent:t", inspect=True)
+        )
 
     def url(self, token: str | None = None) -> str:
         return f"http://cw:{token or self.token}@127.0.0.1:{self.proxy.port}"
@@ -356,6 +359,104 @@ def test_skip_hosts_and_the_core_are_tunnelled_unread(
     with q.client(verify=ca, token=core) as c:
         assert c.get(f"https://127.0.0.1:{port}/y").status_code == 200
     assert p.records("net.request") == [] and q.records("net.request") == []
+
+
+def test_programs_without_the_ca_are_tunnelled_even_in_an_inspecting_environment(
+    start: Callable[..., Proxy], https_origin: tuple[int, Path]
+) -> None:
+    """MCP servers, restic, `mcp login`, plugin commands and downloads use egress in the same
+    environment but are never given the CA: decrypting their HTTPS would break it."""
+    port, ca = https_origin
+    p = start(port, ca, 'enabled = true\nunmatched = "deny"')
+    for client in ("mcp:files", "restic", "cairnward-download"):
+        token = p.sessions.create(Session(environment="e", client=client))
+        with p.client(verify=ca, token=token) as c:
+            assert c.get(f"https://127.0.0.1:{port}/x").status_code == 200, client
+    assert p.records("net.request") == []
+
+
+def test_only_runs_given_the_ca_are_inspected(tmp_path: Path) -> None:
+    """/v1/runs also serves restic, `mcp login` and plugin commands: only `cairnward run` says it
+    gave the program the CA, and only an inspecting environment honours it."""
+    import base64
+
+    from cairnward.core.management import management_app
+    from cairnward.egress.control import LocalEgress
+    from cairnward.gateway.clients import RunKeys
+
+    paths = Paths(tmp_path / "c", tmp_path / "d", tmp_path / "s")
+    (paths.config_dir / "environments").mkdir(parents=True)
+    (paths.config_dir / "environments" / "on.toml").write_text("[tls_inspection]\nenabled = true")
+    (paths.config_dir / "environments" / "off.toml").write_text("")
+    sessions = Sessions()
+    app = management_app(load_config(paths), audit=None, run_keys=RunKeys(),
+                         egress=LocalEgress(sessions), isolated=False)  # fmt: skip
+    body = {"client": "x", "profile": "generic", "workspace": "/w", "program": "p",
+            "arg_count": 0, "sandbox": "srt"}  # fmt: skip
+
+    def inspected(**extra: Any) -> bool:
+        from fastapi.testclient import TestClient
+
+        with TestClient(app) as c:
+            token = c.post("/v1/runs", json={**body, **extra}).json()["egress_token"]
+        auth = "Basic " + base64.b64encode(f"cw:{token}".encode()).decode()
+        session = sessions.lookup(auth)
+        assert session is not None
+        return session.inspect
+
+    assert inspected(environment="on", tls_trust=True)
+    assert not inspected(environment="on")  # a helper program (restic, mcp login, a plugin)
+    assert not inspected(environment="off", tls_trust=True)
+
+
+def test_isolated_mode_passes_the_flag_to_egress() -> None:
+    from fastapi.testclient import TestClient
+
+    from cairnward.egress.control import control_app
+
+    sessions = Sessions()
+    with TestClient(control_app(sessions)) as c:
+        token = c.post("/v1/sessions", json={"environment": "e", "inspect": True}).json()["token"]
+    assert sessions._by_token[token].inspect is True
+
+
+def test_a_request_for_another_site_is_refused(
+    start: Callable[..., Proxy], https_origin: tuple[int, Path]
+) -> None:
+    """Domain fronting: a tunnel to an allowed host, a Host header for another site. On a shared
+    CDN that request would reach a site egress never checked."""
+    import base64
+
+    port, ca = https_origin
+    p = start(port, ca, 'enabled = true\nunmatched = "allow"')
+    ctx = ssl.create_default_context(cafile=str(p.bundle()))
+    auth = base64.b64encode(f"cw:{p.token}".encode()).decode()
+    with socket.create_connection(("127.0.0.1", p.proxy.port), timeout=10) as raw:
+        raw.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\nProxy-Authorization: Basic "
+                    f"{auth}\r\n\r\n".encode())  # fmt: skip
+        assert raw.recv(4096).startswith(b"HTTP/1.1 200")
+        with ctx.wrap_socket(raw, server_hostname="127.0.0.1") as s:
+            s.sendall(b"GET /x HTTP/1.1\r\nHost: blocked.example\r\n\r\n")
+            answer = b""
+            while chunk := s.recv(4096):
+                answer += chunk
+    assert answer.startswith(b"HTTP/1.1 403") and b"blocked.example" in answer
+    assert Handler.seen == []
+    assert p.records("net.request", 1)[0].decision == "deny"
+
+
+@pytest.mark.parametrize(
+    ("headers", "target", "refused"),
+    [
+        ([(b"host", b"api.example.org")], "/x", False),
+        ([(b"host", b"API.example.org.:443")], "/x", False),
+        ([(b"host", b"other.example.org")], "/x", True),
+        ([(b"host", b"api.example.org")], "https://other.example.org/x", True),
+        ([(b"host", b"api.example.org"), (b"host", b"other.example.org")], "/x", True),
+    ],
+)
+def test_fronting_check(headers: list[tuple[bytes, bytes]], target: str, refused: bool) -> None:
+    assert (fronted(headers, target, "api.example.org") is not None) is refused
 
 
 def test_off_by_default(start: Callable[..., Proxy], https_origin: tuple[int, Path]) -> None:

@@ -39,6 +39,8 @@ class RunIn(BaseModel):
     program: str = Field(max_length=200)
     arg_count: int = Field(ge=0)
     sandbox: str
+    # the program was given Cairnward's CA, so egress may decrypt its HTTPS (TLS inspection)
+    tls_trust: bool = False
     max_requests: int | None = Field(default=None, ge=1)
     max_tokens: int | None = Field(default=None, ge=1)
     max_minutes: float | None = Field(default=None, gt=0)
@@ -187,6 +189,8 @@ def management_app(
                     client=body.client,
                     run_id=run_id,
                     actor=f"agent:{body.client}",
+                    inspect=body.tls_trust
+                    and cfg.environments[body.environment].tls_inspection.enabled,
                 )
             )
         runs[run_id] = _Run(body.environment, body.client, time.monotonic(), profile=body.profile)

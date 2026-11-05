@@ -58,6 +58,10 @@ class Session:
     # credential), so an address on this machine or the LAN is accepted when any
     # environment lists it exactly.
     any_environment: bool = False
+    # TLS inspection applies only to sessions whose program was given Cairnward's CA (a
+    # `cairnward run` agent in an inspecting environment). MCP servers, restic, `mcp login`,
+    # plugin commands and downloads share the environment but not the CA, so they're tunnelled.
+    inspect: bool = False
 
 
 @dataclass
@@ -257,8 +261,10 @@ class EgressProxy:
 
     def _inspection(self, session: Session, host: str, port: int) -> TlsInspection | None:
         """The environment's inspection settings, when this connection is to be inspected."""
-        if session.trusted_core:
-            return None  # the core's own calls: it checks and records them itself
+        if session.trusted_core or not session.inspect:
+            # the core's own calls (it checks and records them itself), and programs that weren't
+            # given the CA: decrypting their HTTPS would only make it fail
+            return None
         env = self.config.environments.get(session.environment)
         if env is None or not env.tls_inspection.enabled:
             return None
@@ -337,7 +343,8 @@ class EgressProxy:
             await self._pipe(cr, cw, ur, uw, counts)
 
         inspector = Inspector(lambda m, p: check_request(inspection, host, port, m, p),
-                              record, pipe, self.limits.idle_timeout_s)  # fmt: skip
+                              record, pipe, self.limits.idle_timeout_s,
+                              tunnel_host=host)  # fmt: skip
         await inspector.run(reader, writer, up_reader, up_writer)
         return None
 

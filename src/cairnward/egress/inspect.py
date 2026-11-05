@@ -59,6 +59,29 @@ def request_path(target: str) -> str:
     return path or "/"
 
 
+def host_header_name(value: str) -> str:
+    """The host a Host header names: no port, brackets or trailing dot, lowercase."""
+    value = value.strip().lower()
+    if value.startswith("["):
+        return value[1:].split("]", 1)[0]
+    if value.count(":") == 1:
+        value = value.rsplit(":", 1)[0]
+    return value.rstrip(".")
+
+
+def fronted(headers: list[tuple[bytes, bytes]], target: str, tunnel_host: str) -> str | None:
+    """Why a request names another site than the tunnel it came through, or None. On a shared
+    CDN that would reach a site egress never checked (domain fronting)."""
+    names = {host_header_name(v.decode("latin-1")) for k, v in headers if k.lower() == b"host"}
+    if "://" in target:  # absolute form carries its own authority
+        names.add(host_header_name(target.split("://", 1)[1].split("/", 1)[0].rpartition("@")[2]))
+    wanted = tunnel_host.strip("[]").lower().rstrip(".")
+    other = sorted(n for n in names if n != wanted)
+    if other:
+        return f"the request names {other[0]}, but the tunnel was opened to {wanted}"
+    return None
+
+
 @dataclass(frozen=True)
 class Verdict:
     allowed: bool
@@ -108,7 +131,9 @@ class _Closed(Exception):
 
 
 class Inspector:
-    def __init__(self, check: Check, record: Record, pipe: Pipe, idle_s: float):
+    def __init__(self, check: Check, record: Record, pipe: Pipe, idle_s: float,
+                 tunnel_host: str | None = None):  # fmt: skip
+        self.tunnel_host = tunnel_host
         self.check = check
         self.record = record
         self.pipe = pipe
@@ -180,6 +205,9 @@ class Inspector:
             ex = Exchange(method, target, self.check(method, request_path(target)))
             if method.upper() == "CONNECT":
                 ex.verdict = Verdict(False, "a tunnel inside an inspected tunnel", None)
+            elif self.tunnel_host and (why := fronted(list(ev.headers), target,
+                                                      self.tunnel_host)):  # fmt: skip
+                ex.verdict = Verdict(False, why, None)
             if not ex.verdict.allowed:
                 ex.status = 403
                 try:

@@ -68,7 +68,9 @@ Done on 2026-11-05:
 | I8 | Presidio's small spaCy model misses some names, so redaction isn't complete | Accepted |
 | I26 | With TLS inspection on, the local CA's key could impersonate any site to tools that trust it | Accepted: off by default, owner-only file outside every sandbox, `cairnward egress-ca rotate` |
 | I27 | TLS inspection passes request bodies on unredacted, offers only HTTP/1.1, and doesn't read WebSocket messages after the upgrade | Accepted (ADR-0018) |
-| I32 | PR 28 changed trust boundaries (a local CA that decrypts HTTPS, OpenShell as a sandbox) without updating `docs/threat-model.md` or recording a review in `docs/reviews/`, as NFR-S2 and the PR checklist require. T-17 still says TLS interception is off and unbuilt | Open |
+| I32 | PR 28 changed trust boundaries (a local CA that decrypts HTTPS, OpenShell as a sandbox) without updating `docs/threat-model.md` or recording a review in `docs/reviews/`, as NFR-S2 and the PR checklist require | Fixed: threat model v0.4 and [review](reviews/threat-model-2026-11-05.md) |
+| I33 | TLS inspection decrypted every program in the environment, but only `cairnward run` gives tools the CA, so MCP servers, remote restic backups, `mcp login`, plugin commands and downloads would have failed. Found by the review | Fixed before anyone turned inspection on: only runs given the CA are inspected |
+| I34 | Domain fronting: an inspected request could name another site in `Host` than the tunnel was opened to, and a shared CDN would serve it, around the host allow list and path rules. Found by the review | Fixed for inspected tunnels. Uninspected tunnels can't be checked (T-34) |
 | I30 | On native Windows, curl ignores Cairnward's CA bundle (it uses the Windows certificate store), so TLS inspection would break it there. Found by CI | Accepted: runs on Windows go through WSL, where curl uses the bundle |
 
 ### Functionality
