@@ -154,6 +154,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
+- Docs: [managing the repository](repository-management.md), with a checklist of GitHub settings and housekeeping still to do
 - Docs: the spec's architecture diagram redrawn to match the two-process layout; [limitations](limitations.md) in one place; a [guide for regulated companies](compliance-governance.md); two wrong claims in the threat model corrected (a plaintext search index and an audit retention setting, neither of which exists)
 - **PR 28 (merged):** TLS inspection in egress and OpenShell as a second sandbox (ADR-0018, D77 and
   D78), both opt-in per environment. They were "not planned" in the handoff until you asked for them
