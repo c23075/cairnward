@@ -1,6 +1,6 @@
 # Managing the repository
 
-Written 2026-11-06. Each section gives a widely used practice for running a code repository, then
+Written 2026-11-06; checklist status checked the same day. Each section gives a widely used practice for running a code repository, then
 how this repository handles it today and what's missing. The owner's view of the project is
 [status.md](status.md); this page is about the repository itself. Settings marked "check" can't be
 seen from the code, so confirm them under the repository's Settings on GitHub.
@@ -51,7 +51,8 @@ deleted.
 **Here:**
 - Branches are short-lived and named for the change (`replication`, `wsl2`, `fix-main-ci`).
   Branches made by AI coding sessions are named `claude/...`.
-- **31 merged branches remain on GitHub.** All are contained in `main`.
+- **Merged branches remain on GitHub.** There were 31 on 2026-11-06, all contained in `main`.
+  By the next check that day, 18 had been deleted and 13 remained.
   `wip/mcp-oauth` holds an early commit whose change is already in `main` (as `d1124dc`).
 
 **To do:**
@@ -150,8 +151,8 @@ keeping.
 - **Gaps:**
   - WSL2 isn't tested in CI (I19).
   - `core/server.py` is outside the coverage count (I18).
-  - GitHub's code scanning ran on PR 38, but whether it's set to run on every PR is a setting to
-    check.
+  - Nothing else: CodeQL code scanning (Python, JavaScript, workflows) runs on every PR, as seen
+    on PR 39 (checked 2026-11-06).
 
 **To do:**
 - Make the jobs required checks (section 1).
@@ -196,6 +197,7 @@ keeping.
   plainly that there's no outside review, and that only the latest release gets fixes.
 - **No secrets in the repository,** by design. Config uses `env:` and `keyring:` references, and
   CI checks that secrets never reach the audit log.
+- **Code scanning is on:** CodeQL runs on every PR (seen on PR 39).
 - **Check:** secret scanning and push protection (Settings → Code security), and two-factor
   authentication on the owner's account.
 - **Deploy keys:** the audit-anchor deploy key belongs to a separate private repository, and can
@@ -323,15 +325,18 @@ Literature research is a separate repository, `literature-review-agent-plugin` (
 
 ## Checklist
 
-| # | Action | Where | Done |
+Status as checked on 2026-11-06, from the repository's files and GitHub's branch list. Settings
+that GitHub doesn't show to this check are marked "can't see"; tick them yourself.
+
+| # | Action | Where | Status |
 |---|---|---|---|
-| 1 | Protect `main`: require a PR, require the CI checks, block force pushes | Settings → Rules | ☐ |
-| 2 | Automatically delete head branches | Settings → General | ☐ |
-| 3 | Delete the 31 merged branches | Code → Branches, or the commands above | ☐ |
-| 4 | Allow only merge commits | Settings → General | ☐ |
-| 5 | Secret scanning with push protection, Dependabot alerts | Settings → Code security | ☐ |
-| 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ☐ (A8) |
-| 7 | Dependabot for the npm lockfiles | `.github/dependabot.yml` | ☐ |
-| 8 | CONTRIBUTING.md and issue templates | Repository root, `.github/ISSUE_TEMPLATE/` | ☐ |
-| 9 | A rule linking GitHub issues and I-numbers | This page, section 10 | ☐ |
-| 10 | Read the threat model and limitations against the code at each milestone | `docs/reviews/` | ☐ |
+| 1 | Protect `main`: require a PR, require the CI checks, block force pushes | Settings → Rules | ☐ GitHub lists `main` as not protected. A newer ruleset may not show in that flag, so look in Settings → Rules |
+| 2 | Automatically delete head branches | Settings → General | ☐ Not on: PR 39's branch was still there after it merged |
+| 3 | Delete the merged branches | Code → Branches, or the commands above | ◐ 18 of 31 deleted. 13 remain: `a11y-dialogs`, `citation-eval`, `client-budgets`, `dashboard-backup`, `gateway-overhead-bench`, `lit-ask-eval-fixes`, `mcp-oauth`, `measure-gaps`, `paperqa-timeout`, `release-workflow`, `review-screen-main-model`, `wip/mcp-oauth` (superseded), and `claude/project-status-kzw0ob` |
+| 4 | Allow only merge commits | Settings → General | Can't see. Every merged PR so far (38) used a merge commit |
+| 5 | Secret scanning with push protection, Dependabot alerts | Settings → Code security | Can't see. Code scanning (CodeQL) is on |
+| 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ☐ No tags; the version is still 0.0.1 (A8) |
+| 7 | Dependabot for the npm lockfiles | `.github/dependabot.yml` | ☐ Only `uv` and `github-actions` are watched |
+| 8 | CONTRIBUTING.md and issue templates | Repository root, `.github/ISSUE_TEMPLATE/` | ☐ Neither exists |
+| 9 | A rule linking GitHub issues and I-numbers | This page, section 10 | ☐ Proposed in section 10, not yet adopted. Followed once (#36 and I35) |
+| 10 | Read the threat model and limitations against the code at each milestone | `docs/reviews/` | ☐ Not yet a habit. Done once on 2026-11-06, when two wrong claims were found |
