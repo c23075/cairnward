@@ -176,7 +176,8 @@ locking doesn't erase earlier plaintext from disks or old backups. Read the
 - [Getting started](docs/getting-started.md): the full setup guide
 - [Specification](docs/spec.md): the design and its decisions
 - [Requirements](docs/requirements.md) and [architecture decisions](docs/adr/)
-- [Threat model](docs/threat-model.md)
+- [Threat model](docs/threat-model.md) and [limitations](docs/limitations.md): what the protections don't do
+- [Governance for regulated companies](docs/compliance-governance.md): using Cairnward as one layer of governance for in-house agents
 - [Agent security and privacy today](docs/landscape.md): the state of the industry, and how Cairnward compares
 - [Benchmarks and results](docs/bench/)
 

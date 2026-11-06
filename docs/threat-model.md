@@ -5,7 +5,7 @@ Method: **STRIDE** (security) and **LINDDUN** (privacy) applied to the component
 
 Review this document whenever a component, data flow or trust boundary changes, and at least once per milestone. Record each review in [`reviews/`](reviews/). A control marked *planned* doesn't exist yet.
 
-**Assumed configuration:** the **Strict** preset (spec §5.0). Every protection is optional; a control listed here applies only when its setting is on. `cairnward privacy show` tells you which controls are active in each environment.
+**Assumed configuration:** the **Strict** preset (spec §5.0). Every protection is optional; a control listed here applies only when its setting is on. `cairnward privacy show` tells you which controls are active in each environment. All the limitations in one place: [limitations.md](limitations.md).
 
 ---
 
@@ -85,7 +85,7 @@ The model is **not** a trusted component: anything it decides passes through the
 |---|---|---|---|
 | P-01 | Linking | A plugin's queries to outside services from one IP build a profile of the user | Hosts are listed in the plugin's manifest and allowed per environment; every fetch is audited. The research plugin's sources are in its `docs/threat-model.md` |
 | P-02 | Identifying | Synced chat titles/metadata reveal identity or topics on a cloud target | "Encrypt this sync target" offer; restic backups always encrypted; ☁ badge |
-| P-03 | Non-repudiation | The audit log is a detailed activity record that could be used against the user | Content-free audit records (digests); retention setting; not synced unless chosen; user can export/redact. TLS inspection adds a record per request (T-35) |
+| P-03 | Non-repudiation | The audit log is a detailed activity record that could be used against the user | Content-free audit records (digests); user can export. Residual: there's no retention setting or redaction for the audit log, so it grows until removed by hand (corrected 2026-11-06; an earlier version listed both). TLS inspection adds a record per request (T-35) |
 | P-04 | Detecting | Cloud providers can infer activity from sync timing/size | On-demand mode; scheduled batching; padding not provided (documented limitation) |
 | P-05 | Data disclosure | More data than needed sent to hosted backends/tools | Minimal context assembly (retrieval rather than whole documents); redaction |
 | P-06 | Unawareness | User doesn't realise what left the machine | Per-chat egress report; network badge in status bar; first-time approval for each new host/target |
@@ -110,7 +110,7 @@ The model is **not** a trusted component: anything it decides passes through the
 - Protections the user switches off (Open preset, Custom settings) don't apply; this is the user's choice, made visible by badges and audited (spec §5.0).
 - A compromised OS account or root user can read everything that's unlocked and capture passphrases as they're typed. Under WSL2 that includes any program running as the user on Windows (T-28).
 - Prompt injection can't be fully prevented by any known method; Cairnward limits its impact instead (approvals, network off, user-only actions).
-- Unlocked chats' search index is plaintext in SQLite; deleting it is best effort on SSDs.
+- Unlocked conversations' keys are stored unwrapped in `keys.db` on the same disk, so only locking and full-disk encryption protect them from someone with the disk; per-conversation keys make deletion reliable. (Corrected 2026-11-06: an earlier version said a plaintext search index existed, but vault search decrypts as it goes and keeps no index.) Deleting is best effort on SSDs.
 - A recovery key opens every locked conversation it covers; it's shown once and never stored, so keeping it safe is up to the user.
 - Content of third-party tools' own HTTPS traffic to allowed hosts can't be inspected unless the environment turns on TLS inspection, and even then bodies aren't redacted (T-17).
 - With TLS inspection on, the local CA's key is as valuable as the sites it can impersonate to the run's tools (T-33).
