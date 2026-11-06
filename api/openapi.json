@@ -179,7 +179,7 @@
   "info": {
     "description": "OpenAI-compatible endpoint. Every call is policy-checked and audited.",
     "title": "Cairnward gateway",
-    "version": "0.0.1"
+    "version": "0.1.0"
   },
   "openapi": "3.1.0",
   "paths": {

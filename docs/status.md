@@ -44,7 +44,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | A4 | Keep the backup password somewhere off this machine | Without it, backups can't be restored after a disk failure |
 | A5 | Try one real restore | The real repository has never been restored |
 | A7 | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
-| A8 | Run the first signed release | Both repositories are now public, so the workflow should get as far as signing. It has never run on GitHub |
+| A8 | Run the first signed release | 0.1.0 is prepared: version, lockfile and changelog. After merging, tag `v0.1.0`, check the draft's signatures and publish ([steps](repository-management.md#9-releases-and-versions)). The workflow has never run on GitHub |
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
 | A11 | If you want the OpenShell sandbox: install OpenShell, set `OPENSHELL_TELEMETRY_ENABLED=false` for its gateway, and try one run with `sandbox = "openshell"` | It has only run against a stand-in. Whether a sandbox can reach Cairnward's loopback-only ports is unknown |
 | A12 | If you turn on TLS inspection: try it with your real agents and the sites they use | Only tested with httpx and curl against a local server. Agents that pin certificates will fail |
