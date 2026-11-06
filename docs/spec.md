@@ -109,36 +109,47 @@ Current decisions. Superseded decisions are listed at the end with what replaced
 
 ## 3. Architecture
 
+Isolated mode (isolation on), as built. Updated 2026-11-06; the earlier diagram predated the
+two-process layout.
+
 ```
-  Chat clients (Open WebUI, Jan, LibreChat, ...)      Coding agents (Qwen Code, opencode, Aider, Goose)
-  in a container on an internal-only network          launched with `cairnward run -- <agent>`
-            │                                                   │  (bubblewrap sandbox, no network
-            │ OpenAI API / MCP                                  │   namespace interfaces except bridges)
- ┌──────────▼───────────────────────────────────────────────────▼────────────────────────────┐
- │ cairnward core (sandboxed: no direct network)                                             │
- │                                                                                            │
- │  Model endpoint (/v1, virtual models)   MCP proxy (aggregated, pinned tools)              │
- │            │                                   │                                           │
- │            └──────────────┬────────────────────┘                                           │
- │                   ┌───────▼────────┐    approvals inbox ──► dashboard / CLI / notification │
- │                   │ POLICY ENGINE  │                                                       │
- │                   └───────┬────────┘                                                       │
- │     ┌──────────┬──────────┼───────────┬─────────────┬──────────────┐                       │
- │  AUDIT LOG  TRANSCRIPT  REDACTOR   PLUGIN       ARTIFACTS     SYNC/BACKUP                  │
- │  (hash chain) VAULT      (light +  SERVICES     (git repos)   (restic, event logs)         │
- │               (age)     optional   (brokered)                                              │
- │                          worker)                                                           │
- │  Dashboard (loopback, hardened)                                                            │
- └──────────────┬──────────────────────────────────────────────────────────────┬──────────────┘
-                │ Unix socket                                                  │ Unix socket
-        ┌───────▼─────────┐                                           ┌────────▼─────────┐
-        │ Model server    │                                           │ cairnward-egress │──► Internet
-        │ Ollama/llama.cpp│                                           │ (only process    │   (allowlisted
-        │ (local)         │                                           │  with network)   │    hosts only)
-        └─────────────────┘                                           └──────────────────┘
+ Chat clients (Open WebUI, Jan, LibreChat, ...)          Coding agents (Aider, opencode, Qwen Code, Goose)
+ optionally in a container whose only way out is         started with `cairnward run -- <agent>` in an
+ Cairnward's client socket (§4.4)                        srt or OpenShell sandbox (§3.2, D77)
+            │ OpenAI API / MCP, client key                         │ run key; network only to gateway + egress
+ ┌──────────▼──────────────────────────────────────────────────────▼──────────────────────────┐
+ │ OUTER PROCESS: the only process with network access                                         │
+ │   forwarders: 127.0.0.1:8484 → gateway, :8485 → dashboard, client socket → gateway          │
+ │   cairnward-egress :8486: a session per client and run, policy per host, address checks,    │
+ │     optional TLS inspection (D78), an audit record per connection                           │
+ │   control API (Unix socket): egress sessions, starting sandboxed MCP servers and plugins,   │
+ │     backups, settings edits                                                                 │
+ │   background: backups (restic), audit anchors, replication, OpenTelemetry export            │
+ │  ┌──────────────────────────────────────────────────────────────────────────────────────┐  │
+ │  │ CORE (srt sandbox: no network device; its own seccomp filter refuses VM sockets)      │  │
+ │  │   model endpoint /v1 (virtual models)          MCP endpoint /mcp (pinned tools)       │  │
+ │  │                 └───────────────┬──────────────────┘                                  │  │
+ │  │                          POLICY ENGINE ──► approvals inbox ──► dashboard / CLI        │  │
+ │  │     AUDIT LOG     TRANSCRIPT VAULT    REDACTION      PLUGIN SERVICES   ARTIFACTS      │  │
+ │  │    (hash chain)   (age key per       (patterns,     (model, fetch,    (git repos)     │  │
+ │  │                    conversation)      Presidio)      storage, keys)                   │  │
+ │  │   management API (cairnward.sock), gateway and dashboard on Unix sockets              │  │
+ │  └──────────────────────────────────────────────────────────────────────────────────────┘  │
+ └─────────────┬────────────────────────────────────────────────────────┬─────────────────────┘
+               │ model calls (local servers are                         │ everything else, through egress
+               │ allow-listed in the core's sandbox)                    │
+       ┌───────▼───────────┐                              ┌─────────────▼──────────────────────────┐
+       │ Local models       │                              │ allowed hosts only: hosted models      │
+       │ Ollama, llama.cpp  │                              │ (HTTPS), remote MCP servers, sites     │
+       └────────────────────┘                              │ that agents and plugins may reach      │
+                                                           └────────────────────────────────────────┘
 ```
 
-The diagram shows the **Strict** configuration. Each box below the policy engine, and the sandboxing itself, can be switched off (§5.0); the endpoints, routing and virtual models always work.
+Each MCP server and plugin runs in its own srt sandbox, started by the outer process (srt can't
+nest) and connected to the core over a socket. With isolation off, the outer process and the core
+are one process; agents and MCP servers in an environment with isolation on are still sandboxed.
+
+The diagram shows the **Strict** configuration. Each box below the policy engine, and the sandboxing itself, can be switched off (§5.0); the endpoints, routing and virtual models always work. What none of this protects against is in [limitations.md](limitations.md).
 
 **Rules** (when the corresponding protections are on)
 1. Clients and agents talk only to Cairnward (model endpoint, MCP proxy) and, if allowed, to the egress proxy. The OS enforces this when isolation is on (§3.2); with isolation off, the proxy settings are advisory and tools can connect directly.
