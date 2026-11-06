@@ -148,7 +148,8 @@ def _remote_host(repo: str) -> str:
     rest = repo.split(":", 1)[1]
     if "://" in rest:
         return urlsplit(rest).hostname or "?"
-    return rest.split("/", 1)[0].split(":", 1)[0] or "?"
+    # sftp-style user@host:path: the host, without the user name
+    return rest.split("/", 1)[0].split(":", 1)[0].rpartition("@")[2] or "?"
 
 
 def _record(r: Any) -> dict[str, Any]:
@@ -489,8 +490,14 @@ def dashboard_app(
 
         b = cfg.main.backup
         kind = backup.remote_kind(cfg) if b.repository else None
-        repo = str(backup.repository_or_problem(cfg))
-        shown = repo if kind is None else f"{kind}:{_remote_host(repo)}"
+        repo = backup.repository_or_problem(cfg)
+        # An unusable repository (e.g. sftp:, issue #36) comes back as its problem text: shown
+        # as the problem, never as the location
+        problem = repo if isinstance(repo, str) and kind not in backup.REMOTE_KINDS else None
+        if kind is not None:
+            shown: str | None = f"{kind}:{_remote_host(b.repository or '')}"
+        else:
+            shown = None if problem else str(repo)
         pending = backup.pending(cfg)
         return {
             "mode": b.mode,
@@ -498,6 +505,7 @@ def dashboard_app(
             "access": b.access,
             "same_disk_warning": backup.same_disk_warning(cfg) if b.mode != "none" else None,
             "where": shown,  # a remote's host only, no bucket paths or keys
+            "problem": problem,
             "remote": kind,
             "environment": b.environment or cfg.main.defaults.environment if kind else None,
             "interval_hours": b.interval_hours,

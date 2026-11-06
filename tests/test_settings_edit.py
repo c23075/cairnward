@@ -246,3 +246,29 @@ def test_control_route_runs_the_backup_for_the_isolated_core() -> None:
     r = TestClient(control_app(Sessions(), backup_now=refuse)).post("/v1/backup/run")
     assert r.status_code == 400 and r.json()["detail"] == "backups are off"
     assert TestClient(control_app(Sessions())).post("/v1/backup/run").status_code == 404
+
+
+async def test_backup_view_reports_an_unsupported_repository(paths: Paths) -> None:
+    """Issue #36: an unsupported kind such as sftp: made GET /api/backup fail with a 500, from
+    the same-disk check, instead of showing why the repository can't be used."""
+    with paths.main_config.open("a") as f:
+        f.write('[backup]\nmode = "auto"\nrepository = "sftp:user@backup.example.org:/b"\n')
+    cfg = load_config(paths)
+    auth = DashboardAuth()
+    app = dashboard_app(cfg, auth=auth, audit=None)
+    c, _ = await signed_in(app, auth)
+    try:
+        r = await c.get("/api/backup")
+    finally:
+        await c.aclose()
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert "'sftp:' repositories aren't supported" in b["problem"]
+    assert b["where"] == "sftp:backup.example.org"  # the host only: no user name or path
+    assert b["same_disk_warning"] is None
+
+
+def test_same_disk_warning_tolerates_an_unsupported_repository(paths: Paths) -> None:
+    with paths.main_config.open("a") as f:
+        f.write('[backup]\nmode = "auto"\nrepository = "sftp:user@backup.example.org:/b"\n')
+    assert backup.same_disk_warning(load_config(paths)) is None

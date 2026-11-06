@@ -447,11 +447,12 @@ export async function backups(main) {
     b.mode === "none"
       ? h("div", { class: "warnbox", role: "status" }, "Backups are off. Use Change settings, or run `cairnward backup use`.")
       : null,
+    b.problem ? h("div", { class: "warnbox", role: "alert" }, `This repository can't be used: ${b.problem}`) : null,
     b.same_disk_warning ? h("div", { class: "warnbox" }, b.same_disk_warning) : null,
     b.cloud_warning ? h("div", { class: "warnbox" }, b.cloud_warning) : null,
     dl(["Mode", b.mode === "auto" ? `automatic, every ${b.interval_hours} h while Cairnward runs` : b.mode === "on_demand" ? "on demand" : "off"],
       ["Where", b.where || "not set"],
-      ["Network", b.remote ? `remote (${b.remote}): through egress in the ${b.environment} environment` : (b.repository ? "a folder (no network)" : null)],
+      ["Network", b.problem ? null : b.remote ? `remote (${b.remote}): through egress in the ${b.environment} environment` : (b.repository ? "a folder (no network)" : null)],
       ["Keeps", `${b.keep.daily} daily, ${b.keep.weekly} weekly, ${b.keep.monthly} monthly`],
       ["Includes", ["conversations", "audit log", ...b.includes].join(", ")],
       ["Last backup", last ? `${when(last.time)}${last.snapshot ? ` (snapshot ${last.snapshot})` : ""}` : "never"]),

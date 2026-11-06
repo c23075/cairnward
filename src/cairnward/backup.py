@@ -670,8 +670,9 @@ def apply_access(cfg: Config) -> None:
 
 
 def same_disk_warning(cfg: Config) -> str | None:
-    """A backup on the same disk as the data survives mistakes, not a failed disk."""
-    repo = repository(cfg)
+    """A backup on the same disk as the data survives mistakes, not a failed disk. None for a
+    remote repository, and for one that can't be used (that problem is reported elsewhere)."""
+    repo = repository_or_problem(cfg)
     if not isinstance(repo, Path):
         return None
     probe = repo
