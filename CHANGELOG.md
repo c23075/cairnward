@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Dashboard backup view (#36):** an unsupported repository such as `sftp:` no longer makes the view fail. It now says why the repository can't be used.
 - **Faster start (I15):**
   - The isolated core no longer imports the MCP SDK (about half a second) until an MCP server or
     the `/mcp` endpoint is first used.
