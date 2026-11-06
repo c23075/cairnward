@@ -24,10 +24,14 @@ from typing import Any
 from cairnward.config.paths import Paths
 from cairnward.sysinfo import windows_mounts, wsl_version
 
-SRT_VERSION = "0.0.81"
+PKG_DIR = Path(__file__).parent / "srt_pkg"
+# The pinned version, read from the package file that `install` copies, so a dependency update
+# there (Dependabot) changes what's reported too.
+SRT_VERSION: str = json.loads((PKG_DIR / "package.json").read_text(encoding="utf-8"))[
+    "dependencies"
+]["@anthropic-ai/sandbox-runtime"]
 MIN_NODE = (22, 12)
 MIN_NODE_TEXT = ".".join(map(str, MIN_NODE))
-PKG_DIR = Path(__file__).parent / "srt_pkg"
 CLI_REL = Path("node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js")
 
 # Never readable from inside a sandbox (relative to the home directory). Runs hide the whole

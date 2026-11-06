@@ -11,3 +11,25 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The sandbox (srt), pinned in two places: srt_pkg is what `cairnward sandbox install` copies,
+  # and spikes/t06-sandbox is what CI's isolation job installs. Grouped by dependency, so one PR
+  # moves both and CI tests the version users would get. Read srt's changelog before merging:
+  # the sandbox is the main security boundary.
+  - package-ecosystem: npm
+    directories:
+      - /src/cairnward/sandbox/srt_pkg
+      - /spikes/t06-sandbox
+    schedule:
+      interval: weekly
+    groups:
+      sandbox-runtime:
+        patterns: ["*"]
+        group-by: dependency-name
+  # The browser test's Playwright and axe-core (CI only)
+  - package-ecosystem: npm
+    directory: /tests/e2e
+    schedule:
+      interval: weekly
+    groups:
+      e2e:
+        patterns: ["*"]
