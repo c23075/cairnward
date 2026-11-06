@@ -1,0 +1,52 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security problem, don't open an issue: use Security → Report a vulnerability (see SECURITY.md).
+        Please leave out prompts, conversation content, API keys and other secrets.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The commands or steps, and the relevant settings (with secrets removed).
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: Any error message or log lines, for example from `cairnward doctor --json`.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Cairnward version or commit
+      placeholder: e.g. 0.0.1, or the commit you're on
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux
+        - Windows (WSL2)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: isolation
+    attributes:
+      label: Isolation
+      options:
+        - "on (isolated mode)"
+        - "off"
+        - Not sure

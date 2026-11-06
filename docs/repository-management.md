@@ -18,8 +18,9 @@ seen from the code, so confirm them under the repository's Settings on GitHub.
 1. Protect `main`, so nothing merges before CI passes. PRs 22 to 24 did, and broke `main` (I25).
 2. Turn on automatic deletion of merged branches, and delete the 31 merged ones.
 3. Make the first release (A8). There are no tags yet, and the version is still 0.0.1.
-4. Decide how GitHub issues and the status page's I-numbers relate.
-5. Add a short CONTRIBUTING.md, and issue templates.
+4. ~~Decide how GitHub issues and the status page's I-numbers relate.~~ Done: the rule is in
+   section 10 and CONTRIBUTING.md.
+5. ~~Add a short CONTRIBUTING.md, and issue templates.~~ Done on 2026-11-06.
 
 ## 1. Protect the default branch
 
@@ -180,8 +181,16 @@ keeping.
 - Review Dependabot PRs like any other: CI must pass, and read the changelog of anything in the
   security path. That covers cryptography, httpx and h11, the MCP SDK, FastAPI and uvicorn, and the
   sandbox.
-- Dependabot doesn't watch the npm lockfiles. Either add `npm` entries for `tests/e2e` and the
-  sandbox package, or update them by hand when the sandbox version changes.
+- **Dependabot also watches the npm lockfiles** (added 2026-11-06):
+  - **The browser test** (`tests/e2e`): one entry.
+  - **The sandbox:** pinned in two places, `src/cairnward/sandbox/srt_pkg` (what
+    `cairnward sandbox install` copies) and `spikes/t06-sandbox` (what CI's isolation job
+    installs). They're grouped by dependency, so one PR moves both.
+  - **One version number:** `SRT_VERSION` is now read from `srt_pkg/package.json`, so a bump
+    can't leave the reported version behind.
+- **Still a gap:** CI's isolation job tests the sandbox from `spikes/t06-sandbox`, not from
+  `srt_pkg`, the copy users install. The grouping keeps them equal, but CI doesn't install the
+  shipped copy itself.
 
 ## 8. Security of the repository
 
@@ -241,11 +250,18 @@ aren't on.
 - GitHub issues receive outside reports, such as #36 from an outside contributor, which became
   I35.
 
-**To do:**
-- Keep both, with a rule: an outside report stays a GitHub issue, and gets an I-number only when
-  it changes the project's state. Link the two both ways, as with I35 and #36.
-- Add issue templates for bug reports, feature requests and a pointer to `SECURITY.md`.
-- Thank outside reporters on the issue when it's fixed.
+**The rule (adopted 2026-11-06, also in CONTRIBUTING.md):**
+- An outside report stays a GitHub issue. It gets an I-number only when it changes the project's
+  state, and then the two refer to each other, as with #36 and I35.
+- A question, or a declined request, stays a GitHub issue only.
+
+**Templates:**
+- `.github/ISSUE_TEMPLATE/` has forms for bug reports (platform, isolation mode, and a reminder to
+  leave out prompts and secrets) and for feature requests.
+- Links send security reports to private advisories and point readers to
+  [limitations.md](limitations.md).
+
+**To do:** thank outside reporters on the issue when it's fixed.
 
 ## 11. Documentation kept with the code
 
@@ -275,15 +291,12 @@ record that it was done in `docs/reviews/`.
 **Here:**
 - Apache-2.0 (`LICENSE`).
 - CLAUDE.md serves as the setup and testing guide for AI coding sessions.
-- There's no CONTRIBUTING.md and no CODEOWNERS.
+- `CONTRIBUTING.md` (added 2026-11-06) covers setup, the checks CI runs, the optional isolation
+  and browser tests, how to propose a change, the conventions, the issue rule and the licence. It
+  follows the commands in CLAUDE.md.
+- There's no CODEOWNERS.
 
-**To do:**
-- Add a short CONTRIBUTING.md for people, pointing to the commands in CLAUDE.md:
-  - `uv sync`;
-  - the lint commands, and the test suite;
-  - regenerating schemas, and how to enable the isolation and browser tests;
-  - the PR template's checklist.
-- CODEOWNERS can wait until there's a second maintainer.
+**To do:** CODEOWNERS can wait until there's a second maintainer.
 
 ## 13. Working with AI coding agents
 
@@ -332,11 +345,11 @@ that GitHub doesn't show to this check are marked "can't see"; tick them yoursel
 |---|---|---|---|
 | 1 | Protect `main`: require a PR, require the CI checks, block force pushes | Settings → Rules | ☐ GitHub lists `main` as not protected. A newer ruleset may not show in that flag, so look in Settings → Rules |
 | 2 | Automatically delete head branches | Settings → General | ☐ Not on: PR 39's branch was still there after it merged |
-| 3 | Delete the merged branches | Code → Branches, or the commands above | ◐ 18 of 31 deleted. 13 remain: `a11y-dialogs`, `citation-eval`, `client-budgets`, `dashboard-backup`, `gateway-overhead-bench`, `lit-ask-eval-fixes`, `mcp-oauth`, `measure-gaps`, `paperqa-timeout`, `release-workflow`, `review-screen-main-model`, `wip/mcp-oauth` (superseded), and `claude/project-status-kzw0ob` |
+| 3 | Delete the merged branches | Code → Branches, or the commands above | ◐ 18 of 31 deleted. Checked again on 2026-11-06: 11 of the 13 left are contained in `main`, and `wip/mcp-oauth`'s change is in `main` as another commit, so all 12 are safe to delete. A Claude Code session can't delete them, because its git access is limited to its own branch, so the owner deletes them. Also delete `claude/project-status-kzw0ob` once its PR has merged |
 | 4 | Allow only merge commits | Settings → General | Can't see. Every merged PR so far (38) used a merge commit |
 | 5 | Secret scanning with push protection, Dependabot alerts | Settings → Code security | Can't see. Code scanning (CodeQL) is on |
 | 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ☐ No tags; the version is still 0.0.1 (A8) |
-| 7 | Dependabot for the npm lockfiles | `.github/dependabot.yml` | ☐ Only `uv` and `github-actions` are watched |
-| 8 | CONTRIBUTING.md and issue templates | Repository root, `.github/ISSUE_TEMPLATE/` | ☐ Neither exists |
-| 9 | A rule linking GitHub issues and I-numbers | This page, section 10 | ☐ Proposed in section 10, not yet adopted. Followed once (#36 and I35) |
+| 7 | Dependabot for the npm lockfiles | `.github/dependabot.yml` | ☑ Added 2026-11-06: `tests/e2e`, and the sandbox's two copies grouped (section 7) |
+| 8 | CONTRIBUTING.md and issue templates | Repository root, `.github/ISSUE_TEMPLATE/` | ☑ Added 2026-11-06 |
+| 9 | A rule linking GitHub issues and I-numbers | This page, section 10 | ☑ Adopted 2026-11-06, in section 10 and CONTRIBUTING.md |
 | 10 | Read the threat model and limitations against the code at each milestone | `docs/reviews/` | ☐ Not yet a habit. Done once on 2026-11-06, when two wrong claims were found |

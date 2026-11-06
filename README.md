@@ -184,6 +184,8 @@ locking doesn't erase earlier plaintext from disks or old backups. Read the
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks and how to propose a change.
+
 ```bash
 uv sync
 ```
