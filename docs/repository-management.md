@@ -17,7 +17,7 @@ seen from the code, so confirm them under the repository's Settings on GitHub.
 **To fix, in order:**
 1. Protect `main`, so nothing merges before CI passes. PRs 22 to 24 did, and broke `main` (I25).
 2. Turn on automatic deletion of merged branches, and delete the 31 merged ones.
-3. Make the first release (A8). There are no tags yet, and the version is still 0.0.1.
+3. Make the first release (A8). 0.1.0 is prepared (version and changelog); tag and publish it.
 4. ~~Decide how GitHub issues and the status page's I-numbers relate.~~ Done: the rule is in
    section 10 and CONTRIBUTING.md.
 5. ~~Add a short CONTRIBUTING.md, and issue templates.~~ Done on 2026-11-06.
@@ -227,16 +227,42 @@ aren't on.
 - `CHANGELOG.md` has an "Unreleased" section, kept up to date.
 - `.github/workflows/release.yml` builds on a `v*` tag, checks, signs, and leaves a draft
   release. Nothing is published to a package index.
-- **There are no tags yet,** the version is still 0.0.1, and the release workflow has never run
-  (A8).
+- **0.1.0 is prepared** (2026-11-06):
+  - the version is set in `pyproject.toml`, `src/cairnward/__init__.py`, `uv.lock` and
+    `api/openapi.json`, and tests keep them equal;
+  - the changelog's entries are under 0.1.0.
+- **There are no tags yet,** and the release workflow has never run (A8).
 
-**To do:**
-1. Choose the first version, for example 0.1.0, and set it in `pyproject.toml`.
-2. Move "Unreleased" in the changelog under that version.
-3. Tag `v0.1.0` and push the tag.
-4. Read the draft release, check the signatures, then publish.
-5. From then on, tag each release the same way, so "only the latest release gets fixes" has
-   something to point to.
+**How to release** (the first time, and every time after):
+1. Set the version in `pyproject.toml` and `src/cairnward/__init__.py`. Run `uv lock`, and
+   `uv run cairnward api schema --out api/openapi.json`; the API document records the version.
+   Check that `uv.lock`'s diff is only the version line. An older `uv` may also change the
+   file's `revision`; put that back. `tests/test_release.py` and
+   `tests/test_gateway.py` catch a version left behind.
+2. Move "Unreleased" in the changelog under the new version, with the date.
+3. Merge that through a PR. Then tag the merge on `main` and push the tag:
+   ```bash
+   git checkout main && git pull
+   git tag -a v0.1.0 -m "Cairnward 0.1.0"
+   git push origin v0.1.0
+   ```
+4. The release workflow does the rest:
+   - checks the tag against the version;
+   - builds, checks the wheel, and installs it;
+   - writes an SBOM, and signs everything with Sigstore;
+   - leaves a **draft** release with the files and signatures.
+5. Before publishing, download a file and its `.sigstore.json` from the draft, and check it was
+   signed by this repository's workflow for this tag:
+   ```bash
+   uvx sigstore@4.5.1 verify identity \
+     --cert-identity "https://github.com/c23075/cairnward/.github/workflows/release.yml@refs/tags/v0.1.0" \
+     --cert-oidc-issuer https://token.actions.githubusercontent.com \
+     --bundle cairnward-0.1.0-py3-none-any.whl.sigstore.json cairnward-0.1.0-py3-none-any.whl
+   ```
+6. Read the draft's notes, add a link to the changelog section, then publish.
+
+If the workflow fails, fix the cause in a PR. Then delete the tag, on GitHub and locally, and tag
+the new merge. Never move a tag that was published.
 
 ## 10. Issues and tracking
 
@@ -348,7 +374,7 @@ that GitHub doesn't show to this check are marked "can't see"; tick them yoursel
 | 3 | Delete the merged branches | Code → Branches, or the commands above | ◐ 18 of 31 deleted. Checked again on 2026-11-06: 11 of the 13 left are contained in `main`, and `wip/mcp-oauth`'s change is in `main` as another commit, so all 12 are safe to delete. A Claude Code session can't delete them, because its git access is limited to its own branch, so the owner deletes them. Also delete `claude/project-status-kzw0ob` once its PR has merged |
 | 4 | Allow only merge commits | Settings → General | Can't see. Every merged PR so far (38) used a merge commit |
 | 5 | Secret scanning with push protection, Dependabot alerts | Settings → Code security | Can't see. Code scanning (CodeQL) is on |
-| 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ☐ No tags; the version is still 0.0.1 (A8) |
+| 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ◐ 0.1.0 prepared (version, lockfile, changelog). Tag `v0.1.0` and publish (section 9) (A8) |
 | 7 | Dependabot for the npm lockfiles | `.github/dependabot.yml` | ☑ Added 2026-11-06: `tests/e2e`, and the sandbox's two copies grouped (section 7) |
 | 8 | CONTRIBUTING.md and issue templates | Repository root, `.github/ISSUE_TEMPLATE/` | ☑ Added 2026-11-06 |
 | 9 | A rule linking GitHub issues and I-numbers | This page, section 10 | ☑ Adopted 2026-11-06, in section 10 and CONTRIBUTING.md |

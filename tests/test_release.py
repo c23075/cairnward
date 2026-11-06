@@ -38,6 +38,14 @@ def test_version_tag() -> None:
     assert "doesn't match" in rc.check_version(str(version))  # the v is required
 
 
+def test_package_version_matches_pyproject() -> None:
+    """`cairnward --version` prints __version__; a release is tagged from pyproject.toml. They must
+    be the same, or a release reports the wrong number."""
+    from cairnward import __version__
+
+    assert __version__ == load().project()["version"]
+
+
 def test_real_wheel_has_what_runs(tmp_path: Path) -> None:
     subprocess.run([uv(), "build", "--wheel", "--out-dir", str(tmp_path), "--project", str(ROOT)],
                    check=True, capture_output=True)  # fmt: skip

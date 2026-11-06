@@ -7,8 +7,8 @@ leave it. Cairnward sits between your chat apps, coding agents and models. It ch
 model call, tool call and outbound connection against a policy you control, records them in a
 tamper-evident log, and runs tools in a sandbox whose only network route goes through Cairnward.
 
-> **Status: early (v0.0.1), not ready to rely on.** It has been tested on one Linux machine,
-> hasn't had an independent security audit, and has no releases yet. See [Status](#status).
+> **Status: early (v0.1.0, the first release), not ready to rely on.** It has been tested on one
+> Linux machine and hasn't had an independent security audit. See [Status](#status).
 
 ## What it does
 

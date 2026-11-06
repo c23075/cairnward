@@ -31,7 +31,7 @@ body:
     id: version
     attributes:
       label: Cairnward version or commit
-      placeholder: e.g. 0.0.1, or the commit you're on
+      placeholder: e.g. 0.1.0, or the commit you're on
   - type: dropdown
     id: platform
     attributes:
