@@ -60,7 +60,8 @@ set by a preset (spec §5.0 lists it as opt-in).
   path glob, first match wins) and `unmatched` (allow or deny). Paths are normalized before
   matching (escapes of unreserved characters decoded, `//`, `.` and `..` resolved), and a path
   with an encoded slash, backslash or NUL is refused (amended 2026-11-09, after an audit found
-  `/allowed/../other` escaping an allow rule). A denied request gets a 403 from
+  `/allowed/../other` escaping an allow rule). Each request must also be allowed when its path
+  is read without `;` parameters and ignoring case, the ways some servers read it. A denied request gets a 403 from
   egress and never reaches the host.
 - **CA:** an EC P-256 key, valid for two years, in `<data_dir>/egress-ca/` (0600), which sandboxed
   agents can't read. Host certificates are made on demand, valid for seven days, and kept in

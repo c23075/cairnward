@@ -570,6 +570,30 @@ def test_rules_see_the_path_the_server_will_resolve() -> None:
     assert check_request(guarded, "h.example", 443, "GET", request_path("/other")).allowed
 
 
+def test_case_and_path_parameters_cannot_steer_past_rules() -> None:
+    """Servers that ignore case or drop `;` parameters (Tomcat: `/a/..;/b` is `/b`) read a
+    path differently: every reading must be allowed."""
+    scoped = TlsInspection(enabled=True, unmatched="deny",
+                           rules=[HttpRule(host="h.example", path="/repos/me/**",
+                                           decision="allow")])  # fmt: skip
+    for path in ("/repos/me/..;/..;/other", "/repos/me/..%3B/..%3b/other", "/Repos/me/x",
+                 "/repos/me;v=1/x"):  # fmt: skip
+        assert not check_request(scoped, "h.example", 443, "GET", request_path(path)).allowed
+    assert check_request(scoped, "h.example", 443, "GET", "/repos/me/a;b").allowed
+    guarded = TlsInspection(enabled=True, unmatched="allow",
+                            rules=[HttpRule(host="h.example", path="/admin/**", decision="deny"),
+                                   HttpRule(host="h.example", path="/Docs/**",
+                                            decision="allow")])  # fmt: skip
+    for path, why in (("/Admin/x", "ignoring case"), ("/admin;x/y", "without ;-parameters"),
+                      ("/ADMIN;x/y", "without ;-parameters, ignoring case")):  # fmt: skip
+        verdict = check_request(guarded, "h.example", 443, "GET", request_path(path))
+        assert not verdict.allowed and verdict.rule == 0 and why in verdict.reason
+    for path in ("/Docs/a", "/other;j=1", "/Other", "/adm%3bx/"):
+        assert check_request(guarded, "h.example", 443, "GET", request_path(path)).allowed
+    exact = check_request(guarded, "h.example", 443, "GET", "/admin/x")
+    assert exact.reason == "rule 1: deny * h.example/admin/**"
+
+
 def test_first_matching_rule_wins_and_host_patterns() -> None:
     tls = TlsInspection(
         enabled=True,

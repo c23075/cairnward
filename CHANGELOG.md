@@ -5,7 +5,8 @@
 ### Security
 - TLS inspection: method and path rules now match the normalized path (escaped unreserved
   characters decoded, `//`, `.` and `..` resolved), and a path with an encoded slash, backslash
-  or NUL is refused. Before, `/repos/me/../../other` passed an allow rule for `/repos/me/**`, and
+  or NUL is refused. Each request must also be allowed when its path is read without `;`
+  parameters (Tomcat reads `/a/..;/b` as `/b`) and ignoring case. Before, `/repos/me/../../other` passed an allow rule for `/repos/me/**`, and
   `//admin` or `/%61dmin` slipped past a deny rule for `/admin`. Found in an audit, tested
   against the rule checker only.
 
