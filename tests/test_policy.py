@@ -67,6 +67,15 @@ def act(kind: str, target: str, **kw: object) -> Action:
         ("pypi.org:443", "pypi.org:443", True),
         ("pypi.org:22", "pypi.org:443", False),
         ("pypi.org", "pypi.org:443", False),
+        # IPv6, with or without brackets and port (egress's targets are "[v6]:port")
+        ("[::1]:443", "[::1]", True),
+        ("[::1]:443", "::1", True),
+        ("[::1]:443", "[::1]:443", True),
+        ("[::1]:443", "[::1]:80", False),
+        ("::1", "::1", True),
+        ("::1", "[::1]", True),
+        ("[2001:db8::1]:443", "2001:db8::1", True),
+        ("[2001:db8::2]:443", "2001:db8::1", False),
     ],
 )
 def test_host_matches(host: str, pattern: str, ok: bool) -> None:

@@ -531,6 +531,45 @@ def test_request_path_drops_query_and_authority() -> None:
     assert request_path("") == "/"
 
 
+@pytest.mark.parametrize(
+    ("raw", "normal"),
+    [
+        ("/a/b/", "/a/b/"),
+        ("/a//b", "/a/b"),
+        ("/./admin", "/admin"),
+        ("/x/../admin", "/admin"),
+        ("/%61dmin", "/admin"),
+        ("/a/%2E%2e/admin", "/admin"),
+        ("/repos/me/../../other/x", "/other/x"),
+        ("/..", "/"),
+        ("/a/b/..", "/a/"),
+        ("/a%20b", "/a%20b"),  # reserved and other escapes stay encoded
+        ("/a%7e", "/a~"),
+        ("https://h.example/a/../b?x", "/b"),
+    ],
+)
+def test_request_path_is_normalized(raw: str, normal: str) -> None:
+    assert request_path(raw) == normal
+
+
+def test_rules_see_the_path_the_server_will_resolve() -> None:
+    """Dot segments, doubled slashes and escapes neither escape an allow rule nor slip past
+    a deny rule; an encoded slash, backslash or NUL is refused outright."""
+    scoped = TlsInspection(enabled=True, unmatched="deny",
+                           rules=[HttpRule(host="h.example", path="/repos/me/**",
+                                           decision="allow")])  # fmt: skip
+    for path in ("/repos/me/../../other/x", "/repos/me/%2e%2e/%2e%2e/other",
+                 "/repos/me/..%2f..%2fother", "/repos/me/..\\..\\other"):  # fmt: skip
+        assert not check_request(scoped, "h.example", 443, "GET", request_path(path)).allowed
+    assert check_request(scoped, "h.example", 443, "GET", request_path("/repos/me/./x")).allowed
+    guarded = TlsInspection(enabled=True, unmatched="allow",
+                            rules=[HttpRule(host="h.example", path="/admin/**",
+                                            decision="deny")])  # fmt: skip
+    for path in ("//admin", "/./admin/x", "/x/../admin", "/%61dmin/x", "/admin%2fx", "/%00"):
+        assert not check_request(guarded, "h.example", 443, "GET", request_path(path)).allowed
+    assert check_request(guarded, "h.example", 443, "GET", request_path("/other")).allowed
+
+
 def test_first_matching_rule_wins_and_host_patterns() -> None:
     tls = TlsInspection(
         enabled=True,

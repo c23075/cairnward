@@ -57,7 +57,10 @@ set by a preset (spec §5.0 lists it as opt-in).
 - **Interception:** when on, egress answers a run's CONNECT with a certificate from Cairnward's
   local CA, opens its own TLS connection to the host, verified against the public roots, and
   passes HTTP/1.1 requests through h11. Each request is checked against `rules` (host, method,
-  path glob, first match wins) and `unmatched` (allow or deny). A denied request gets a 403 from
+  path glob, first match wins) and `unmatched` (allow or deny). Paths are normalized before
+  matching (escapes of unreserved characters decoded, `//`, `.` and `..` resolved), and a path
+  with an encoded slash, backslash or NUL is refused (amended 2026-11-09, after an audit found
+  `/allowed/../other` escaping an allow rule). A denied request gets a 403 from
   egress and never reaches the host.
 - **CA:** an EC P-256 key, valid for two years, in `<data_dir>/egress-ca/` (0600), which sandboxed
   agents can't read. Host certificates are made on demand, valid for seven days, and kept in
