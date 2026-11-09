@@ -2,7 +2,7 @@
 
 One short file per significant decision, in the format: context, options, decision, consequences. Status is one of *Proposed*, *Accepted*, *Superseded by ADR-NNNN*.
 
-ADRs are never edited after acceptance except to change their status; a changed decision gets a new ADR that supersedes the old one. The decisions table in [spec §2](../spec.md#2-decisions-log-from-interview) is the index.
+ADRs are never edited after acceptance except to change their status; a changed decision gets a new ADR that supersedes the old one. The decisions table in [spec §2](../spec.md#2-decisions-log) is the index.
 
 | ADR | Title | Status |
 |---|---|---|
