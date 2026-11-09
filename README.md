@@ -48,6 +48,10 @@ flowchart LR
     E -->|"allow-listed hosts only"| I(("Internet"))
 ```
 
+In a larger agentic system stack, Cairnward is the runtime enforcement and evidence layer on one
+host; identity, central policy, central audit and GRC come from elsewhere. See
+[where it sits in the stack](docs/overview.md#where-it-sits-in-an-agentic-system-stack).
+
 ## Privacy presets
 
 `cairnward setup` asks you to choose one. Any setting can be overridden globally or per
@@ -172,16 +176,13 @@ locking doesn't erase earlier plaintext from disks or old backups. Read the
 
 ## Documentation
 
+All the docs, grouped by reader: [docs/README.md](docs/README.md). The main ones:
+- [Overview](docs/overview.md): what Cairnward is and where it sits in an agentic system stack
 - [Project status](docs/status.md): where things stand, open issues and what's left to test
 - [Getting started](docs/getting-started.md): the full setup guide
 - [Specification](docs/spec.md): the design and its decisions
-- [Architecture in UML](docs/architecture-uml.md): deployment, classes, request sequences and vault states
-- [Requirements](docs/requirements.md) and [architecture decisions](docs/adr/)
 - [Threat model](docs/threat-model.md) and [limitations](docs/limitations.md): what the protections don't do
 - [Governance for regulated companies](docs/compliance-governance.md): using Cairnward as one layer of governance for in-house agents
-- [Managing the repository](docs/repository-management.md): branches, PRs, CI, releases and what's left to set up
-- [Agent security and privacy today](docs/landscape.md): the state of the industry, and how Cairnward compares
-- [Benchmarks and results](docs/bench/)
 
 ## Development
 

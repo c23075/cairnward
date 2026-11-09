@@ -24,6 +24,13 @@ with:
 3. a data protection impact assessment for each agent system it fronts;
 4. the central pieces this page lists under "What the company must add".
 
+## Where it sits in the stack
+
+How Cairnward fits among the layers of an enterprise agentic system (identity, central policy,
+gateways, DLP, sandboxing, SIEM, GRC) is in [overview.md](overview.md#where-it-sits-in-an-agentic-system-stack).
+In short: it's the runtime enforcement and evidence layer on one host, and the central layers come
+from elsewhere, as "What the company must add" lists.
+
 ## What Cairnward contributes
 
 Each control below runs on the machine where Cairnward runs, and is switchable per environment.
@@ -177,3 +184,9 @@ system behind Cairnward. The step numbers in the table match the list below.
 5. **Scale** workload by workload. Revisit whether the gaps above justify building central policy
    and audit services around Cairnward, or adopting a commercial gateway that has them
    ([landscape.md](landscape.md)).
+
+## Planned: enterprise proof of concept and model risk management
+
+A plan to extend Cairnward into an enterprise proof of concept, with LLMOps and model risk
+management (inventory, validation, monitoring), is in
+[plan/enterprise-poc.md](plan/enterprise-poc.md). Nothing in it is built yet.
