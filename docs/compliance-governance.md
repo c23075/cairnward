@@ -3,8 +3,8 @@
 Written 2026-11-06 for security, privacy and compliance teams, and for the engineers who build
 in-house agents. It describes how Cairnward could serve as one layer of governance for agentic
 systems, what it would contribute, and what the company would still need to supply. The last
-two sections are plans (added 2026-11-09): extending it into an enterprise proof of concept,
-and model risk management.
+section is a plan (added 2026-11-09): an enterprise proof of concept, LLMOps and model risk
+management.
 
 This isn't legal advice, and Cairnward isn't certified against any standard. Where this page
 names a regulation or standard, it's to show which kind of requirement a feature can help
@@ -180,11 +180,17 @@ system behind Cairnward. The step numbers in the table match the list below.
    and audit services around Cairnward, or adopting a commercial gateway that has them
    ([landscape.md](landscape.md)).
 
-## Toward an enterprise proof of concept (planned)
+## Planned: an enterprise proof of concept, LLMOps and model risk management
 
-Added 2026-11-09. This section is a plan: **nothing in it is built yet.** The owner intends to
-extend Cairnward into a proof of concept of an enterprise agent-governance stack, also as an
-LLMOps portfolio project.
+Added 2026-11-09. This section is a plan: **nothing new in it is built yet.** The owner intends
+to extend Cairnward into a proof of concept of an enterprise agent-governance stack, as an LLMOps
+portfolio project, with model risk management (MRM) and model validation as a focus.
+
+Frameworks that set MRM expectations include the Federal Reserve and OCC's SR 11-7 (US), the
+PRA's SS1/23 (UK, which covers AI and machine-learning models explicitly), and, for high-risk AI
+systems, the EU AI Act's risk-management and record-keeping duties. As elsewhere on this page,
+naming them shows what kind of requirement a feature could help evidence; Cairnward meets none of
+them, and how they'd apply hasn't been assessed.
 
 ### What Cairnward already demonstrates
 
@@ -201,14 +207,15 @@ tests, some only against stand-ins (see [status.md](status.md)):
   export.
 - **Vault:** encrypted per conversation, with crypto-shredding on purge.
 
+Because it sits on every model call, it already collects much of the evidence MRM needs about how
+models are *used*. What it lacks is the validation side, judging whether a model is fit for its
+purpose, and the central pieces an enterprise needs (see "What the company must add").
+
 What exists for deployment today: a systemd unit (`deploy/systemd/`) and container setups for
 two chat clients (`deploy/containers/`). There's no container image or compose file for a
 Cairnward sidecar yet.
 
-It isn't yet a proof of concept for an **enterprise stack**: the central pieces listed under
-"What the company must add" don't exist.
-
-### The pieces a proof of concept would add
+### Platform pieces a proof of concept would add
 
 Each would be the smallest thing that demonstrates the pattern:
 
@@ -221,49 +228,7 @@ Each would be the smallest thing that demonstrates the pattern:
 | **Fleet view** | A dashboard listing the sidecars: version, privacy level, weakened settings, recent denials |
 | **Reference workloads** | Two or three containerised agents (a coding agent, a retrieval agent over an internal document store, an agent using a CRM tool), each with its own sidecar and data class |
 
-### Design rule: a control plane around the sidecars, not inside them
-
-These pieces would be a separate control-plane project that talks to the sidecars only through
-interfaces they already have: configuration files, the audit export, OpenTelemetry and the
-control socket. The core barely changes, so its threat model ([threat-model.md](threat-model.md))
-still holds; the control plane would need its own.
-
-**Not planned:** turning Cairnward into one shared multi-user gateway. It has no
-authentication, roles or tenant separation, and adding them would be a new design (see "Not
-supported" under "How to deploy it"). A fleet of sidecars with a thin control plane demonstrates
-the enterprise pattern without that.
-
-### Caveats for the proof of concept
-- **Non-regulated data only.** Cairnward has had no independent review, and hosted providers,
-  remote MCP servers, OpenShell and TLS inspection have only been tested against stand-ins.
-- **It demonstrates an architecture, not a product.** Compare it with a commercial gateway that
-  has central policy and audit ([landscape.md](landscape.md)).
-
-### Possible first steps
-1. An ADR for the control-plane split: which interfaces the control plane may use, and its
-   trust boundary with the sidecars.
-2. A container image for a Cairnward sidecar, and a compose file with two sidecars, each in
-   front of a reference agent.
-3. Audit shipping to OpenSearch, a scheduled anchor check, and a drift alert against a signed
-   baseline.
-4. Then identity (an identity provider in the compose file) and, last, central approvals.
-
-## Model risk management (planned)
-
-Added 2026-11-09. A plan, like the section above: **nothing new in it is built yet.** The owner
-is also interested in model risk management (MRM) and model validation.
-
-Frameworks that set MRM expectations include the Federal Reserve and OCC's SR 11-7 (US), the
-PRA's SS1/23 (UK, which covers AI and machine-learning models explicitly), and, for high-risk AI
-systems, the EU AI Act's risk-management and record-keeping duties. As elsewhere on this page,
-naming them shows what kind of requirement a feature could help evidence; Cairnward meets none of
-them, and how they'd apply hasn't been assessed.
-
-### How Cairnward maps to the MRM lifecycle
-
-Cairnward sits on every model call, so it already collects much of the evidence MRM needs about
-how models are used. What it lacks is the validation side: judging whether a model is fit for
-its purpose.
+### Model risk management: today and the gaps
 
 | MRM requirement | What Cairnward has today | Gap |
 |---|---|---|
@@ -275,28 +240,53 @@ its purpose.
 | **Effective challenge and independence** | Approvals are separated from the model. The audit chain can be checked independently against anchors | No validator role or sign-off workflow; Cairnward has no identities |
 | **Documentation** | Spec, ADRs, threat model and review records | No model documentation template (a model card: purpose, limits, data, validation results) |
 
-### Planned work
-1. **Model inventory and use policy.** A record per model (owner, purpose, risk tier, validation
-   status and expiry) that the policy engine enforces: an environment refuses, or asks about, a
-   model whose validation has expired or doesn't cover its use. This fits the existing
-   allow / ask / deny design, and the refusal is audited like any other.
-2. **Validation harness.** Extend `evals/` into a suite that runs through the gateway, so every
+### Design rule: a control plane around the sidecars, not inside them
+
+The new pieces would be a separate control-plane project that talks to the sidecars only through
+interfaces they already have: configuration files, the audit export, OpenTelemetry and the
+control socket. The core barely changes, so its threat model ([threat-model.md](threat-model.md))
+still holds; the control plane would need its own. The one exception is MRM item 4 below: the
+policy engine would read each model's validation status, so a call can be refused at the moment
+it's made.
+
+**Not planned:** turning Cairnward into one shared multi-user gateway. It has no
+authentication, roles or tenant separation, and adding them would be a new design (see "Not
+supported" under "How to deploy it"). A fleet of sidecars with a thin control plane demonstrates
+the enterprise pattern without that.
+
+### Planned work, in order
+1. **An ADR** for the control-plane split: which interfaces it may use, its trust boundary with
+   the sidecars, and how validation status reaches the policy engine.
+2. **A sidecar container image** and a compose file with two sidecars, each in front of a
+   reference agent.
+3. **Central audit and drift:** audit shipping to OpenSearch, a scheduled anchor check, and a
+   drift alert against a signed baseline configuration.
+4. **Model inventory enforced by policy:** a record per model (owner, purpose, risk tier,
+   validation status and expiry); an environment refuses, or asks about, a model whose
+   validation has expired or doesn't cover its use. This fits the existing allow / ask / deny
+   design, and the refusal is audited like any other. Few gateways enforce validation status at
+   call time, so this is the most distinctive item.
+5. **Validation harness:** extend `evals/` into a suite that runs through the gateway, so every
    validation run is itself audited: task accuracy, robustness, refusal behaviour,
    prompt-injection resistance, and comparison with a challenger model. Each run produces a
    validation report stored with the model's inventory record.
-3. **Ongoing monitoring.** Quality and stability metrics computed from the audit log and
+6. **Ongoing monitoring:** quality and stability metrics computed from the audit log and
    OpenTelemetry (latency, fallback rate, refusal rate, eval scores over time), with thresholds
-   that raise alerts.
-4. **Change triggers.** A new model version or new weights (a different hash) marks the model
-   "needs revalidation" until it's approved again.
-
-Item 1 is the most distinctive: few gateways enforce a model's validation status at the moment
-of the call. Items 2 to 4 are standard LLMOps pieces.
+   that raise alerts, shown in the fleet view.
+7. **Revalidation on change:** a new model version or new weights (a different hash) marks the
+   model "needs revalidation" until it's approved again.
+8. **Identity, then central approvals:** an identity provider in the compose file, approvers and
+   validators signing in through SSO, and last, the central approvals inbox with a sign-off step
+   for validation reports.
 
 ### Caveats
-- **Evidence, not compliance.** These would produce evidence a validation team could use; they
-  wouldn't make anyone compliant with SR 11-7, SS1/23 or the AI Act.
-- **Independence.** MRM expects validators to be independent of developers. That needs the
-  identity piece of the enterprise plan above; until then, sign-off is by the host's owner.
+- **Non-regulated data only.** Cairnward has had no independent review, and hosted providers,
+  remote MCP servers, OpenShell and TLS inspection have only been tested against stand-ins.
+- **It demonstrates an architecture, not a product.** Compare it with a commercial gateway that
+  has central policy and audit ([landscape.md](landscape.md)).
+- **Evidence, not compliance.** The MRM pieces would produce evidence a validation team could
+  use; they wouldn't make anyone compliant with SR 11-7, SS1/23 or the AI Act.
+- **Independence.** MRM expects validators to be independent of developers. That needs identity
+  (item 8); until then, sign-off is by the host's owner.
 - **Validation metrics need real data.** Evals on synthetic tasks show the harness works, not
   that a model is fit for a real use.
