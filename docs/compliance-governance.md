@@ -3,7 +3,8 @@
 Written 2026-11-06 for security, privacy and compliance teams, and for the engineers who build
 in-house agents. It describes how Cairnward could serve as one layer of governance for agentic
 systems, what it would contribute, and what the company would still need to supply. The last
-section is a plan for extending it into an enterprise proof of concept (added 2026-11-09).
+two sections are plans (added 2026-11-09): extending it into an enterprise proof of concept,
+and model risk management.
 
 This isn't legal advice, and Cairnward isn't certified against any standard. Where this page
 names a regulation or standard, it's to show which kind of requirement a feature can help
@@ -246,3 +247,56 @@ the enterprise pattern without that.
 3. Audit shipping to OpenSearch, a scheduled anchor check, and a drift alert against a signed
    baseline.
 4. Then identity (an identity provider in the compose file) and, last, central approvals.
+
+## Model risk management (planned)
+
+Added 2026-11-09. A plan, like the section above: **nothing new in it is built yet.** The owner
+is also interested in model risk management (MRM) and model validation.
+
+Frameworks that set MRM expectations include the Federal Reserve and OCC's SR 11-7 (US), the
+PRA's SS1/23 (UK, which covers AI and machine-learning models explicitly), and, for high-risk AI
+systems, the EU AI Act's risk-management and record-keeping duties. As elsewhere on this page,
+naming them shows what kind of requirement a feature could help evidence; Cairnward meets none of
+them, and how they'd apply hasn't been assessed.
+
+### How Cairnward maps to the MRM lifecycle
+
+Cairnward sits on every model call, so it already collects much of the evidence MRM needs about
+how models are used. What it lacks is the validation side: judging whether a model is fit for
+its purpose.
+
+| MRM requirement | What Cairnward has today | Gap |
+|---|---|---|
+| **Model inventory** | Every model and backend is declared in `backends.toml`; virtual models (`cw/<environment>:<effort>`) tie each one to an environment. Model files are downloaded hash-pinned (`cairnward models pull --sha256`) | No inventory record per model with an owner, intended use, risk tier, validation status or approval date |
+| **Use restrictions** | Each environment decides which backends, models and tools may be used for which data class. Providers that may train on prompts are limited to scratch environments. A run's key can't call models outside its environment | No link between "validated for use X" and the environments where the model may run |
+| **Change control** | Settings changes are audited with their difference and flagged when weaker. Tool definitions and plugins are pinned by hash | A new model version or new weights isn't treated as a model change needing revalidation |
+| **Ongoing monitoring** | Each call is audited with backend, model, tokens, duration, fallbacks and denials. OpenTelemetry export; benchmarks in [bench/](bench/) | No quality metrics (drift, accuracy, hallucination or refusal rates), thresholds or alerts |
+| **Validation and testing** | `evals/coding/run_eval.py` runs an agent through `cairnward run` and reports pass/fail, time, model calls and tokens from the audit log | One small coding eval. No validation suite (accuracy, robustness, bias, prompt-injection resistance), no challenger model, no validation reports |
+| **Effective challenge and independence** | Approvals are separated from the model. The audit chain can be checked independently against anchors | No validator role or sign-off workflow; Cairnward has no identities |
+| **Documentation** | Spec, ADRs, threat model and review records | No model documentation template (a model card: purpose, limits, data, validation results) |
+
+### Planned work
+1. **Model inventory and use policy.** A record per model (owner, purpose, risk tier, validation
+   status and expiry) that the policy engine enforces: an environment refuses, or asks about, a
+   model whose validation has expired or doesn't cover its use. This fits the existing
+   allow / ask / deny design, and the refusal is audited like any other.
+2. **Validation harness.** Extend `evals/` into a suite that runs through the gateway, so every
+   validation run is itself audited: task accuracy, robustness, refusal behaviour,
+   prompt-injection resistance, and comparison with a challenger model. Each run produces a
+   validation report stored with the model's inventory record.
+3. **Ongoing monitoring.** Quality and stability metrics computed from the audit log and
+   OpenTelemetry (latency, fallback rate, refusal rate, eval scores over time), with thresholds
+   that raise alerts.
+4. **Change triggers.** A new model version or new weights (a different hash) marks the model
+   "needs revalidation" until it's approved again.
+
+Item 1 is the most distinctive: few gateways enforce a model's validation status at the moment
+of the call. Items 2 to 4 are standard LLMOps pieces.
+
+### Caveats
+- **Evidence, not compliance.** These would produce evidence a validation team could use; they
+  wouldn't make anyone compliant with SR 11-7, SS1/23 or the AI Act.
+- **Independence.** MRM expects validators to be independent of developers. That needs the
+  identity piece of the enterprise plan above; until then, sign-off is by the host's owner.
+- **Validation metrics need real data.** Evals on synthetic tasks show the harness works, not
+  that a model is fit for a real use.
