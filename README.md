@@ -175,6 +175,7 @@ locking doesn't erase earlier plaintext from disks or old backups. Read the
 - [Project status](docs/status.md): where things stand, open issues and what's left to test
 - [Getting started](docs/getting-started.md): the full setup guide
 - [Specification](docs/spec.md): the design and its decisions
+- [Architecture in UML](docs/architecture-uml.md): deployment, classes, request sequences and vault states
 - [Requirements](docs/requirements.md) and [architecture decisions](docs/adr/)
 - [Threat model](docs/threat-model.md) and [limitations](docs/limitations.md): what the protections don't do
 - [Governance for regulated companies](docs/compliance-governance.md): using Cairnward as one layer of governance for in-house agents

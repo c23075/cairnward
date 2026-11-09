@@ -149,7 +149,7 @@ Each MCP server and plugin runs in its own srt sandbox, started by the outer pro
 nest) and connected to the core over a socket. With isolation off, the outer process and the core
 are one process; agents and MCP servers in an environment with isolation on are still sandboxed.
 
-The diagram shows the **Strict** configuration. Each box below the policy engine, and the sandboxing itself, can be switched off (§5.0); the endpoints, routing and virtual models always work. What none of this protects against is in [limitations.md](limitations.md).
+The diagram shows the **Strict** configuration. Each box below the policy engine, and the sandboxing itself, can be switched off (§5.0); the endpoints, routing and virtual models always work. What none of this protects against is in [limitations.md](limitations.md). UML diagrams of the processes, main classes and two request flows are in [architecture-uml.md](architecture-uml.md).
 
 **Rules** (when the corresponding protections are on)
 1. Clients and agents talk only to Cairnward (model endpoint, MCP proxy) and, if allowed, to the egress proxy. The OS enforces this when isolation is on (§3.2); with isolation off, the proxy settings are advisory and tools can connect directly.
