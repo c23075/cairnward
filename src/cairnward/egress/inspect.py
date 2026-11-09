@@ -51,12 +51,55 @@ def path_matches(path: str, pattern: str) -> bool:
     return _glob(pattern).match(path) is not None
 
 
+_UNRESERVED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+_ESCAPE = re.compile(r"%([0-9A-Fa-f]{2})")
+# Characters a server may read as a path separator or terminator once decoded: a path that
+# hides one behind an escape (or uses a backslash) can't be matched safely, so it's refused.
+_AMBIGUOUS = re.compile(r"%(2f|5c|00)|\\", re.IGNORECASE)
+
+
+def _decode_unreserved(m: re.Match[str]) -> str:
+    ch = chr(int(m.group(1), 16))
+    return ch if ch in _UNRESERVED else "%" + m.group(1).upper()
+
+
+def normalize_path(path: str) -> str:
+    """The path as a server would resolve it (RFC 3986 6.2.2): escapes of unreserved characters
+    decoded (so `%2e` is a dot and `%61` is `a`), other escapes in upper case, repeated slashes
+    collapsed, `.` and `..` segments removed. `..` never climbs above the root."""
+    path = _ESCAPE.sub(_decode_unreserved, path)
+    out: list[str] = []
+    segments = path.split("/")
+    for i, seg in enumerate(segments):
+        last = i == len(segments) - 1
+        if seg == "..":
+            if out:
+                out.pop()
+            if last:
+                out.append("")
+        elif seg == ".":
+            if last:
+                out.append("")
+        elif seg or last:
+            out.append(seg)
+    return "/" + "/".join(out) if out != [""] else "/"
+
+
+def ambiguous_path(path: str) -> bool:
+    """True when the raw path holds an encoded slash, backslash or NUL (see _AMBIGUOUS)."""
+    return _AMBIGUOUS.search(path) is not None
+
+
 def request_path(target: str) -> str:
-    """The path of a request target, without the query (rules don't see the query)."""
+    """The path of a request target, normalized (normalize_path), without the query (rules
+    don't see the query). An ambiguous path (ambiguous_path) is returned raw, for
+    check_request to refuse."""
     if "://" in target:  # absolute form inside a tunnel: drop scheme and authority
         target = "/" + target.split("://", 1)[1].partition("/")[2]
-    path = target.split("?", 1)[0].split("#", 1)[0]
-    return path or "/"
+    path = target.split("?", 1)[0].split("#", 1)[0] or "/"
+    if ambiguous_path(path):
+        return path
+    return normalize_path(path)
 
 
 def host_header_name(value: str) -> str:
@@ -89,16 +132,59 @@ class Verdict:
     rule: int | None  # index into rules, None for the `unmatched` default
 
 
-def check_request(tls: TlsInspection, host: str, port: int, method: str, path: str) -> Verdict:
-    target = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
-    method = method.upper()
+_PARAMS = re.compile(r"(;|%3b)[^/]*", re.IGNORECASE)
+
+
+def strip_params(path: str) -> str:
+    """The path without `;` parameters in any segment (`/a;jsessionid=1/..;/b` -> `/a/../b`), as
+    some servers (Tomcat, Jetty, Spring) read it before resolving dot segments."""
+    return _PARAMS.sub("", path)
+
+
+def path_readings(path: str) -> list[tuple[str, bool]]:
+    """(path, case-insensitive) for each way a server might read this path: exactly, without
+    `;` parameters, and either one ignoring case. A request must be allowed under all of them."""
+    paths = dict.fromkeys([normalize_path(path), normalize_path(strip_params(path))])
+    return [(p, fold) for p in paths for fold in (False, True)]
+
+
+def _first_rule(tls: TlsInspection, host: str, target: str, method: str, path: str,
+                fold: bool) -> Verdict:  # fmt: skip
+    if fold:
+        path = path.lower()
     for i, rule in enumerate(tls.rules):
         if not (host_matches(target, rule.host) or host_matches(host, rule.host)):
             continue
-        if rule.method not in ("*", method) or not path_matches(path, rule.path):
+        pattern = rule.path.lower() if fold else rule.path
+        if rule.method not in ("*", method) or not path_matches(path, pattern):
             continue
         return Verdict(rule.decision == "allow", _describe(rule, i), i)
     return Verdict(tls.unmatched == "allow", f"no rule matched (unmatched = {tls.unmatched})", None)
+
+
+def check_request(tls: TlsInspection, host: str, port: int, method: str, path: str) -> Verdict:
+    """First matching rule wins, under every reading of the path (path_readings): the request
+    goes out only if each reading is allowed, so neither letter case nor `;` parameters can
+    steer it past a deny rule or out of an allow rule."""
+    target = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+    method = method.upper()
+    if ambiguous_path(path):
+        return Verdict(False, "the path holds an encoded slash, backslash or NUL", None)
+    exact = normalize_path(path)
+    first: Verdict | None = None
+    for reading, fold in path_readings(path):
+        verdict = _first_rule(tls, host, target, method, reading, fold)
+        if not verdict.allowed:
+            how = [w for w, on in (("without ;-parameters", reading != exact),
+                                   ("ignoring case", fold)) if on]  # fmt: skip
+            if how:
+                verdict = Verdict(False, f"{verdict.reason} (path read {', '.join(how)})",
+                                  verdict.rule)  # fmt: skip
+            return verdict
+        first = first or verdict
+    if first is None:  # can't happen: path_readings always yields the exact reading
+        raise RuntimeError("no reading of the path was checked")
+    return first
 
 
 def _describe(rule: HttpRule, i: int) -> str:

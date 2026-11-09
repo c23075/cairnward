@@ -110,12 +110,24 @@ class Decision:
         return self.decision == "allow"
 
 
+def _split_host(value: str) -> tuple[str, str]:
+    """(name, port) of 'host', 'host:port', '[v6]', '[v6]:port' or a bare IPv6 address; an
+    IPv6 name keeps its brackets so both spellings compare equal."""
+    value = value.lower()
+    if value.startswith("["):
+        name, _, rest = value.partition("]")
+        return name + "]", rest[1:] if rest.startswith(":") else ""
+    if value.count(":") > 1:  # bare IPv6 address: no port
+        return f"[{value}]", ""
+    name, sep, port = value.rpartition(":")
+    return (name, port) if sep else (value, "")
+
+
 def host_matches(host: str, pattern: str) -> bool:
-    """'example.org', '*.example.org' (subdomains only) and optional ':port' on either side."""
-    h_name, _, h_port = host.lower().rpartition(":") if ":" in host else (host.lower(), "", "")
-    p_name, _, p_port = (
-        pattern.lower().rpartition(":") if ":" in pattern else (pattern.lower(), "", "")
-    )
+    """'example.org', '*.example.org' (subdomains only) and optional ':port' on either side.
+    IPv6 addresses may be written with or without brackets ('::1', '[::1]', '[::1]:443')."""
+    h_name, h_port = _split_host(host)
+    p_name, p_port = _split_host(pattern)
     if p_port and p_port != h_port:
         return False
     if p_name.startswith("*."):
