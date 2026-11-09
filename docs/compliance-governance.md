@@ -2,7 +2,8 @@
 
 Written 2026-11-06 for security, privacy and compliance teams, and for the engineers who build
 in-house agents. It describes how Cairnward could serve as one layer of governance for agentic
-systems, what it would contribute, and what the company would still need to supply.
+systems, what it would contribute, and what the company would still need to supply. The last
+section is a plan for extending it into an enterprise proof of concept (added 2026-11-09).
 
 This isn't legal advice, and Cairnward isn't certified against any standard. Where this page
 names a regulation or standard, it's to show which kind of requirement a feature can help
@@ -177,3 +178,71 @@ system behind Cairnward. The step numbers in the table match the list below.
 5. **Scale** workload by workload. Revisit whether the gaps above justify building central policy
    and audit services around Cairnward, or adopting a commercial gateway that has them
    ([landscape.md](landscape.md)).
+
+## Toward an enterprise proof of concept (planned)
+
+Added 2026-11-09. This section is a plan: **nothing in it is built yet.** The owner intends to
+extend Cairnward into a proof of concept of an enterprise agent-governance stack, also as an
+LLMOps portfolio project.
+
+### What Cairnward already demonstrates
+
+It's a working proof of concept for **one layer**: enforcement and evidence on a single host,
+as a sidecar next to one agent workload (Pattern A). These work end to end and are covered by
+tests, some only against stand-ins (see [status.md](status.md)):
+- **Model gateway:** policy and budgets; hosted providers allowed, asked about or denied per
+  environment.
+- **Sandboxed agent runs:** egress is the only way out.
+- **Tool governance:** MCP tools pinned by hash and approved per definition.
+- **Approvals:** answered by a person in Cairnward's interface, never by the model.
+- **Redaction** of text going to models, MCP servers and plugins.
+- **Audit log:** hash-chained, digests rather than content, with anchors and OpenTelemetry
+  export.
+- **Vault:** encrypted per conversation, with crypto-shredding on purge.
+
+What exists for deployment today: a systemd unit (`deploy/systemd/`) and container setups for
+two chat clients (`deploy/containers/`). There's no container image or compose file for a
+Cairnward sidecar yet.
+
+It isn't yet a proof of concept for an **enterprise stack**: the central pieces listed under
+"What the company must add" don't exist.
+
+### The pieces a proof of concept would add
+
+Each would be the smallest thing that demonstrates the pattern:
+
+| Missing piece | Smallest thing that would demonstrate it |
+|---|---|
+| **Central policy** | A Git repository of signed baseline configurations pushed to each sidecar, with a drift check that compares the running configuration to the baseline and raises an alert |
+| **Identity** | Each sidecar's client keys tied to a service account in an identity provider (for example OIDC workload identity), and approvers identified through SSO instead of "the host's owner" |
+| **Central audit** | A log shipper (Vector or Fluent Bit) sending `audit.jsonl` to a SIEM or OpenSearch, and a scheduled central `audit verify --anchors` across all hosts |
+| **Central approvals** | An inbox that gathers pending requests from several sidecars, with a named approver for each. The largest new piece |
+| **Fleet view** | A dashboard listing the sidecars: version, privacy level, weakened settings, recent denials |
+| **Reference workloads** | Two or three containerised agents (a coding agent, a retrieval agent over an internal document store, an agent using a CRM tool), each with its own sidecar and data class |
+
+### Design rule: a control plane around the sidecars, not inside them
+
+These pieces would be a separate control-plane project that talks to the sidecars only through
+interfaces they already have: configuration files, the audit export, OpenTelemetry and the
+control socket. The core barely changes, so its threat model ([threat-model.md](threat-model.md))
+still holds; the control plane would need its own.
+
+**Not planned:** turning Cairnward into one shared multi-user gateway. It has no
+authentication, roles or tenant separation, and adding them would be a new design (see "Not
+supported" under "How to deploy it"). A fleet of sidecars with a thin control plane demonstrates
+the enterprise pattern without that.
+
+### Caveats for the proof of concept
+- **Non-regulated data only.** Cairnward has had no independent review, and hosted providers,
+  remote MCP servers, OpenShell and TLS inspection have only been tested against stand-ins.
+- **It demonstrates an architecture, not a product.** Compare it with a commercial gateway that
+  has central policy and audit ([landscape.md](landscape.md)).
+
+### Possible first steps
+1. An ADR for the control-plane split: which interfaces the control plane may use, and its
+   trust boundary with the sidecars.
+2. A container image for a Cairnward sidecar, and a compose file with two sidecars, each in
+   front of a reference agent.
+3. Audit shipping to OpenSearch, a scheduled anchor check, and a drift alert against a signed
+   baseline.
+4. Then identity (an identity provider in the compose file) and, last, central approvals.
