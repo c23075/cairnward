@@ -1,7 +1,9 @@
 """Encrypted backups with restic (spec §4.8, FR-SYNC-1/3/6/8; ADR-0007 as amended by D50).
 
 What a snapshot holds: not the live database files but a **per-conversation export** built
-in a staging folder (`<state>/backup/staging`):
+in a staging folder, in memory when it can be (`$XDG_RUNTIME_DIR/cairnward-backup-staging`, a
+fixed name so restic's snapshots stay incremental), else `<state>/backup/staging`. It's removed
+when the run ends, even after a failure (threat-model review 2026-11-10, I40):
 
     conversations/<id>/conversation.json   the conversation row and its messages, exactly as
                                            stored (ciphertext when encrypted)
@@ -399,6 +401,15 @@ def snapshots(cfg: Config) -> list[dict[str, Any]]:
     return sorted(json.loads(out or "[]"), key=lambda s: s["time"])
 
 
+def staging_dir(cfg: Config) -> tuple[Path, bool]:
+    """Where the plain export is built, and whether that's memory-backed."""
+    if cfg.main.backup.staging == "memory":
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime and Path(runtime).is_dir():
+            return Path(runtime) / "cairnward-backup-staging", True
+    return backup_dir(cfg) / "staging", False
+
+
 def last_run(cfg: Config) -> dict[str, Any] | None:
     f = backup_dir(cfg) / "last.json"
     with contextlib.suppress(OSError, ValueError):
@@ -413,15 +424,26 @@ def run(cfg: Config, log: Log = print) -> dict[str, Any]:
     with _locked(cfg):
         started = time.monotonic()
         _process_purges(cfg, log)
-        staging = backup_dir(cfg) / "staging"
-        manifest = stage(cfg, staging)
-        log(f"backing up {manifest['conversations']} conversations ...")
+        from cairnward.artifacts import remove_tree
+
+        staging, in_memory = staging_dir(cfg)
+        for leftover in {backup_dir(cfg) / "staging", staging}:  # from a run that crashed
+            if leftover.exists():
+                remove_tree(leftover)
+        if not in_memory and cfg.main.backup.staging == "memory":
+            log("warning: no memory-backed folder ($XDG_RUNTIME_DIR): the backup's plain export "
+                "is built on the disk while it runs")  # fmt: skip
         try:
+            manifest = stage(cfg, staging)
+            log(f"backing up {manifest['conversations']} conversations ...")
             res = run_restic(cfg, "backup", "--json", "--host", HOST, "--tag", TAG, ".",
                              cwd=staging)  # fmt: skip
         except BackupError as exc:
             _audit(cfg, "backup.run", "error", error=str(exc)[:300])
             raise
+        finally:
+            if staging.exists():
+                remove_tree(staging)  # plain files: never left lying around, success or not
         summary: dict[str, Any] = {}
         for line in res.stdout.splitlines():
             with contextlib.suppress(ValueError):
@@ -433,9 +455,6 @@ def run(cfg: Config, log: Log = print) -> dict[str, Any]:
                    "--keep-daily", str(b.keep_daily), "--keep-weekly", str(b.keep_weekly),
                    "--keep-monthly", str(b.keep_monthly), "--keep-last", "1")  # fmt: skip
         apply_access(cfg)
-        from cairnward.artifacts import remove_tree
-
-        remove_tree(staging)  # the export is plain files; don't leave it lying around
         result = {"snapshot": summary.get("snapshot_id", "")[:12],
                   "conversations": manifest["conversations"],
                   "files": summary.get("total_files_processed"),

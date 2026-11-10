@@ -218,6 +218,12 @@ class BackupConfig(_Strict):
         description="who can read a folder repository: only you, or also your group (for example "
         "to let another account copy it). Contents stay encrypted either way",
     )
+    staging: Literal["memory", "disk"] = Field(
+        default="memory",
+        description="where the plain export is built before restic encrypts it: memory "
+        "($XDG_RUNTIME_DIR, so it never reaches the disk; falls back to disk without it) or disk "
+        "(<state>/backup/staging, for exports larger than memory allows)",
+    )
     interval_hours: int = Field(default=24, ge=1, le=24 * 30, description="auto mode: how often")
     keep_daily: int = Field(default=7, ge=0, le=3650)
     keep_weekly: int = Field(default=4, ge=0, le=520)

@@ -168,6 +168,16 @@
           "default": null,
           "description": "a folder for the restic repository: a second disk, NAS mount or synced folder (contents are encrypted by restic). Default: ~/cairnward-backups",
           "title": "Repository"
+        },
+        "staging": {
+          "default": "memory",
+          "description": "where the plain export is built before restic encrypts it: memory ($XDG_RUNTIME_DIR, so it never reaches the disk; falls back to disk without it) or disk (<state>/backup/staging, for exports larger than memory allows)",
+          "enum": [
+            "memory",
+            "disk"
+          ],
+          "title": "Staging",
+          "type": "string"
         }
       },
       "title": "BackupConfig",
@@ -761,7 +771,8 @@
         "keep_weekly": 4,
         "mode": "none",
         "password_command": null,
-        "repository": null
+        "repository": null,
+        "staging": "memory"
       }
     },
     "defaults": {

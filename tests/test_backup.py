@@ -5,9 +5,11 @@ Skipped unless restic (>= 0.15) is installed."""
 
 import json
 import os
+import shutil
 import stat
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -325,3 +327,59 @@ def test_restore_brings_back_files_without_overwriting_or_undoing_a_purge(
     (new / "mcp" / "research" / "notes.txt").write_text("newer")
     assert backup.import_files(new_cfg, export) == {"added": 0, "skipped": 4}
     assert (new / "mcp" / "research" / "notes.txt").read_text() == "newer"
+
+
+# ------------------------------------------------------------------ staging (I40)
+
+
+@pytest.mark.skipif(shutil.which("restic") is None, reason="restic not installed")
+def test_the_export_is_staged_in_memory_and_always_removed(
+    cfg_paths: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = tmp_path / "run-user"
+    runtime.mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    cfg = load_config(cfg_paths)
+    seed(cfg_paths)
+    backup.init(cfg, log=lambda m: None)
+    staged: list[Path] = []
+    real_stage = backup.stage
+
+    def watch(c: Any, dest: Path) -> dict[str, Any]:
+        out = real_stage(c, dest)
+        staged.append(dest)
+        assert (dest / "MANIFEST.json").exists()
+        return out
+
+    monkeypatch.setattr(backup, "stage", watch)
+    assert backup.run(cfg, log=lambda m: None)["conversations"] == 3
+    assert staged == [runtime / "cairnward-backup-staging"]  # memory, a fixed name
+    assert not staged[0].exists() and not (backup.backup_dir(cfg) / "staging").exists()
+
+    # restic failing mid-run: the plain export is removed anyway
+    real_run = backup.run_restic
+
+    def failing(c: Any, *args: str, **kw: Any) -> Any:
+        if args and args[0] == "backup":
+            raise backup.BackupError("disk full")
+        return real_run(c, *args, **kw)
+
+    monkeypatch.setattr(backup, "run_restic", failing)
+    with pytest.raises(backup.BackupError, match="disk full"):
+        backup.run(cfg, log=lambda m: None)
+    assert not staged[-1].exists()
+
+
+def test_without_a_memory_folder_staging_falls_back_to_disk(
+    cfg_paths: Paths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    cfg = load_config(cfg_paths)
+    assert backup.staging_dir(cfg) == (backup.backup_dir(cfg) / "staging", False)
+    (cfg_paths.config_dir / "cairnward.toml").write_text('[backup]\nstaging = "disk"\n')
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(cfg_paths.state_dir))
+    disk = load_config(cfg_paths)
+    assert backup.staging_dir(disk) == (backup.backup_dir(disk) / "staging", False)

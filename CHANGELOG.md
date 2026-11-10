@@ -18,6 +18,8 @@
   records. Not used by `serve` yet.
 
 ### Security
+- Backups build their plain export in memory (`$XDG_RUNTIME_DIR`) and remove it even when
+  restic fails; `[backup] staging = "disk"` keeps the old place (I40).
 - TLS inspection: method and path rules now match the normalized path (escaped unreserved
   characters decoded, `//`, `.` and `..` resolved), and a path with an encoded slash, backslash
   or NUL is refused. Each request must also be allowed when its path is read without `;`

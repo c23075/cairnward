@@ -99,8 +99,8 @@ disagree with the code, the code was checked, and this page follows it.
 - **With database encryption on,** the files are protected only while Cairnward isn't running
   with the key in memory, and only as well as the passphrase. A `[storage] key` reference is as
   safe as wherever it points (an `env:` reference stays readable in that process's `/proc`). While
-  a backup runs, a plain export with unlocked conversations' keys sits in `<state>/backup/staging`
-  (I40). Earlier plaintext stays in the disk's free space and in older
+  a backup runs, a plain export with unlocked conversations' keys is held in memory, or on disk
+  where there's no memory folder (I40). Earlier plaintext stays in the disk's free space and in older
   backups, and the audit log has no plaintext mirror to cross-check against.
 - **With `crypto_shred = "off"`** (the Open preset), conversation bodies and titles are stored as
   plain text.
