@@ -33,8 +33,9 @@ import uvicorn
 from cairnward.audit import AuditLog, enabled_for, record_settings
 from cairnward.config.edit import apply_edit
 from cairnward.config.loader import Config
-from cairnward.egress import EgressProxy, Session, Sessions
+from cairnward.egress import Session, Sessions
 from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, control_app
+from cairnward.egress.rust import make_egress
 from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
@@ -399,10 +400,12 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 *core_background(cfg, vault, hub, log),
             ]
             if with_egress:
-                proxy = EgressProxy(cfg, PolicyEngine(cfg, approver=inbox, audit=audit), sessions)
+                proxy = make_egress(cfg, PolicyEngine(cfg, approver=inbox, audit=audit), sessions,
+                                    socket_dir=sockets(cfg)["egress"].parent)  # fmt: skip
                 await proxy.start()
                 tasks.append(proxy.serve_forever())
-                log(f"cairnward-egress on 127.0.0.1:{proxy.port}")
+                rust = " (Rust data path)" if cfg.main.egress.implementation == "rust" else ""
+                log(f"cairnward-egress on 127.0.0.1:{proxy.port}{rust}")
             log(
                 f"Cairnward gateway on http://{server.gateway_host}:{server.gateway_port}/v1 "
                 f"(privacy: {cfg.privacy().label}; single process, core not isolated)"
@@ -522,7 +525,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
         # Asks go to the inbox in the core (its management socket).
         asker = RemoteApprover(str(socks["management"]), cfg.main.egress.approval_timeout_s)
         engine = PolicyEngine(cfg, approver=asker, audit=audit)
-        proxy = EgressProxy(cfg, engine, sessions)
+        proxy = make_egress(cfg, engine, sessions, socket_dir=socks["egress"].parent)
         bridge = BridgeLauncher(
             LocalLauncher(
                 cfg,
@@ -554,6 +557,13 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
             }
             egress_url = f"http://cw:{core_token}@127.0.0.1:{server.egress_port}"
             env.update(HTTP_PROXY=egress_url, HTTPS_PROXY=egress_url)  # srt's parent proxy
+            from cairnward.store import dbkey
+
+            db_key = dbkey.key_for(cfg.paths)
+            if db_key is not None:
+                # the sandboxed core can't be asked for the passphrase: it gets the key on stdin,
+                # never in its environment (/proc/<pid>/environ keeps that; ADR-0019, R1)
+                env[dbkey.ON_STDIN] = "1"
             shutil.rmtree(core_tmp(cfg), ignore_errors=True)  # what a crash left, maybe plaintext
             private_dir(core_tmp(cfg))
             cmd = wrap(
@@ -585,8 +595,16 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                 fwd_clients = await _client_socket(
                     cfg, lambda: asyncio.open_unix_connection(gw_sock)
                 )
-                core = await asyncio.create_subprocess_exec(*cmd, env=env, stdin=subprocess.DEVNULL)
-                log(f"cairnward-egress on 127.0.0.1:{proxy.port} (only networked process)")
+                core = await asyncio.create_subprocess_exec(
+                    *cmd, env=env,
+                    stdin=subprocess.PIPE if db_key is not None else subprocess.DEVNULL,
+                )  # fmt: skip
+                if db_key is not None and core.stdin is not None:
+                    core.stdin.write(db_key.hex().encode() + b"\n")
+                    await core.stdin.drain()
+                    core.stdin.close()
+                rust = ", Rust data path" if cfg.main.egress.implementation == "rust" else ""
+                log(f"cairnward-egress on 127.0.0.1:{proxy.port} (only networked process{rust})")
                 log(
                     f"Cairnward gateway on http://127.0.0.1:{server.gateway_port}/v1 "
                     f"(privacy: {cfg.privacy().label}; core isolated, pid {core.pid})"
@@ -687,6 +705,9 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     from cairnward.mcp.launch import RemoteLauncher
 
     refuse_vm_sockets(log)
+    from cairnward.store import dbkey
+
+    dbkey.receive(cfg.paths)  # the database key, when serve sent one (before any store opens)
     socks = sockets(cfg)
     srt_proxy = os.environ.get("HTTP_PROXY", "")
     if srt_proxy and "://" not in srt_proxy:
@@ -816,6 +837,16 @@ def serve(cfg: Config, *, with_egress: bool = True, log: Log) -> int:
     for name, backend in cfg.backends.backends.items():
         if warning := backend.unencrypted_warning(name):
             log(f"warning: {warning}")
+    from cairnward.store import dbkey
+    from cairnward.store.db import DatabaseKeyError
+
+    for warning in dbkey.weakenings(cfg.paths):
+        log(f"warning: {warning}")
+    try:
+        dbkey.key_for(cfg.paths)  # ask for the passphrase once, before anything starts
+    except DatabaseKeyError as exc:
+        log(f"cairnward: can't start: {exc}")
+        return 2
     if busy := port_problems(cfg, with_egress=with_egress):
         if _already_running(cfg):
             log("cairnward: already running (`cairnward status`); stop that one first")

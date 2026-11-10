@@ -263,6 +263,24 @@ class EgressProxy:
             cancelled.set()
             return timed_out("approval timed out")
 
+    async def connect_decision(self, session: Session, action: Action, display: str) -> Decision:
+        """Allow or deny one connection: the core's own, one the user approved for this run
+        when the sandbox asked, or the policy (asking when it says so). Also used by the
+        decision service for a data path in another process (decisions.py)."""
+        if session.trusted_core:
+            if session.any_environment:
+                action.details["environment"] = "checked by the core in its own environment"
+            return Decision(action, "allow", "low", "requested by the core (already checked)")
+        if self.sessions.approved(session.run_id, display):
+            return Decision(action, "allow", self.engine.rule_for(action).risk,
+                            "approved for this run when the sandbox asked",
+                            approved_by="user", scope="run")  # fmt: skip
+        decision = await self._decide(action)
+        if decision.allowed and decision.asked and session.run_id:
+            # a run's "yes" covers its later connections to this host too
+            self.sessions.approve(session.run_id, display)
+        return decision
+
     async def _deny(self, writer: asyncio.StreamWriter, decision: Decision) -> None:
         await asyncio.to_thread(self.engine.audit_deny, decision)
         await self._reply(writer, 403, "Forbidden by cairnward",
@@ -292,6 +310,15 @@ class EgressProxy:
         if self._upstream_ssl is None:
             self._upstream_ssl = tls.upstream_context()
         return self._issuer.context(host), self._upstream_ssl
+
+    def _tls_contexts_pem(self, host: str) -> tuple[bytes, bytes]:
+        """The host's certificate chain and key, for the Rust data path (decisions.py)."""
+        from cairnward.egress import tls
+
+        if self._issuer is None:
+            self._issuer = tls.Issuer(self.config.paths.data_dir)
+        chain, key = self._issuer.leaf_pem(host)
+        return chain, key
 
     async def _record_request(self, action: Action, ex: Exchange) -> None:
         """One audit record per inspected request; the path and query only as a digest."""
@@ -428,19 +455,7 @@ class EgressProxy:
             client=session.client, run_id=session.run_id, actor=session.actor,
             details={"method": method.upper(), "via": "egress"},
         )  # fmt: skip
-        if session.trusted_core:
-            decision = Decision(action, "allow", "low", "requested by the core (already checked)")
-            if session.any_environment:
-                action.details["environment"] = "checked by the core in its own environment"
-        elif self.sessions.approved(session.run_id, display):
-            decision = Decision(action, "allow", self.engine.rule_for(action).risk,
-                                "approved for this run when the sandbox asked",
-                                approved_by="user", scope="run")  # fmt: skip
-        else:
-            decision = await self._decide(action)
-            if decision.allowed and decision.asked and session.run_id:
-                # a run's "yes" covers its later connections to this host too
-                self.sessions.approve(session.run_id, display)
+        decision = await self.connect_decision(session, action, display)
         if not decision.allowed:
             await self._deny(writer, decision)
             return

@@ -29,12 +29,21 @@ class Origin(BaseHTTPRequestHandler):
         self.wfile.write(b"ok")
 
 
-def test_helper_traffic_goes_through_egress(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("mode", "impl"), [("off", "python"), ("off", "rust"),
+                                           ("isolated", "rust")])  # fmt: skip
+def test_helper_traffic_goes_through_egress(tmp_path: Path, mode: str, impl: str) -> None:
+    """Also with the Rust data path (ADR-0020), in a single process and beside the isolated
+    core, where the decision service asks the core's inbox."""
+    from cairnward.egress.rust import binary
+
+    if impl == "rust" and binary() is None:
+        pytest.skip("Rust egress binary not built")
     origin = ThreadingHTTPServer(("127.0.0.1", 0), Origin)
     threading.Thread(target=origin.serve_forever, daemon=True).start()
     port = origin.server_address[1]
-    cw = Cairnward(tmp_path, "off", privacy='preset = "strict"\nnetwork = "allowlist"\n'
-                   f'network_allow_hosts = ["127.0.0.1:{port}"]\n')  # fmt: skip
+    cw = Cairnward(tmp_path, mode, privacy='preset = "strict"\nnetwork = "allowlist"\n'
+                   f'network_allow_hosts = ["127.0.0.1:{port}"]\n',
+                   main=f'[egress]\nimplementation = "{impl}"\n')  # fmt: skip
     cfg = load_config(cw.paths)
     try:
         with (
@@ -43,6 +52,12 @@ def test_helper_traffic_goes_through_egress(tmp_path: Path) -> None:
         ):
             pass
         with cw:
+            if impl == "rust":  # the Rust data path is what carries the traffic
+                import subprocess
+
+                running = subprocess.run(["pgrep", "-f", "cairnward-egress-rs serve"],
+                                         capture_output=True, text=True).stdout  # fmt: skip
+                assert running.split(), "cairnward-egress-rs isn't running"
             with (
                 egress_session(cfg, "coding", "restic") as proxy,
                 httpx.Client(proxy=proxy, trust_env=False) as c,

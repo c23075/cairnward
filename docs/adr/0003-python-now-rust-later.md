@@ -18,4 +18,4 @@ Option 3. Keep the audit log and egress proxy behind narrow interfaces (`AuditSi
 ## Consequences
 - Fast iteration in Phase 0.
 - Must keep core dependencies minimal and hash-locked (Python's dependency tree is the main audit cost).
-- Rust rewrite is planned in Phase 3, not committed to a date.
+- Rust rewrite is planned in Phase 3, not committed to a date. ("Phase 3" is now "Later" in [spec §9](../spec.md#9-delivery-plan-summary), with no date.)

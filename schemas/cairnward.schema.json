@@ -168,6 +168,16 @@
           "default": null,
           "description": "a folder for the restic repository: a second disk, NAS mount or synced folder (contents are encrypted by restic). Default: ~/cairnward-backups",
           "title": "Repository"
+        },
+        "staging": {
+          "default": "memory",
+          "description": "where the plain export is built before restic encrypts it: memory ($XDG_RUNTIME_DIR, so it never reaches the disk; falls back to disk without it) or disk (<state>/backup/staging, for exports larger than memory allows)",
+          "enum": [
+            "memory",
+            "disk"
+          ],
+          "title": "Staging",
+          "type": "string"
         }
       },
       "title": "BackupConfig",
@@ -243,6 +253,16 @@
           "minimum": 5,
           "title": "Idle Timeout S",
           "type": "integer"
+        },
+        "implementation": {
+          "default": "python",
+          "description": "the data path: python, or rust (cairnward-egress-rs, ADR-0020; opt-in while it's new)",
+          "enum": [
+            "python",
+            "rust"
+          ],
+          "title": "Implementation",
+          "type": "string"
         },
         "max_connections": {
           "default": 64,
@@ -682,6 +702,27 @@
       "title": "ServerConfig",
       "type": "object"
     },
+    "StorageConfig": {
+      "additionalProperties": false,
+      "description": "SQLCipher \"encrypt everything\" mode (ADR-0019). Turned on with `cairnward store encrypt`;\nthe database key is then wrapped with a passphrase asked at start.",
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "optional, a weakening: a reference ('env:NAME' or 'keyring:NAME') to the database key itself, so an unattended start needs no passphrase",
+          "title": "Key"
+        }
+      },
+      "title": "StorageConfig",
+      "type": "object"
+    },
     "TelemetryConfig": {
       "additionalProperties": false,
       "description": "OpenTelemetry export of model and tool calls (FR-AUD-5): off unless an endpoint is set.",
@@ -740,7 +781,8 @@
         "keep_weekly": 4,
         "mode": "none",
         "password_command": null,
-        "repository": null
+        "repository": null,
+        "staging": "memory"
       }
     },
     "defaults": {
@@ -756,6 +798,7 @@
         "approval_timeout_s": 120,
         "connect_timeout_s": 15,
         "idle_timeout_s": 300,
+        "implementation": "python",
         "max_connections": 64
       }
     },
@@ -819,6 +862,12 @@
         "gateway_host": "127.0.0.1",
         "gateway_port": 8484,
         "socket_path": null
+      }
+    },
+    "storage": {
+      "$ref": "#/$defs/StorageConfig",
+      "default": {
+        "key": null
       }
     },
     "telemetry": {

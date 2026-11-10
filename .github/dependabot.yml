@@ -7,6 +7,11 @@ updates:
     groups:
       dev-tools:
         dependency-type: development
+  # The Rust egress data path (ADR-0020): tokio, serde_json and what they pull in
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:

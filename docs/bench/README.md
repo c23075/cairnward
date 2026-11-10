@@ -6,6 +6,8 @@
 
 It uses only the Python standard library, sends only generated filler text, and by default talks only to servers on this machine.
 
+Other measurements: `scripts/bench_gateway.py` (the gateway's overhead), `scripts/bench_egress.py` (the Python and Rust egress data paths side by side, [results](results-2026-11-10-egress-rust.md)).
+
 ## Run it
 
 With Ollama (default `http://127.0.0.1:11434`):

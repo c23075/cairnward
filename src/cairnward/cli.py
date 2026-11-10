@@ -59,6 +59,20 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument(
         "--anchors", action="store_true", help="also check against the anchors repo ([anchor])"
     )
+    prove = audit_sub.add_parser(
+        "prove", help="a proof that one record is in an anchored checkpoint (Merkle, RFC 9162)"
+    )
+    prove.add_argument("seq", type=int, help="the record's sequence number")
+    prove.add_argument("--out", type=Path, help="write the proof here (default: print it)")
+    chk = audit_sub.add_parser(
+        "check-proof", help="check a proof from `audit prove`, without the log"
+    )
+    chk.add_argument("proof", type=Path, help="the proof file")
+    chk.add_argument(
+        "--signers",
+        type=Path,
+        help="the anchors repo's signers file you trust, to check the signature",
+    )
     anch = audit_sub.add_parser("anchor", help="sign and push a checkpoint to your anchors repo")
     anch.add_argument("--setup", action="store_true", help="create the keys and show what to do")
     log_cmd = audit_sub.add_parser("log", help="show records")
@@ -380,6 +394,11 @@ def build_parser() -> argparse.ArgumentParser:
     store = sub.add_parser("store", help="local storage (vault and keys)")
     store_sub = store.add_subparsers(dest="store_command", metavar="ACTION", required=True)
     store_sub.add_parser("info", help="database files, schema versions and counts")
+    store_sub.add_parser(
+        "encrypt", help="encrypt vault, keys and audit databases with SQLCipher (stop serve first)"
+    )
+    store_sub.add_parser("decrypt", help="turn SQLCipher encryption off again (stop serve first)")
+    store_sub.add_parser("passphrase", help="change the passphrase of the database key")
 
     priv = sub.add_parser("privacy", help="privacy settings")
     priv_sub = priv.add_subparsers(dest="privacy_command", metavar="ACTION", required=True)
@@ -484,7 +503,101 @@ def _cmd_store_info(args: argparse.Namespace) -> int:
             print(f"{name:6} {path}  {size / 1024:.0f} KiB  schema {rev} ({state})")
         for key, value in vault.stats().items():
             print(f"{key:14} {value}")
+    from cairnward.store import dbkey
+
+    state = "SQLCipher" + (" (key by reference)" if dbkey.configured_reference(paths) else "")
+    print(f"{'encryption':14} {state if dbkey.enabled(paths) else 'off (plain SQLite)'}")
     return 0
+
+
+def _new_passphrase(prompt: str) -> str:
+    import getpass
+
+    first = getpass.getpass(f"{prompt}: ")
+    if len(first) < 8:
+        raise SystemExit("cairnward: use at least 8 characters")
+    if getpass.getpass("Again: ") != first:
+        raise SystemExit("cairnward: the two passphrases differ")
+    return first
+
+
+def _cmd_store_crypt(args: argparse.Namespace) -> int:
+    """`store encrypt | decrypt | passphrase` (ADR-0019)."""
+    import getpass
+
+    from cairnward.audit import AuditLog
+    from cairnward.core.server import _already_running
+    from cairnward.store import Vault, dbkey
+    from cairnward.store.db import DatabaseKeyError, convert, is_encrypted
+
+    cfg = _load(args)
+    paths = cfg.paths
+    if args.store_command != "passphrase" and _already_running(cfg):
+        print("cairnward: stop `cairnward serve` first: the databases are rewritten",
+              file=sys.stderr)  # fmt: skip
+        return 1
+    files = [paths.data_dir / name for name in dbkey.DATABASES]
+    try:
+        if args.store_command == "passphrase":
+            if not dbkey.enabled(paths):
+                print("cairnward: the databases aren't encrypted", file=sys.stderr)
+                return 1
+            old = getpass.getpass("Current passphrase: ")
+            dbkey.rewrap(paths, old, _new_passphrase("New passphrase"))
+            with AuditLog.open(paths) as log:
+                log.append("store.passphrase", actor="user", outcome="ok")
+            print("Passphrase changed. The databases themselves are unchanged.")
+            return 0
+        if args.store_command == "encrypt":
+            if dbkey.enabled(paths):
+                print("cairnward: the databases are already encrypted", file=sys.stderr)
+                return 1
+            if not dbkey.pending_file(paths).exists():
+                Vault.open(paths).close()  # create and migrate them first, plain
+                AuditLog.open(paths).close()
+                print("The passphrase is asked whenever Cairnward starts. Without it (or the "
+                      "key) the vault, its keys and the audit log can't be opened "
+                      "again.")  # fmt: skip
+                passphrase = _new_passphrase("New passphrase for the databases")
+            else:
+                print("Finishing an encryption that was interrupted.")
+                passphrase = getpass.getpass("Its passphrase: ")
+            key = dbkey.begin(paths, passphrase)
+            for path in files:
+                if path.exists() and not is_encrypted(path):
+                    convert(path, key, encrypt=True)
+            dbkey.commit(paths, key)
+            mirror = paths.data_dir / "audit.jsonl"
+            mirror.unlink(missing_ok=True)  # a plaintext copy of the audit log
+            with AuditLog.open(paths) as log:
+                names = [p.name for p in files if p.exists()]
+                log.append("store.encrypted", actor="user", outcome="ok",
+                           details={"databases": names})  # fmt: skip
+            print("Encrypted: " + ", ".join(p.name for p in files if p.exists()) + ".")
+            print("audit.jsonl (the plaintext mirror) was removed; `audit log --json` exports.")
+            print("Old plaintext may remain in the disk's free space: full-disk encryption is "
+                  "still advised.")  # fmt: skip
+            return 0
+        # decrypt
+        if not dbkey.enabled(paths):
+            print("cairnward: the databases aren't encrypted", file=sys.stderr)
+            return 1
+        db_key = dbkey.key_for(paths)
+        if db_key is None:  # pragma: no cover - enabled() was checked
+            return 1
+        with AuditLog.open(paths) as log:
+            log.append("store.decrypted", actor="user", outcome="ok")
+        for path in files:
+            if path.exists() and is_encrypted(path):
+                convert(path, db_key, encrypt=False)
+        dbkey.key_file(paths).unlink()
+        dbkey.forget(paths)
+        AuditLog.open(paths).close()  # writes the plaintext mirror again
+        print("Decrypted. The databases are plain SQLite again.")
+        return 0
+    except DatabaseKeyError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
 
 
 def _parse_expect(values: list[str]) -> list[tuple[int, str]]:
@@ -500,6 +613,8 @@ def _parse_expect(values: list[str]) -> list[tuple[int, str]]:
 def _cmd_audit(args: argparse.Namespace) -> int:
     from cairnward.audit import AuditLog
 
+    if args.audit_command == "check-proof":  # works anywhere: needs neither log nor config
+        return _audit_check_proof(args)
     paths = default_paths(args.config_dir)
     with AuditLog.open(paths) as log:
         if args.audit_command == "head":
@@ -508,12 +623,15 @@ def _cmd_audit(args: argparse.Namespace) -> int:
             return 0
         if args.audit_command == "anchor":
             return _audit_anchor(args, log)
+        if args.audit_command == "prove":
+            return _audit_prove(args, log)
         if args.audit_command == "verify":
             res = log.verify(_parse_expect(args.expect))
             for note in res.notes:
                 print(f"note: {note}")
             if res.ok:
-                print(f"OK: {res.records} records, chain and mirror intact.")
+                what = "chain intact" if log.mirror is None else "chain and mirror intact"
+                print(f"OK: {res.records} records, {what}.")
                 print(f"Head {res.head_seq}:{res.head_hash}")
                 return _audit_verify_anchors(args, log) if args.anchors else 0
             print(
@@ -593,6 +711,53 @@ def _audit_anchor(args: argparse.Namespace, log: Any) -> int:
     return 0
 
 
+def _audit_prove(args: argparse.Namespace, log: Any) -> int:
+    import json
+
+    from cairnward.audit.anchor import Anchorer, AnchorError, make_proof
+
+    cfg = _load(args)
+    try:
+        bundle = make_proof(Anchorer(cfg.paths, cfg.main.anchor), log, args.seq)
+    except AnchorError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    text = json.dumps(bundle, indent=1, sort_keys=True) + "\n"
+    if args.out:
+        args.out.write_text(text, encoding="utf-8")
+        print(f"proof for record {args.seq} in the checkpoint at seq {bundle['size']}: {args.out}")
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def _audit_check_proof(args: argparse.Namespace) -> int:
+    import json
+
+    from cairnward.audit.anchor import check_proof
+
+    try:
+        bundle = json.loads(args.proof.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"cairnward: can't read {args.proof}: {exc}", file=sys.stderr)
+        return 1
+    problems = check_proof(bundle if isinstance(bundle, dict) else {}, args.signers)
+    unsigned = [p for p in problems if p.startswith("signature not checked")]
+    if problems and problems != unsigned:
+        print("proof FAILED:", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+    rec = bundle["record"]
+    print(f"OK: record {rec['seq']} ({rec['action']}, {rec['ts']}) is in the checkpoint at seq "
+          f"{bundle['size']}, signed {bundle['checkpoint']['payload'].get('ts')}")  # fmt: skip
+    if unsigned:
+        print(f"note: {unsigned[0]}")
+        return 2
+    print("signature OK")
+    return 0
+
+
 def _audit_verify_anchors(args: argparse.Namespace, log: Any) -> int:
     from cairnward.audit.anchor import Anchorer, AnchorError
 
@@ -608,6 +773,9 @@ def _audit_verify_anchors(args: argparse.Namespace, log: Any) -> int:
         if res.timestamped:
             print(f"timestamps OK: {res.timestamped} checkpoint(s) timestamped by the authority, "
                   f"the last at {res.last_tsa_time}")  # fmt: skip
+        if res.merkle_roots:
+            print(f"Merkle roots OK: {res.merkle_roots} checkpoint(s) match the log, each "
+                  "extending the one before")  # fmt: skip
         return 0
     print(f"anchors FAILED: {len(res.problems)} problem(s)", file=sys.stderr)
     for problem in res.problems:
@@ -682,7 +850,7 @@ def _cmd_egress(args: argparse.Namespace) -> int:
     import asyncio
 
     from cairnward.audit import AuditLog, enabled_for, record_settings
-    from cairnward.egress import EgressProxy, Session, Sessions
+    from cairnward.egress import Session, Sessions
     from cairnward.policy import DenyApprover, PolicyEngine, TerminalApprover
 
     cfg = _load(args)
@@ -696,7 +864,11 @@ def _cmd_egress(args: argparse.Namespace) -> int:
         engine = PolicyEngine(cfg, approver=approver, audit=log)
         sessions = Sessions()
         token = sessions.create(Session(environment=env, client=args.client, actor="user"))
-        proxy = EgressProxy(cfg, engine, sessions, port=args.port)
+        from cairnward.core.server import sockets
+        from cairnward.egress.rust import make_egress
+
+        proxy = make_egress(cfg, engine, sessions, port=args.port,
+                            socket_dir=sockets(cfg)["egress"].parent)  # fmt: skip
 
         async def run() -> None:
             port = await proxy.start()
@@ -1656,6 +1828,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "privacy":
             return _cmd_privacy_show(args)
         if args.command == "store":
+            if args.store_command in ("encrypt", "decrypt", "passphrase"):
+                return _cmd_store_crypt(args)
             return _cmd_store_info(args)
         if args.command == "audit":
             return _cmd_audit(args)

@@ -21,7 +21,7 @@ Deletion options: overwrite + VACUUM (best effort) vs **crypto-shredding** (encr
 - Locked: the chat key is wrapped with the passphrase (age scrypt recipient) and optionally a recovery key; passphrase changes re-wrap only.
 - Artifacts have a separate key, locked separately.
 - Purge = destroy the key.
-- SQLCipher stays an optional Phase 3 "encrypt everything" mode.
+- SQLCipher stays an optional Phase 3 "encrypt everything" mode. ("Phase 3" is now "Later" in [spec §9](../spec.md#9-delivery-plan-summary), with no date.)
 
 ## Consequences
 - Reliable deletion for chat records regardless of lock state.

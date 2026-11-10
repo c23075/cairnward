@@ -117,10 +117,12 @@ def _resolver(host: str, port: int) -> list[str]:
 @given(data=st.data())
 def test_fuzz_egress_requests(start: Callable[..., Running], origin: int,  # noqa: F811
                               asyncio_errors: Errors, data: st.DataObject) -> None:  # fmt: skip
-    running = getattr(test_fuzz_egress_requests, "_running", None)
-    if running is None or running.proxy is None:
-        running = start('network = "open"', resolver=_resolver)
-        test_fuzz_egress_requests._running = running  # type: ignore[attr-defined]
+    # one proxy per fixture instance (the Python and the Rust data path each get their own)
+    cached = getattr(test_fuzz_egress_requests, "_running", None)
+    if cached is None or cached[0] is not start:
+        cached = (start, start('network = "open"', resolver=_resolver))
+        test_fuzz_egress_requests._running = cached  # type: ignore[attr-defined]
+    running = cached[1]
     request = data.draw(st.one_of(proxy_requests(running.auth), st.binary(max_size=300)))
     reply = _ask(running, request)
     complete = b"\r\n\r\n" in request

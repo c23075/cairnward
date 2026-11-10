@@ -20,6 +20,10 @@ disagree with the code, the code was checked, and this page follows it.
   - It has never run on real WSL2, so Windows support is unproven (A1, I19).
   - A real backup has never been restored (A5).
   - The release and signing workflow has never run on GitHub (A8).
+  - The egress proxy and audit log, the most security-critical parts, are Python with a large
+    dependency tree (hash-locked). A Rust data path exists as an opt-in (`[egress] implementation = "rust"`, ADR-0020): measured at the same cost and reviewed, but not yet run for real outside tests (A18). The audit writer stays in Python by decision (D81), with an independent Rust verifier.
+  - The threat model maps to the OWASP Top 10 for LLM Applications, not yet to the Top 10 for
+    Agentic Applications ([landscape.md](landscape.md)).
   - See the status page's testing lists for the full picture.
 - **Isolation is Linux-only.** The OS sandbox (srt, bubblewrap) runs on Linux, and on Windows only
   through WSL2. On other systems, or with `isolation = "off"`, every network and file rule is
@@ -53,9 +57,13 @@ disagree with the code, the code was checked, and this page follows it.
   - It checks method and path, but passes request bodies on without redacting them.
   - It offers only HTTP/1.1, and doesn't read WebSocket messages after the upgrade.
   - It breaks tools that pin certificates or ignore `SSL_CERT_FILE` (I27, I30).
-  - Its CA key could impersonate any site to the tools that trust it (T-33).
+  - Its CA key could impersonate any site to the tools that trust it (T-33). Sandboxed runs
+    can't read it, but with isolation off an agent running as you can (I37).
 - **Plain HTTP is allowed in two places,** with a warning or an audit record but no requirement
   to encrypt: to backends on your local network (I3), and from tools to allowed hosts (I4).
+- **The gateway doesn't check `Origin`,** so desktop apps that send one keep working. A web page
+  is still refused by the `Host` check, the API keys and the absence of CORS headers (spec §4.1,
+  T-01, I38). The dashboard does check `Origin`.
 - **Programs that aren't sandboxed** can reach local model servers, such as Ollama on
   127.0.0.1:11434, directly, bypassing Cairnward (spec §3.2). That includes chat clients not run
   in the provided containers.
@@ -85,8 +93,15 @@ disagree with the code, the code was checked, and this page follows it.
 **The vault**
 - **Unlocked conversations aren't protected from someone with the disk.** Each conversation's
   key sits unwrapped in `keys.db`, on the same disk as the vault. Per-conversation encryption is
-  there to make deletion reliable (crypto-shredding). Only two things keep the data from someone
-  who has the disk: locking a conversation with a passphrase, and full-disk encryption (A7).
+  there to make deletion reliable (crypto-shredding). Three things keep the data from someone
+  who has the disk: locking a conversation with a passphrase, database encryption (`store
+  encrypt`, D80, off by default and Linux x86-64 only), and full-disk encryption (A7).
+- **With database encryption on,** the files are protected only while Cairnward isn't running
+  with the key in memory, and only as well as the passphrase. A `[storage] key` reference is as
+  safe as wherever it points (an `env:` reference stays readable in that process's `/proc`). While
+  a backup runs, a plain export with unlocked conversations' keys is held in memory, or on disk
+  where there's no memory folder (I40). Earlier plaintext stays in the disk's free space and in older
+  backups, and the audit log has no plaintext mirror to cross-check against.
 - **With `crypto_shred = "off"`** (the Open preset), conversation bodies and titles are stored as
   plain text.
 - **Metadata stays readable** even when content is encrypted: when a conversation was created
@@ -136,6 +151,8 @@ disagree with the code, the code was checked, and this page follows it.
   - Even with anchoring, records newer than the last anchor (up to an hour by default) can be
     changed by someone controlling the machine.
   - Timestamps come from the machine's clock unless a timestamp server is set (`tsa_url`).
+  - Merkle checkpoints (D79) let one record be checked against a signed checkpoint without the
+    log, but only for records the checkpoint covers; they don't protect newer ones.
 - **Auditing can be switched off** like any protection. Then only settings snapshots and
   `audit.disabled` / `audit.enabled` markers are written.
 
@@ -150,5 +167,8 @@ disagree with the code, the code was checked, and this page follows it.
 - **You can weaken any protection.** Each setting is switchable by design (D55). Weakening it is
   shown (badge, `privacy show`, dashboard) and audited, but not prevented. Nothing stops the
   machine's owner from loosening policy.
+- **A client's own API key can name any environment** in the model it asks for
+  (`cw/<environment>:<effort>`), and so pick a more open privacy level. Only run keys from
+  `cairnward run` and plugins are pinned to one environment (spec §4.1, I39).
 - **The configuration is plain files in your config folder.** There's no central policy, signing
   or enforcement across machines.

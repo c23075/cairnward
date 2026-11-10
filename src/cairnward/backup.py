@@ -1,7 +1,9 @@
 """Encrypted backups with restic (spec §4.8, FR-SYNC-1/3/6/8; ADR-0007 as amended by D50).
 
 What a snapshot holds: not the live database files but a **per-conversation export** built
-in a staging folder (`<state>/backup/staging`):
+in a staging folder, in memory when it can be (`$XDG_RUNTIME_DIR/cairnward-backup-staging`, a
+fixed name so restic's snapshots stay incremental), else `<state>/backup/staging`. It's removed
+when the run ends, even after a failure (threat-model review 2026-11-10, I40):
 
     conversations/<id>/conversation.json   the conversation row and its messages, exactly as
                                            stored (ciphertext when encrypted)
@@ -278,8 +280,17 @@ def _rows(conn: sqlite3.Connection, sql: str, *params: Any) -> list[dict[str, An
     return [{c: _jsonable(v) for c, v in zip(cols, row, strict=True)} for row in cur]
 
 
-def _ro(path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+def _ro(path: Path, key: bytes | None = None) -> Any:
+    from cairnward.store.db import connect
+
+    return connect(path, key, readonly=True)
+
+
+def _db_key(cfg: Config) -> bytes | None:
+    """The SQLCipher key when the databases are encrypted (ADR-0019), else None."""
+    from cairnward.store import dbkey
+
+    return dbkey.key_for(cfg.paths)
 
 
 def _copy_plugin(source: Path, dest: Path) -> None:
@@ -298,10 +309,14 @@ def _copy_plugin(source: Path, dest: Path) -> None:
             shutil.copy2(path, target)
 
 
-def _copy_db(src: Path, dst: Path) -> None:
+def _copy_db(src: Path, dst: Path, key: bytes | None = None) -> None:
+    """A consistent copy, even while Cairnward writes. An encrypted database stays encrypted
+    with the same key."""
+    from cairnward.store.db import connect
+
     dst.parent.mkdir(parents=True, exist_ok=True)
-    with contextlib.closing(_ro(src)) as s, contextlib.closing(sqlite3.connect(dst)) as d:
-        s.backup(d)  # a consistent copy, even while Cairnward writes
+    with contextlib.closing(_ro(src, key)) as s, contextlib.closing(connect(dst, key)) as d:
+        s.backup(d)
 
 
 def stage(cfg: Config, dest: Path) -> dict[str, Any]:
@@ -316,11 +331,12 @@ def stage(cfg: Config, dest: Path) -> dict[str, Any]:
         dest.chmod(0o700)
     counts: dict[str, int] = {"conversations": 0, "messages": 0}
     vault_db, keys_db = data / "vault.db", data / "keys.db"
+    key = _db_key(cfg)
     if vault_db.exists():
         with (
-            contextlib.closing(_ro(vault_db)) as v,
+            contextlib.closing(_ro(vault_db, key)) as v,
             contextlib.closing(
-                _ro(keys_db) if keys_db.exists() else sqlite3.connect(":memory:")
+                _ro(keys_db, key) if keys_db.exists() else sqlite3.connect(":memory:")
             ) as k,
         ):
             v.execute("BEGIN")  # one consistent read
@@ -355,7 +371,12 @@ def stage(cfg: Config, dest: Path) -> dict[str, Any]:
             if server.kind == "plugin" and (data / "mcp" / name).is_dir():
                 _copy_plugin(data / "mcp" / name, dest / "plugins" / name)
     if (data / "audit.db").exists():
-        _copy_db(data / "audit.db", dest / "audit" / "audit.db")
+        _copy_db(data / "audit.db", dest / "audit" / "audit.db", key)
+    from cairnward.store import dbkey
+
+    if dbkey.enabled(cfg.paths):  # the encrypted audit copy needs it; it's passphrase-wrapped
+        (dest / "audit").mkdir(exist_ok=True)
+        shutil.copy2(dbkey.key_file(cfg.paths), dest / "audit" / dbkey.KEY_FILE)
     if (data / "audit.jsonl").exists():
         shutil.copy2(data / "audit.jsonl", dest / "audit" / "audit.jsonl")
     if b.include_artifacts and (data / "artifacts").is_dir():
@@ -380,6 +401,15 @@ def snapshots(cfg: Config) -> list[dict[str, Any]]:
     return sorted(json.loads(out or "[]"), key=lambda s: s["time"])
 
 
+def staging_dir(cfg: Config) -> tuple[Path, bool]:
+    """Where the plain export is built, and whether that's memory-backed."""
+    if cfg.main.backup.staging == "memory":
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime and Path(runtime).is_dir():
+            return Path(runtime) / "cairnward-backup-staging", True
+    return backup_dir(cfg) / "staging", False
+
+
 def last_run(cfg: Config) -> dict[str, Any] | None:
     f = backup_dir(cfg) / "last.json"
     with contextlib.suppress(OSError, ValueError):
@@ -394,15 +424,26 @@ def run(cfg: Config, log: Log = print) -> dict[str, Any]:
     with _locked(cfg):
         started = time.monotonic()
         _process_purges(cfg, log)
-        staging = backup_dir(cfg) / "staging"
-        manifest = stage(cfg, staging)
-        log(f"backing up {manifest['conversations']} conversations ...")
+        from cairnward.artifacts import remove_tree
+
+        staging, in_memory = staging_dir(cfg)
+        for leftover in {backup_dir(cfg) / "staging", staging}:  # from a run that crashed
+            if leftover.exists():
+                remove_tree(leftover)
+        if not in_memory and cfg.main.backup.staging == "memory":
+            log("warning: no memory-backed folder ($XDG_RUNTIME_DIR): the backup's plain export "
+                "is built on the disk while it runs")  # fmt: skip
         try:
+            manifest = stage(cfg, staging)
+            log(f"backing up {manifest['conversations']} conversations ...")
             res = run_restic(cfg, "backup", "--json", "--host", HOST, "--tag", TAG, ".",
                              cwd=staging)  # fmt: skip
         except BackupError as exc:
             _audit(cfg, "backup.run", "error", error=str(exc)[:300])
             raise
+        finally:
+            if staging.exists():
+                remove_tree(staging)  # plain files: never left lying around, success or not
         summary: dict[str, Any] = {}
         for line in res.stdout.splitlines():
             with contextlib.suppress(ValueError):
@@ -414,9 +455,6 @@ def run(cfg: Config, log: Log = print) -> dict[str, Any]:
                    "--keep-daily", str(b.keep_daily), "--keep-weekly", str(b.keep_weekly),
                    "--keep-monthly", str(b.keep_monthly), "--keep-last", "1")  # fmt: skip
         apply_access(cfg)
-        from cairnward.artifacts import remove_tree
-
-        remove_tree(staging)  # the export is plain files; don't leave it lying around
         result = {"snapshot": summary.get("snapshot_id", "")[:12],
                   "conversations": manifest["conversations"],
                   "files": summary.get("total_files_processed"),
@@ -582,8 +620,11 @@ def import_conversations(cfg: Config, export: Path) -> dict[str, int]:
     Vault.open(cfg.paths).close()  # make sure the databases exist and are migrated
     data = cfg.paths.data_dir
     added = skipped = 0
-    with contextlib.closing(sqlite3.connect(data / "vault.db")) as v, contextlib.closing(
-            sqlite3.connect(data / "keys.db")) as k:  # fmt: skip
+    from cairnward.store.db import connect
+
+    db_key = _db_key(cfg)
+    with contextlib.closing(connect(data / "vault.db", db_key)) as v, contextlib.closing(
+            connect(data / "keys.db", db_key)) as k:  # fmt: skip
         folders_file = export / "vault" / "folders.json"
         if folders_file.exists():
             for row in json.loads(folders_file.read_text(encoding="utf-8")):
@@ -618,7 +659,9 @@ def import_files(cfg: Config, export: Path) -> dict[str, int]:
     or not at all: what's already here is left alone, and a purged conversation's artifacts stay
     gone, even from a backup taken before the purge."""
     data = cfg.paths.data_dir
-    with contextlib.closing(sqlite3.connect(data / "vault.db")) as v:
+    from cairnward.store.db import connect
+
+    with contextlib.closing(connect(data / "vault.db", _db_key(cfg))) as v:
         kept = {r[0] for r in v.execute("SELECT id FROM conversations WHERE purged_at IS NULL")}
     wanted: list[tuple[Path, Path]] = []
     for folder in sorted((export / "artifacts").glob("*/*")):

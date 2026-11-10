@@ -10,6 +10,12 @@ Keys are OpenSSH Ed25519 keys made with ssh-keygen (no extra Python dependency):
 "cairnward-anchor"). The repo holds, per installation, `signers` (the public signing
 key) and `checkpoints.jsonl`.
 
+Since 2026-11-10 each checkpoint (`"v": 2`) also signs `root`, the RFC 9162 Merkle root over
+records 1..seq (merkle.py). Verifying then also recomputes each root from the log and checks that
+every checkpoint's tree extends the one before (a consistency proof), and `cairnward audit prove`
+can show one record is in an anchored checkpoint without handing over the rest of the log.
+Version 1 checkpoints (hash only) still verify as before.
+
 Honest limit: someone in full control of this machine can alter records newer than the
 last anchor, or stop anchoring; the gap shows as missing or late anchors.
 """
@@ -27,6 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from cairnward.audit import merkle
 from cairnward.audit.log import AuditLog
 from cairnward.config.models import AnchorConfig
 from cairnward.config.paths import Paths
@@ -55,6 +62,7 @@ class AnchorResult:
     unanchored: int = 0
     timestamped: int = 0  # checkpoints with a verified RFC 3161 timestamp
     last_tsa_time: str | None = None
+    merkle_roots: int = 0  # checkpoints whose Merkle root matched the log
     problems: list[str] = field(default_factory=list)
 
 
@@ -182,7 +190,8 @@ class Anchorer:
         pub = self.sign_key.with_suffix(".pub").read_text().strip()
         if not signers.exists():
             signers.write_text(f"{IDENTITY} {pub}\n")
-        payload = {"v": 1, "install": install, "seq": seq, "hash": head,
+        payload = {"v": 2, "install": install, "seq": seq, "hash": head,
+                   "root": merkle.root(log.hashes(seq)),
                    "ts": datetime.now(UTC).isoformat(timespec="seconds")}  # fmt: skip
         text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         entry = {"payload": payload, "sig": self._sign(text)}
@@ -204,6 +213,27 @@ class Anchorer:
         return payload
 
     @staticmethod
+    def _check_root(log: AuditLog, seq: int, signed_root: str,
+                    previous: tuple[int, str] | None) -> str | None:  # fmt: skip
+        """Why a v2 checkpoint's Merkle root fails, or None: it must match the log's records
+        1..seq, and its tree must extend the previous checkpoint's (RFC 9162 consistency)."""
+        hashes = log.hashes(seq)
+        if len(hashes) != seq:
+            return f"seq {seq}: the log has {len(hashes)} records up to it, so some are missing"
+        try:
+            if merkle.root(hashes) != signed_root:
+                return f"seq {seq}: the Merkle root differs from its anchor: the log was altered"
+            if previous is not None:
+                old_seq, old_root = previous
+                proof = merkle.consistency_proof(old_seq, hashes)
+                if not merkle.verify_consistency(old_seq, seq, old_root, signed_root, proof):
+                    return (f"seq {seq}: its tree doesn't extend the checkpoint at seq "
+                            f"{old_seq}: anchored history was rewritten")  # fmt: skip
+        except merkle.ProofError as exc:
+            return f"seq {seq}: malformed Merkle data ({exc})"
+        return None
+
+    @staticmethod
     def _entries(path: Path) -> list[dict[str, Any]]:
         if not path.exists():
             return []
@@ -215,6 +245,12 @@ class Anchorer:
                 out.append({"payload": {}, "sig": "", "broken": line[:80]})
         return out
 
+    def checkpoints(self) -> tuple[Path, list[dict[str, Any]]]:
+        """The signers file and every checkpoint entry for this installation (after a sync)."""
+        self._sync()
+        signers, checkpoints = self._files()
+        return signers, self._entries(checkpoints)
+
     def verify(self, log: AuditLog) -> AnchorResult:
         self._sync()
         signers, checkpoints = self._files()
@@ -224,6 +260,7 @@ class Anchorer:
         local_pub = self.sign_key.with_suffix(".pub").read_text().split()[:2]
         if signers.read_text().split()[1:3] != local_pub:
             result.problems.append("the repo's signing key differs from this machine's")
+        previous: tuple[int, str] | None = None  # the last checkpoint with a verified root
         for entry in self._entries(checkpoints):
             payload = entry.get("payload") or {}
             text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -250,8 +287,77 @@ class Anchorer:
                 result.problems.append(f"seq {seq} was anchored but is missing from the log")
             elif rec.hash != payload.get("hash"):
                 result.problems.append(f"seq {seq} differs from its anchor: the log was altered")
+            if "root" in payload and isinstance(seq, int):
+                problem = self._check_root(log, seq, str(payload["root"]), previous)
+                if problem:
+                    result.problems.append(problem)
+                else:
+                    result.merkle_roots += 1
+                    previous = (seq, str(payload["root"]))
         head_seq, _ = log.head()
         if result.last_seq is not None:
             result.unanchored = max(0, head_seq - int(result.last_seq))
         result.ok = not result.problems
         return result
+
+
+# ------------------------------------------------------------------ inclusion proofs
+
+PROOF_FORMAT = "cairnward-inclusion-proof-1"
+
+
+def make_proof(anchorer: Anchorer, log: AuditLog, seq: int) -> dict[str, Any]:
+    """A self-contained proof that record `seq` is in the latest anchored checkpoint: the
+    record (metadata and digests only, as in the log), its Merkle audit path, and the signed
+    checkpoint. Someone holding it and the signers file can check it without the log."""
+    rec = log.at(seq)
+    if rec is None:
+        raise AnchorError(f"there is no record {seq}")
+    signers, entries = anchorer.checkpoints()
+    covering = [e for e in entries
+                if not e.get("broken") and "root" in (e.get("payload") or {})
+                and e["payload"].get("seq", 0) >= seq]  # fmt: skip
+    if not covering:
+        raise AnchorError(f"no checkpoint with a Merkle root covers record {seq} yet: "
+                          "run `cairnward audit anchor` first")  # fmt: skip
+    entry = covering[-1]
+    size = int(entry["payload"]["seq"])
+    hashes = log.hashes(size)
+    if len(hashes) != size or merkle.root(hashes) != entry["payload"]["root"]:
+        raise AnchorError(f"the log no longer matches the checkpoint at seq {size}: run "
+                          "`cairnward audit verify --anchors`")  # fmt: skip
+    from dataclasses import asdict
+
+    return {"format": PROOF_FORMAT, "record": asdict(rec), "index": seq - 1, "size": size,
+            "proof": merkle.inclusion_proof(seq - 1, hashes), "checkpoint": entry,
+            "signers": signers.read_text().strip() if signers.exists() else None}  # fmt: skip
+
+
+def check_proof(bundle: dict[str, Any], signers: Path | None = None) -> list[str]:
+    """Problems with a proof from make_proof; empty when it holds. Needs no log or config.
+    The signature is checked only against a signers file the checker trusts (`signers`):
+    the copy inside the bundle came with it, so it proves nothing on its own."""
+    from cairnward.audit.log import AuditRecord
+
+    problems: list[str] = []
+    if bundle.get("format") != PROOF_FORMAT:
+        return [f"not a Cairnward inclusion proof (format {bundle.get('format')!r})"]
+    try:
+        rec = AuditRecord(**bundle["record"])
+        payload = bundle["checkpoint"]["payload"]
+        index, size = int(bundle["index"]), int(bundle["size"])
+        if rec.compute_hash() != rec.hash:
+            problems.append("the record's fields don't match its hash: it was edited")
+        if index != rec.seq - 1 or size != int(payload["seq"]):
+            problems.append("the proof's position or size doesn't match the record and checkpoint")
+        if not merkle.verify_inclusion(rec.hash, index, size, bundle["proof"], payload["root"]):
+            problems.append("the record isn't in the checkpoint's Merkle tree")
+    except (KeyError, TypeError, ValueError) as exc:
+        return [f"malformed proof: {type(exc).__name__}: {str(exc)[:120]}"]
+    if signers is None:
+        problems.append("signature not checked: pass the signers file you trust (--signers)")
+    else:
+        text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        if not Anchorer._verify_sig(signers, text, str(bundle["checkpoint"].get("sig", ""))):
+            problems.append("the checkpoint's signature doesn't verify with that signers file")
+    return problems

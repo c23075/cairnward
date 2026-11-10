@@ -52,6 +52,35 @@ jobs:
         if: runner.os == 'Linux'
         run: uv run coverage json -o coverage.json && uv run python scripts/check_coverage.py coverage.json
 
+  rust:
+    # ADR-0020: the Rust egress data path, checked against the Python one it replaces
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain (pinned; rustup is on the runner image)
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.97.0
+      - name: Known vulnerabilities, unmaintained or yanked crates (RustSec advisory database)
+        working-directory: rust
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit --deny warnings
+      - working-directory: rust
+        run: cargo fmt --all --check
+      - working-directory: rust
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - working-directory: rust
+        run: cargo test --locked
+      - working-directory: rust
+        run: cargo build --locked
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uv sync
+      - name: Rust and Python agree (differential tests, and every egress test on both paths)
+        run: uv run pytest -q tests/test_egress_rust.py tests/test_egress.py tests/test_egress_decisions.py tests/test_egress_rust_runner.py tests/test_tls_inspection.py tests/test_audit_rust.py
+
   test-debian:
     runs-on: ubuntu-24.04
     container: python:3.12-slim-bookworm  # Debian 12
@@ -137,6 +166,10 @@ jobs:
         run: spikes/t06-sandbox/run_spike.sh
       - name: Chaining to the egress proxy
         run: spikes/t06-sandbox/run_chain.sh
+      - name: Build the Rust egress data path (ADR-0020), so serve can run it too
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          cargo +1.97.0 build --locked --manifest-path rust/Cargo.toml
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Isolated serve + cairnward run + plugins, end to end
         env:

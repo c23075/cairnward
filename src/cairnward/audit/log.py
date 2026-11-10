@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -165,19 +166,28 @@ class AuditLog:
     def __init__(
         self,
         engine: Engine,
-        mirror: Path,
+        mirror: Path | None,
         enabled_for: Callable[[str | None], bool] | None = None,
     ):
         self._engine = engine
         self.mirror = mirror
         self.enabled_for = enabled_for or (lambda _env: True)
         self._writer = engine.execution_options(isolation_level="AUTOCOMMIT")
+        # Appenders in this process queue here, without a time limit, before SQLite's lock: a
+        # slow fsync under load once made them wait past busy_timeout and fail with "database is
+        # locked", dropping the connection they were recording (found by bench_egress.py).
+        self._appending = threading.Lock()
 
     @classmethod
     def open(cls, paths: Paths, enabled_for: Callable[[str | None], bool] | None = None) -> Self:
-        engine = make_engine(paths.data_dir / "audit.db")
+        from cairnward.store import dbkey
+
+        key = dbkey.key_for(paths)
+        engine = make_engine(paths.data_dir / "audit.db", key)
         upgrade(engine, "audit")
-        log = cls(engine, paths.data_dir / "audit.jsonl", enabled_for)
+        # An encrypted log keeps no plaintext mirror: it would hold everything the encryption
+        # hides (ADR-0019). Export with `audit log --json` instead.
+        log = cls(engine, None if key else paths.data_dir / "audit.jsonl", enabled_for)
         log.sync_mirror()
         return log
 
@@ -194,8 +204,9 @@ class AuditLog:
 
     @contextmanager
     def _write_lock(self) -> Iterator[Connection]:
-        """SQLite's write lock serialises appenders across processes (BEGIN IMMEDIATE)."""
-        with self._writer.connect() as conn:
+        """One appender at a time: a lock within this process, then SQLite's write lock across
+        processes (BEGIN IMMEDIATE; the outer process and the isolated core share the file)."""
+        with self._appending, self._writer.connect() as conn:
             conn.exec_driver_sql("BEGIN IMMEDIATE")
             try:
                 yield conn
@@ -291,6 +302,8 @@ class AuditLog:
     # ------------------------------------------------------------------ mirror
 
     def _mirror_last_seq(self) -> int:
+        if self.mirror is None:
+            return 0
         if not self.mirror.exists() or self.mirror.stat().st_size == 0:
             return 0
         with self.mirror.open("rb") as fh:
@@ -309,6 +322,8 @@ class AuditLog:
             raise AuditError(f"{self.mirror}: last line is not a valid record") from None
 
     def _append_mirror(self, records: list[AuditRecord]) -> None:
+        if self.mirror is None:
+            return
         self.mirror.parent.mkdir(parents=True, exist_ok=True)
         with self.mirror.open("a", encoding="utf-8") as fh:
             for r in records:
@@ -318,6 +333,8 @@ class AuditLog:
 
     def _sync_mirror_locked(self, conn: Connection) -> None:
         """Bring audit.jsonl up to date with audit.db (e.g. after a crash between the two)."""
+        if self.mirror is None:
+            return
         mirror_seq = self._mirror_last_seq()
         rows = conn.execute(
             select(audit_records)
@@ -372,6 +389,13 @@ class AuditLog:
             row = conn.execute(query).first()
         return _row_to_record(row) if row else None
 
+    def hashes(self, upto: int) -> list[str]:
+        """Record hashes for seq 1..upto, in order: the leaves of the Merkle tree (merkle.py)."""
+        query = (select(audit_records.c.hash).where(audit_records.c.seq <= upto)
+                 .order_by(audit_records.c.seq))  # fmt: skip
+        with self._engine.connect() as conn:
+            return [str(h) for (h,) in conn.execute(query).all()]
+
     def head(self) -> tuple[int, str]:
         rec = self.latest()
         return (rec.seq, rec.hash) if rec else (0, GENESIS)
@@ -412,7 +436,9 @@ class AuditLog:
                 problems.append("... stopping after 20 problems")
                 break
 
-        if len(records) == len(rows):
+        if self.mirror is None:
+            notes.append("no mirror file: the audit database is encrypted (ADR-0019)")
+        elif len(records) == len(rows):
             problems.extend(self._compare_mirror(records))
         for seq, h in expect or []:
             got = by_seq.get(seq)
@@ -426,6 +452,8 @@ class AuditLog:
         return VerifyResult(not problems, len(rows), head_seq, head_hash, problems, notes)
 
     def _compare_mirror(self, records: list[AuditRecord]) -> list[str]:
+        if self.mirror is None:
+            return []
         if not self.mirror.exists():
             return [f"{self.mirror}: mirror file missing"] if records else []
         lines = self.mirror.read_text(encoding="utf-8").splitlines()

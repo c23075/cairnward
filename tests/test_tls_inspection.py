@@ -187,9 +187,16 @@ class Proxy:
             threading.Event().wait(0.02)
 
 
-@pytest.fixture
-def start(tmp_path: Path) -> Iterator[Callable[..., Proxy]]:
+@pytest.fixture(params=["python", "rust"])
+def start(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Callable[..., Proxy]]:
+    """The Python data path, or the Rust one (ADR-0020 stage 3) with the same decisions."""
+    from cairnward.egress.rust import binary
+
+    impl: str = request.param
+    if impl == "rust" and binary() is None:
+        pytest.skip("Rust egress binary not built")
     running: list[tuple[asyncio.AbstractEventLoop, EgressProxy, AuditLog]] = []
+    procs: list[subprocess.Popen[str]] = []
 
     def _start(port: int, origin_ca: Path | None, inspection: str) -> Proxy:
         paths = Paths(tmp_path / "cfg", tmp_path / "data", tmp_path / "state")
@@ -211,12 +218,31 @@ def start(tmp_path: Path) -> Iterator[Callable[..., Proxy]]:
         sessions = Sessions()
         proxy = EgressProxy(cfg, engine, sessions, port=0, upstream_ssl=upstream)
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(proxy.start())
+        if impl == "python":
+            loop.run_until_complete(proxy.start())
+        else:
+            import tempfile
+
+            from cairnward.egress.decisions import DecisionService
+
+            sock = Path(tempfile.mkdtemp(prefix="cw-rt-", dir="/tmp")) / "d.sock"
+            loop.run_until_complete(DecisionService(proxy).start(sock))
+            roots = ["--upstream-roots", str(origin_ca)] if origin_ca is not None else []
+            proc = subprocess.Popen([str(binary()), "serve", "--listen", "127.0.0.1:0",
+                                     "--decisions", str(sock), *roots],
+                                    stdout=subprocess.PIPE, text=True)  # fmt: skip
+            procs.append(proc)
+            line = proc.stdout.readline() if proc.stdout else ""
+            assert line.startswith("listening "), line
+            proxy.port = int(line.split()[1])
         threading.Thread(target=loop.run_forever, daemon=True).start()
         running.append((loop, proxy, log))
         return Proxy(proxy, sessions, log, paths)
 
     yield _start
+    for proc in procs:
+        proc.terminate()
+        proc.wait(5)
     for loop, proxy, log in running:
         asyncio.run_coroutine_threadsafe(proxy.close(), loop).result(5)
         loop.call_soon_threadsafe(loop.stop)

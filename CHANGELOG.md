@@ -2,7 +2,36 @@
 
 ## Unreleased
 
+### Added
+- Merkle checkpoints (D79): each audit anchor also signs the RFC 9162 Merkle root over every
+  record so far, `audit verify --anchors` checks each root against the log and that each
+  checkpoint extends the last, and `audit prove` / `audit check-proof` show one record is in a
+  signed checkpoint without the rest of the log. Older checkpoints still verify.
+- Database encryption (D80, ADR-0019): `cairnward store encrypt | decrypt | passphrase` puts
+  vault.db, keys.db and audit.db under SQLCipher with a passphrase-wrapped key, asked at start.
+  An optional `[storage] key` reference allows unattended starts, with a warning. Needs the
+  `sqlcipher` extra, Linux x86-64 only. An encrypted audit log keeps no plaintext mirror.
+
+- `cairnward-audit-rs`, an independent Rust verifier for exported audit logs: record hashes,
+  the chain, Merkle roots and inclusion proofs (ADR-0020 stage 4, D81).
+- `scripts/bench_egress.py`: the Python and Rust data paths measured side by side.
+- CI audits the Rust crates against the RustSec advisory database (`cargo audit --deny
+  warnings`), and Dependabot watches `rust/Cargo.lock`.
+- An opt-in Rust egress data path, `[egress] implementation = "rust"` (ADR-0020, stage 2):
+  `cairnward-egress-rs` handles connections and asks the Python decision service for policy,
+  approvals and audit records. Every egress test runs against both paths. TLS inspection works in
+  the Rust path too (rustls), with certificates, request verdicts and records from Python.
+- The start of the Rust egress data path (ADR-0020, stage 1): a `rust/` workspace whose
+  address checks are compared with the Python ones on generated addresses in CI, and the
+  decision service (`egress/decisions.py`) a Rust data path will ask for policy and audit
+  records. Not used by `serve` yet.
+
 ### Security
+- The Rust data path's decision socket requires a secret, given to the binary on stdin: the
+  isolated core can reach any Unix socket and could otherwise have asked it for CA-signed
+  certificates (review 2026-11-10, T-39).
+- Backups build their plain export in memory (`$XDG_RUNTIME_DIR`) and remove it even when
+  restic fails; `[backup] staging = "disk"` keeps the old place (I40).
 - TLS inspection: method and path rules now match the normalized path (escaped unreserved
   characters decoded, `//`, `.` and `..` resolved), and a path with an encoded slash, backslash
   or NUL is refused. Each request must also be allowed when its path is read without `;`
@@ -11,6 +40,8 @@
   against the rule checker only.
 
 ### Fixed
+- Under load, an audit append could fail with "database is locked" after a slow `fsync`,
+  dropping the egress connection it was recording (I41, both data paths).
 - Host patterns (`network_allow_hosts`, `skip_hosts`, inspection rules) now match IPv6
   addresses written without a port, with or without brackets (`::1`, `[::1]`); before, only
   `[::1]:443` matched, so such an entry was ignored and the connection denied or asked about.

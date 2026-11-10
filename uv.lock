@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -168,6 +168,11 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+sqlcipher = [
+    { name = "sqlcipher3-binary", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "hypothesis" },
@@ -178,6 +183,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "sqlcipher3-binary", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
 [package.metadata]
@@ -190,8 +196,10 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.8" },
     { name = "pyrage", specifier = ">=1.2" },
     { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "sqlcipher3-binary", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'sqlcipher'", specifier = ">=0.6" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
+provides-extras = ["sqlcipher"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -203,6 +211,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-cov", specifier = ">=5" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "sqlcipher3-binary", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.6" },
 ]
 
 [[package]]
@@ -2056,6 +2065,16 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/8e/362e7ac1bc6e8a69d72620cc2acbda80a592021509dcc0c3abb2fcfe4c3a/sqlalchemy-2.1.8-cp315-cp315t-win_amd64.whl", hash = "sha256:ffe69b75459d90529f603d9594255c41d6a503f69220740510373374198735f6", size = 2515542, upload-time = "2026-11-04T01:54:55.764Z" },
     { url = "https://files.pythonhosted.org/packages/35/0f/f7afff708c464e9a35d429e3faaaebdc4d253b7230f8942a0acc4a4e0283/sqlalchemy-2.1.8-cp315-cp315t-win_arm64.whl", hash = "sha256:105a13be11045347a78e1599adbcdad895c32067696bca9ba02754ac32f82699", size = 2433845, upload-time = "2026-11-04T02:24:08.211Z" },
     { url = "https://files.pythonhosted.org/packages/a3/1e/6eba6770b626a991e58de306385d414b9f3ae780ae60c61aa1d0841dcaaf/sqlalchemy-2.1.8-py3-none-any.whl", hash = "sha256:69aea77b5d8a64e95d01fd7ec54985c84b4a8ef3cac3108e9271145441400c1b", size = 2067639, upload-time = "2026-11-04T01:30:31.914Z" },
+]
+
+[[package]]
+name = "sqlcipher3-binary"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/ff/de25662f378f0a5cedef2a5c1d9479db5a9bf7b6bff4fdb8e413869548ac/sqlcipher3_binary-0.6.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:c8a7076a18b4f6fc9b580b0f24aa526d6a47605b1e3e6491ee3e9f2977940d8e", size = 3247275, upload-time = "2025-12-31T16:40:31.593Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/ce/48fabcff1a441e1bc7d91aab00fc1ec398571238b7cf131a4fa73d6eebd2/sqlcipher3_binary-0.6.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:8a6afbdef7cbbb33b1228ce96edc1bfe7f15bdf2a5e8bdab87261ab52e4111e6", size = 3246980, upload-time = "2025-12-31T16:40:36.653Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/ce/fbe8da71656eefd5fd4db70cb6d7b5911ba34279985ee3c11476a1f8550d/sqlcipher3_binary-0.6.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f9bccb9e942a04bbf920714940c8f9e00134cd655b11ba4c6f1306bcc3504d6c", size = 3246791, upload-time = "2025-12-31T16:40:41.484Z" },
 ]
 
 [[package]]
