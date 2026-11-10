@@ -420,7 +420,7 @@ Implemented in T0.5: conversations live in `vault.db`, their keys in a separate 
 - **The key:** `<data_dir>/db-key.age`, the key wrapped with a passphrase (age scrypt, at least 8 characters).
   - **At start:** `serve` and every command that opens the databases ask for the passphrase on a terminal.
   - **Unattended starts:** `[storage] key = "env:NAME" | "keyring:NAME"` in cairnward.toml may hold the key itself (64 hex characters). This is a weakening: a warning from `serve`, `doctor` and the dashboard, recorded in settings snapshots.
-  - **Isolated mode:** the outer process passes the key to the sandboxed core in `CAIRNWARD_DATABASE_KEY`, which the core reads once and removes from its environment. Agents, MCP servers and plugins never inherit it.
+  - **Isolated mode:** the outer process writes the key to the sandboxed core's standard input, read once at start. It's never in an environment, which `/proc/<pid>/environ` would keep (review 2026-11-10, R1). An `env:` reference is removed from the environment once read, so programs started afterwards don't inherit it (R2). Agents, MCP servers and plugins never receive the key.
 - **Crash safety:** the wrapped key is saved as `db-key.age.pending` before any file is converted. Running `store encrypt` again finishes an interrupted run with the same passphrase.
 - **Other commands:** `store passphrase` changes the passphrase (the key and files stay the same); `store decrypt` turns it off; `store info` and `doctor` report the state.
 - **The audit mirror:** an encrypted audit log keeps no plaintext `audit.jsonl` mirror (it would hold what the encryption hides). Encrypting removes it, decrypting writes it again, and `audit verify` notes its absence. Export with `audit log --json`.
@@ -428,7 +428,7 @@ Implemented in T0.5: conversations live in `vault.db`, their keys in a separate 
 - **Platform:** needs the `sqlcipher` extra (`sqlcipher3-binary`), **Linux x86-64 only**.
 - **Cost, measured on the build machine:** vault writes about 20% slower, reading a conversation about 7% slower. Audit appends got faster, because the mirror file isn't written.
 - **Tested** with the real driver: content, schema and log targets absent from the files; wrong, missing and short keys refused; migrations, WAL and `secure_delete` on encrypted files; conversion both ways; an interrupted encryption finished; passphrase change; key by reference; the core's key read once and removed; backups of encrypted databases.
-- **Not yet tried:** isolated mode with the real sandbox (not installed here); replication with encrypted databases.
+- **Tested in isolated mode with the real sandbox** (`tests/isolation/test_encrypted_storage.py`): the core opens the encrypted databases, and the key is in no core or wrapper process's `/proc/<pid>/environ`. **Not yet tried:** replication with encrypted databases.
 - **Limits:** converting doesn't erase earlier plaintext from the disk's free space or old backups, so full-disk encryption is still advised. Tools that read the files directly stop working.
 
 ### 5.6 Supply chain

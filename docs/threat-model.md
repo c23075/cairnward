@@ -1,6 +1,6 @@
 # Cairnward threat model
 
-Status: Draft v0.5, reviewed 2026-11-09 for path-rule matching under TLS inspection and IPv6 host patterns ([review](reviews/threat-model-2026-11-09.md); before that [2026-11-05](reviews/threat-model-2026-11-05.md), [2026-11-03](reviews/threat-model-2026-11-03.md); earlier versions in git history)
+Status: Draft v0.6, reviewed 2026-11-10 for database encryption and Merkle checkpoints ([review](reviews/threat-model-2026-11-10.md); before that [2026-11-09](reviews/threat-model-2026-11-09.md), [2026-11-05](reviews/threat-model-2026-11-05.md), [2026-11-03](reviews/threat-model-2026-11-03.md); earlier versions in git history)
 Method: **STRIDE** (security) and **LINDDUN** (privacy) applied to the components and data flows in [spec §3](spec.md#3-architecture), with every control mapped to the **OWASP Top 10 for LLM Applications (2025)**. Each threat has an ID; controls point to spec sections and requirement IDs in [requirements.md](requirements.md).
 
 Review this document whenever a component, data flow or trust boundary changes, and at least once per milestone. Record each review in [`reviews/`](reviews/). A control marked *planned* doesn't exist yet.
@@ -16,7 +16,7 @@ Review this document whenever a component, data flow or trust boundary changes, 
 | A1 | Chat content (messages, attachments, memory) | Private research, code, personal data |
 | A2 | Artifacts | Work product; may contain the above |
 | A3 | Workspace files and repos | Source code, unpublished papers |
-| A4 | Credentials (API keys, OAuth tokens, restic password, passphrases, chat keys) | Access to cloud accounts and encrypted data |
+| A4 | Credentials (API keys, OAuth tokens, restic password, passphrases, chat keys, the database key) | Access to cloud accounts and encrypted data |
 | A5 | Audit log | Evidence of what the agent did; also sensitive itself (a record of activity) |
 | A6 | Host system integrity | The agent runs commands |
 | A7 | Model files | Code-execution risk if a format allows it |
@@ -79,6 +79,7 @@ The model is **not** a trusted component: anything it decides passes through the
 | T-35 | Info disclosure | With inspection on, egress holds requests in plaintext, and the audit gains one record per request | Plaintext is never written: the audit has method, status, byte counts and a digest of the path and query. Residual: a digest of a short, predictable path can be reversed by guessing | §3.2, §5.2 | FR-NET-2, FR-AUD-1 |
 | T-36 | Elevation of privilege, tampering | With `sandbox = "openshell"`, a flaw or misconfiguration in OpenShell lets the agent out of its sandbox. Or the image is malicious. Or copying the work back writes outside the workspace | The policy allows only Cairnward's two ports, and egress keeps applying the environment's rules. The run key never appears in a command line on the host. The copy back refuses any path through a symlinked folder and won't turn a folder into a link (tested). Residual: OpenShell is trusted to enforce the sandbox. It pulls the image itself, outside egress and the audit. Its gateway sends telemetry unless the owner turns it off. Copies of the workspace stay in its storage until the sandbox is deleted, which on a failed copy back is by hand. **Tested only against a stand-in CLI** | §3.2 | FR-ISO-1 |
 | T-37 | Tampering, elevation of privilege | Path confusion under TLS inspection: a tool spells a path so that egress and the server read it differently (`/allowed/../other`, `%2e%2e`, `//admin`, `/%61dmin`, Tomcat's `/allowed/..;/other`, `/Admin` on a server that ignores case), escaping an allow rule or slipping past a deny rule | Rules match the normalized path (unreserved escapes decoded, `//`, `.`, `..` resolved); an encoded slash, backslash or NUL is refused; each request must also be allowed with `;` parameters dropped and ignoring case (since 2026-11-09). Residual: servers with other parsing quirks (decoding `%2e` after routing twice, matrix parameters in other syntaxes, Unicode case folding) aren't modelled; a strict allow list with `unmatched = "deny"` limits the damage. Tested against the rule checker only | §3.2 | FR-NET-2 |
+| T-38 | Info disclosure | The database key (D80) exposed: read from a process's environment, a key reference, the wrapped key file plus a weak passphrase, or memory; or lost, leaving the databases unreadable | Passphrase-wrapped key (age scrypt); handed to the sandboxed core on stdin, not in its environment; an `env:` reference removed once read; agents, MCP servers and plugins get allow-listed environments; a key reference warned and snapshot-recorded; the wrapped key saved before conversion and backed up. Residual: an `env:` reference stays readable in that process's `/proc`; backups stage a plain export while they run (I40); the key is in memory while running | §5.5 | FR-ENC-1 |
 
 ## 4. LINDDUN privacy threats
 
@@ -115,6 +116,7 @@ The model is **not** a trusted component: anything it decides passes through the
 - A recovery key opens every locked conversation it covers; it's shown once and never stored, so keeping it safe is up to the user.
 - Content of third-party tools' own HTTPS traffic to allowed hosts can't be inspected unless the environment turns on TLS inspection, and even then bodies aren't redacted (T-17).
 - With TLS inspection on, the local CA's key is as valuable as the sites it can impersonate to the run's tools (T-33); with isolation off an agent can read it (I37).
+- With database encryption on, everything at rest is as strong as its passphrase, and the wrapped key travels in backups; the key is in memory while Cairnward runs; backups stage a plain export while they run (T-38, I40).
 - A client's own API key can choose any environment, and so a more open privacy level; only run keys are pinned (spec §4.1, I39).
 - With `sandbox = "openshell"`, OpenShell is trusted to enforce the sandbox, and has never been run with Cairnward for real (T-36).
 - Copies of conversations inside clients' own databases (T-18).

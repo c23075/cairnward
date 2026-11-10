@@ -6,10 +6,14 @@ conversation). Optionally, `[storage] key = "env:NAME" | "keyring:NAME"` in cair
 key itself (64 hex characters) so an unattended host can start without the passphrase; that's a
 weakening, shown as a warning and recorded in settings snapshots.
 
-`key_for(paths)` finds the key in this order: this process's memory; `CAIRNWARD_DATABASE_KEY`
-(how `serve` hands it to the sandboxed core; read once and removed from the environment, so
-child processes don't inherit it); the `[storage] key` reference; the passphrase, asked on a
-terminal. With no `db-key.age` the databases are plain and the answer is None.
+`key_for(paths)` finds the key in this order: this process's memory; the `[storage] key`
+reference; the passphrase, asked on a terminal. With no `db-key.age` the databases are plain and
+the answer is None.
+
+The sandboxed core in isolated mode can't be asked: `serve` writes the key to the core's standard
+input, a pipe read once at start (`receive`). Not an environment variable: removing one from
+`os.environ` leaves it readable in /proc/<pid>/environ for the life of the process (threat-model
+review 2026-11-10, R1).
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from cairnward.store import crypto
 from cairnward.store.db import KEY_BYTES, DatabaseKeyError
 
 KEY_FILE = "db-key.age"
-ENV_VAR = "CAIRNWARD_DATABASE_KEY"
+ON_STDIN = "CAIRNWARD_DATABASE_KEY_ON_STDIN"  # set by serve: the key comes on stdin
 DATABASES = ("vault.db", "keys.db", "audit.db")
 
 _cache: dict[Path, bytes] = {}
@@ -72,6 +76,10 @@ def _from_reference(ref: str) -> bytes:
         value = resolve_secret(ref)
     except BackendError as exc:
         raise DatabaseKeyError(f"[storage] key = {ref!r}: {exc}") from None
+    if ref.startswith("env:"):
+        # read once: programs this process starts later (plugin commands, restic) don't
+        # inherit it (threat-model review 2026-11-10, R2)
+        os.environ.pop(ref[4:], None)
     return _parse(value or "", f"[storage] key = {ref!r}")
 
 
@@ -90,9 +98,7 @@ def key_for(paths: Paths, *, ask: bool = True) -> bytes | None:
     where = paths.data_dir.resolve()
     if where in _cache:
         return _cache[where]
-    if handed := os.environ.pop(ENV_VAR, None):
-        key = _parse(handed, ENV_VAR)
-    elif ref := configured_reference(paths):
+    if ref := configured_reference(paths):
         key = _from_reference(ref)
     elif ask and sys.stdin.isatty():
         key = unwrap(paths, getpass.getpass("Passphrase for Cairnward's databases: "))
@@ -103,6 +109,12 @@ def key_for(paths: Paths, *, ask: bool = True) -> bytes | None:
         )
     _cache[where] = key
     return key
+
+
+def receive(paths: Paths) -> None:
+    """In the sandboxed core: take the key `serve` wrote to stdin, when it says it did."""
+    if os.environ.pop(ON_STDIN, None) == "1":
+        remember(paths, _parse(sys.stdin.readline(), "the key from serve"))
 
 
 def remember(paths: Paths, key: bytes) -> None:

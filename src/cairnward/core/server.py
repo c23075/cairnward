@@ -556,10 +556,11 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
             env.update(HTTP_PROXY=egress_url, HTTPS_PROXY=egress_url)  # srt's parent proxy
             from cairnward.store import dbkey
 
-            if (db_key := dbkey.key_for(cfg.paths)) is not None:
-                # the sandboxed core can't be asked for the passphrase: hand it the key, which it
-                # reads once and drops from its environment (ADR-0019)
-                env[dbkey.ENV_VAR] = db_key.hex()
+            db_key = dbkey.key_for(cfg.paths)
+            if db_key is not None:
+                # the sandboxed core can't be asked for the passphrase: it gets the key on stdin,
+                # never in its environment (/proc/<pid>/environ keeps that; ADR-0019, R1)
+                env[dbkey.ON_STDIN] = "1"
             shutil.rmtree(core_tmp(cfg), ignore_errors=True)  # what a crash left, maybe plaintext
             private_dir(core_tmp(cfg))
             cmd = wrap(
@@ -591,7 +592,14 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                 fwd_clients = await _client_socket(
                     cfg, lambda: asyncio.open_unix_connection(gw_sock)
                 )
-                core = await asyncio.create_subprocess_exec(*cmd, env=env, stdin=subprocess.DEVNULL)
+                core = await asyncio.create_subprocess_exec(
+                    *cmd, env=env,
+                    stdin=subprocess.PIPE if db_key is not None else subprocess.DEVNULL,
+                )  # fmt: skip
+                if db_key is not None and core.stdin is not None:
+                    core.stdin.write(db_key.hex().encode() + b"\n")
+                    await core.stdin.drain()
+                    core.stdin.close()
                 log(f"cairnward-egress on 127.0.0.1:{proxy.port} (only networked process)")
                 log(
                     f"Cairnward gateway on http://127.0.0.1:{server.gateway_port}/v1 "
@@ -693,6 +701,9 @@ def run_core(cfg: Config, *, egress_control: Path, log: Log) -> None:
     from cairnward.mcp.launch import RemoteLauncher
 
     refuse_vm_sockets(log)
+    from cairnward.store import dbkey
+
+    dbkey.receive(cfg.paths)  # the database key, when serve sent one (before any store opens)
     socks = sockets(cfg)
     srt_proxy = os.environ.get("HTTP_PROXY", "")
     if srt_proxy and "://" not in srt_proxy:

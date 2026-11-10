@@ -1,5 +1,6 @@
 """SQLCipher databases (ADR-0019): keyed engines, wrong keys, conversion. Uses the real driver."""
 
+import os
 import secrets
 from pathlib import Path
 
@@ -103,7 +104,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Pa
     cfg.mkdir()
     monkeypatch.setenv("CAIRNWARD_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CAIRNWARD_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.delenv(dbkey.ENV_VAR, raising=False)
+    monkeypatch.delenv(dbkey.ON_STDIN, raising=False)
     dbkey._cache.clear()
     return ["--config-dir", str(cfg)], Paths(cfg, tmp_path / "data", tmp_path / "state")
 
@@ -163,18 +164,26 @@ def test_encrypt_use_and_decrypt_through_the_cli(
     (paths.config_dir / "cairnward.toml").write_text('[storage]\nkey = "env:TEST_DB_KEY"\n')
     monkeypatch.setenv("TEST_DB_KEY", key.hex())
     assert dbkey.key_for(paths, ask=False) == key
+    assert "TEST_DB_KEY" not in os.environ  # read once; child processes don't inherit it
     assert dbkey.weakenings(paths) and "outside its passphrase" in dbkey.weakenings(paths)[0]
-    monkeypatch.setenv("TEST_DB_KEY", "00" * 32)
+    monkeypatch.setenv("TEST_DB_KEY", "00" * 32)  # a wrong key
     dbkey._cache.clear()
     with pytest.raises(db.DatabaseKeyError):
         Vault.open(paths)
 
-    # handed over by serve to the sandboxed core: read once, then gone from the environment
-    dbkey._cache.clear()
-    monkeypatch.setenv(dbkey.ENV_VAR, key.hex())
-    import os
+    # handed over by serve to the sandboxed core on stdin, never in its environment
+    import io
 
-    assert dbkey.key_for(paths) == key and dbkey.ENV_VAR not in os.environ
+    dbkey._cache.clear()
+    monkeypatch.delenv("TEST_DB_KEY", raising=False)
+    (paths.config_dir / "cairnward.toml").write_text("")
+    monkeypatch.setattr("sys.stdin", io.StringIO(key.hex() + "\n"))
+    dbkey.receive(paths)  # without the flag, stdin isn't read
+    with pytest.raises(db.DatabaseKeyError):
+        dbkey.key_for(paths, ask=False)
+    monkeypatch.setenv(dbkey.ON_STDIN, "1")
+    dbkey.receive(paths)
+    assert dbkey.key_for(paths, ask=False) == key and dbkey.ON_STDIN not in os.environ
 
     assert main([*base, "store", "decrypt"]) == 0
     assert not dbkey.enabled(paths)

@@ -49,12 +49,12 @@ described.
 - **The audit mirror goes:** an encrypted audit log keeps no plaintext `audit.jsonl` mirror, since
   it would hold what the encryption hides. `audit verify` loses its cross-check against the
   mirror and notes that.
-- **Isolated mode:** the outer process hands the key to the sandboxed core in an environment
-  variable that the core reads once and removes. Agents, MCP servers and plugins never inherit it.
+- **Isolated mode:** the outer process writes the key to the sandboxed core's standard input,
+  read once at start. It was first an environment variable, but the 2026-11-10 review (R1)
+  found it readable in `/proc/<pid>/environ`. Agents, MCP servers and plugins never receive it.
 - **Costs** (measured): vault writes about 20% slower, reads about 7%. Audit appends got faster
   without the mirror. Tools that read the files directly stop working.
 - **Linux x86-64 only,** because of the driver's wheels.
 - **Converting doesn't erase the old plaintext** from the disk's free space or older backups.
   Full-disk encryption is still advised.
-- **Not yet tried:** isolated mode with the real sandbox, and replication with encrypted
-  databases.
+- **Tested in isolated mode with the real sandbox.** Not yet tried with replication.
