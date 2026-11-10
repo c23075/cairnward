@@ -554,6 +554,12 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
             }
             egress_url = f"http://cw:{core_token}@127.0.0.1:{server.egress_port}"
             env.update(HTTP_PROXY=egress_url, HTTPS_PROXY=egress_url)  # srt's parent proxy
+            from cairnward.store import dbkey
+
+            if (db_key := dbkey.key_for(cfg.paths)) is not None:
+                # the sandboxed core can't be asked for the passphrase: hand it the key, which it
+                # reads once and drops from its environment (ADR-0019)
+                env[dbkey.ENV_VAR] = db_key.hex()
             shutil.rmtree(core_tmp(cfg), ignore_errors=True)  # what a crash left, maybe plaintext
             private_dir(core_tmp(cfg))
             cmd = wrap(
@@ -816,6 +822,16 @@ def serve(cfg: Config, *, with_egress: bool = True, log: Log) -> int:
     for name, backend in cfg.backends.backends.items():
         if warning := backend.unencrypted_warning(name):
             log(f"warning: {warning}")
+    from cairnward.store import dbkey
+    from cairnward.store.db import DatabaseKeyError
+
+    for warning in dbkey.weakenings(cfg.paths):
+        log(f"warning: {warning}")
+    try:
+        dbkey.key_for(cfg.paths)  # ask for the passphrase once, before anything starts
+    except DatabaseKeyError as exc:
+        log(f"cairnward: can't start: {exc}")
+        return 2
     if busy := port_problems(cfg, with_egress=with_egress):
         if _already_running(cfg):
             log("cairnward: already running (`cairnward status`); stop that one first")

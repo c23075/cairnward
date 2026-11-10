@@ -19,6 +19,7 @@ from cairnward.audit.log import AuditLog
 from cairnward.config.loader import Config
 from cairnward.config.privacy import SETTINGS
 from cairnward.plugins.contract import weakenings
+from cairnward.store import dbkey
 
 
 def snapshot(cfg: Config) -> dict[str, Any]:
@@ -36,6 +37,10 @@ def snapshot(cfg: Config) -> dict[str, Any]:
         "global": one(None),
         "environments": [{"name": name, **one(name)} for name in sorted(cfg.environments)],
         "plugin_weakenings": weakenings(cfg.mcp),
+        "storage": {
+            "encrypted": dbkey.enabled(cfg.paths),
+            "key_reference": bool(cfg.main.storage.key),
+        },
     }
 
 
@@ -48,6 +53,9 @@ def _envs(snap: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def diff(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
     changes: list[dict[str, Any]] = []
     scopes = [("global", before.get("global", {}), after["global"])]
+    if before.get("storage") != after.get("storage") and "storage" in after:
+        old, new = before.get("storage"), after.get("storage")
+        changes.append({"scope": "storage", "setting": "storage", "before": old, "after": new})
     if before.get("plugin_weakenings", []) != after.get("plugin_weakenings", []):
         changes.append({"scope": "plugins", "setting": "plugin_weakenings",
                         "before": before.get("plugin_weakenings", []),

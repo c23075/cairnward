@@ -154,6 +154,26 @@ class AnchorConfig(_Strict):
     )
 
 
+class StorageConfig(_Strict):
+    """SQLCipher "encrypt everything" mode (ADR-0019). Turned on with `cairnward store encrypt`;
+    the database key is then wrapped with a passphrase asked at start."""
+
+    key: str | None = Field(
+        default=None,
+        description="optional, a weakening: a reference ('env:NAME' or 'keyring:NAME') to the "
+        "database key itself, so an unattended start needs no passphrase",
+    )
+
+    @field_validator("key")
+    @classmethod
+    def _reference(cls, value: str | None) -> str | None:
+        if value is not None and not (value.startswith(("env:", "keyring:")) and ":" in value
+                                      and value.split(":", 1)[1]):  # fmt: skip
+            raise ValueError("[storage] key must be a reference like 'env:CAIRNWARD_DB_KEY' or "
+                             "'keyring:cairnward-db', never the key itself")  # fmt: skip
+        return value
+
+
 class ReplicationConfig(_Strict):
     """The same chats and artifacts on several devices, through a shared folder (FR-SYNC-4)."""
 
@@ -251,6 +271,7 @@ class MainConfig(_Strict):
     backup: BackupConfig = BackupConfig()
     replication: ReplicationConfig = ReplicationConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
+    storage: StorageConfig = StorageConfig()
 
 
 # --------------------------------------------------------------------------- backends.toml

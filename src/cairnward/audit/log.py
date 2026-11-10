@@ -165,7 +165,7 @@ class AuditLog:
     def __init__(
         self,
         engine: Engine,
-        mirror: Path,
+        mirror: Path | None,
         enabled_for: Callable[[str | None], bool] | None = None,
     ):
         self._engine = engine
@@ -175,9 +175,14 @@ class AuditLog:
 
     @classmethod
     def open(cls, paths: Paths, enabled_for: Callable[[str | None], bool] | None = None) -> Self:
-        engine = make_engine(paths.data_dir / "audit.db")
+        from cairnward.store import dbkey
+
+        key = dbkey.key_for(paths)
+        engine = make_engine(paths.data_dir / "audit.db", key)
         upgrade(engine, "audit")
-        log = cls(engine, paths.data_dir / "audit.jsonl", enabled_for)
+        # An encrypted log keeps no plaintext mirror: it would hold everything the encryption
+        # hides (ADR-0019). Export with `audit log --json` instead.
+        log = cls(engine, None if key else paths.data_dir / "audit.jsonl", enabled_for)
         log.sync_mirror()
         return log
 
@@ -291,6 +296,8 @@ class AuditLog:
     # ------------------------------------------------------------------ mirror
 
     def _mirror_last_seq(self) -> int:
+        if self.mirror is None:
+            return 0
         if not self.mirror.exists() or self.mirror.stat().st_size == 0:
             return 0
         with self.mirror.open("rb") as fh:
@@ -309,6 +316,8 @@ class AuditLog:
             raise AuditError(f"{self.mirror}: last line is not a valid record") from None
 
     def _append_mirror(self, records: list[AuditRecord]) -> None:
+        if self.mirror is None:
+            return
         self.mirror.parent.mkdir(parents=True, exist_ok=True)
         with self.mirror.open("a", encoding="utf-8") as fh:
             for r in records:
@@ -318,6 +327,8 @@ class AuditLog:
 
     def _sync_mirror_locked(self, conn: Connection) -> None:
         """Bring audit.jsonl up to date with audit.db (e.g. after a crash between the two)."""
+        if self.mirror is None:
+            return
         mirror_seq = self._mirror_last_seq()
         rows = conn.execute(
             select(audit_records)
@@ -419,7 +430,9 @@ class AuditLog:
                 problems.append("... stopping after 20 problems")
                 break
 
-        if len(records) == len(rows):
+        if self.mirror is None:
+            notes.append("no mirror file: the audit database is encrypted (ADR-0019)")
+        elif len(records) == len(rows):
             problems.extend(self._compare_mirror(records))
         for seq, h in expect or []:
             got = by_seq.get(seq)
@@ -433,6 +446,8 @@ class AuditLog:
         return VerifyResult(not problems, len(rows), head_seq, head_hash, problems, notes)
 
     def _compare_mirror(self, records: list[AuditRecord]) -> list[str]:
+        if self.mirror is None:
+            return []
         if not self.mirror.exists():
             return [f"{self.mirror}: mirror file missing"] if records else []
         lines = self.mirror.read_text(encoding="utf-8").splitlines()

@@ -278,8 +278,17 @@ def _rows(conn: sqlite3.Connection, sql: str, *params: Any) -> list[dict[str, An
     return [{c: _jsonable(v) for c, v in zip(cols, row, strict=True)} for row in cur]
 
 
-def _ro(path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+def _ro(path: Path, key: bytes | None = None) -> Any:
+    from cairnward.store.db import connect
+
+    return connect(path, key, readonly=True)
+
+
+def _db_key(cfg: Config) -> bytes | None:
+    """The SQLCipher key when the databases are encrypted (ADR-0019), else None."""
+    from cairnward.store import dbkey
+
+    return dbkey.key_for(cfg.paths)
 
 
 def _copy_plugin(source: Path, dest: Path) -> None:
@@ -298,10 +307,14 @@ def _copy_plugin(source: Path, dest: Path) -> None:
             shutil.copy2(path, target)
 
 
-def _copy_db(src: Path, dst: Path) -> None:
+def _copy_db(src: Path, dst: Path, key: bytes | None = None) -> None:
+    """A consistent copy, even while Cairnward writes. An encrypted database stays encrypted
+    with the same key."""
+    from cairnward.store.db import connect
+
     dst.parent.mkdir(parents=True, exist_ok=True)
-    with contextlib.closing(_ro(src)) as s, contextlib.closing(sqlite3.connect(dst)) as d:
-        s.backup(d)  # a consistent copy, even while Cairnward writes
+    with contextlib.closing(_ro(src, key)) as s, contextlib.closing(connect(dst, key)) as d:
+        s.backup(d)
 
 
 def stage(cfg: Config, dest: Path) -> dict[str, Any]:
@@ -316,11 +329,12 @@ def stage(cfg: Config, dest: Path) -> dict[str, Any]:
         dest.chmod(0o700)
     counts: dict[str, int] = {"conversations": 0, "messages": 0}
     vault_db, keys_db = data / "vault.db", data / "keys.db"
+    key = _db_key(cfg)
     if vault_db.exists():
         with (
-            contextlib.closing(_ro(vault_db)) as v,
+            contextlib.closing(_ro(vault_db, key)) as v,
             contextlib.closing(
-                _ro(keys_db) if keys_db.exists() else sqlite3.connect(":memory:")
+                _ro(keys_db, key) if keys_db.exists() else sqlite3.connect(":memory:")
             ) as k,
         ):
             v.execute("BEGIN")  # one consistent read
@@ -355,7 +369,12 @@ def stage(cfg: Config, dest: Path) -> dict[str, Any]:
             if server.kind == "plugin" and (data / "mcp" / name).is_dir():
                 _copy_plugin(data / "mcp" / name, dest / "plugins" / name)
     if (data / "audit.db").exists():
-        _copy_db(data / "audit.db", dest / "audit" / "audit.db")
+        _copy_db(data / "audit.db", dest / "audit" / "audit.db", key)
+    from cairnward.store import dbkey
+
+    if dbkey.enabled(cfg.paths):  # the encrypted audit copy needs it; it's passphrase-wrapped
+        (dest / "audit").mkdir(exist_ok=True)
+        shutil.copy2(dbkey.key_file(cfg.paths), dest / "audit" / dbkey.KEY_FILE)
     if (data / "audit.jsonl").exists():
         shutil.copy2(data / "audit.jsonl", dest / "audit" / "audit.jsonl")
     if b.include_artifacts and (data / "artifacts").is_dir():
@@ -582,8 +601,11 @@ def import_conversations(cfg: Config, export: Path) -> dict[str, int]:
     Vault.open(cfg.paths).close()  # make sure the databases exist and are migrated
     data = cfg.paths.data_dir
     added = skipped = 0
-    with contextlib.closing(sqlite3.connect(data / "vault.db")) as v, contextlib.closing(
-            sqlite3.connect(data / "keys.db")) as k:  # fmt: skip
+    from cairnward.store.db import connect
+
+    db_key = _db_key(cfg)
+    with contextlib.closing(connect(data / "vault.db", db_key)) as v, contextlib.closing(
+            connect(data / "keys.db", db_key)) as k:  # fmt: skip
         folders_file = export / "vault" / "folders.json"
         if folders_file.exists():
             for row in json.loads(folders_file.read_text(encoding="utf-8")):
@@ -618,7 +640,9 @@ def import_files(cfg: Config, export: Path) -> dict[str, int]:
     or not at all: what's already here is left alone, and a purged conversation's artifacts stay
     gone, even from a backup taken before the purge."""
     data = cfg.paths.data_dir
-    with contextlib.closing(sqlite3.connect(data / "vault.db")) as v:
+    from cairnward.store.db import connect
+
+    with contextlib.closing(connect(data / "vault.db", _db_key(cfg))) as v:
         kept = {r[0] for r in v.execute("SELECT id FROM conversations WHERE purged_at IS NULL")}
     wanted: list[tuple[Path, Path]] = []
     for folder in sorted((export / "artifacts").glob("*/*")):

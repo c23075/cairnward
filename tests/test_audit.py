@@ -25,6 +25,11 @@ def log(paths: Paths) -> Iterator[AuditLog]:
         yield audit
 
 
+def _mirror(log: AuditLog) -> Path:
+    assert log.mirror is not None
+    return log.mirror
+
+
 def sql(log: AuditLog, statement: str, **params: object) -> None:
     with log._engine.begin() as conn:
         conn.execute(text(statement), params)
@@ -50,7 +55,7 @@ def test_chain_links_and_verifies(log: AuditLog) -> None:
 
 def test_mirror_has_identical_lines(log: AuditLog) -> None:
     fill(log, 3)
-    lines = log.mirror.read_text().splitlines()
+    lines = _mirror(log).read_text().splitlines()
     assert lines == [r.to_json_line() for r in log.records()]
     assert json.loads(lines[0])["action"] == "tool.call"
 
@@ -117,8 +122,8 @@ def test_concurrent_writers_keep_one_chain(paths: Paths) -> None:
 def test_mirror_catches_up_after_crash(paths: Paths) -> None:
     with AuditLog.open(paths) as audit:
         fill(audit, 3)
-        lines = audit.mirror.read_text().splitlines()
-        audit.mirror.write_text("\n".join(lines[:1]) + "\n")  # crash lost 2 mirror lines
+        lines = _mirror(audit).read_text().splitlines()
+        _mirror(audit).write_text("\n".join(lines[:1]) + "\n")  # crash lost 2 mirror lines
     with AuditLog.open(paths) as audit:  # reopening re-syncs
         assert audit.verify().ok
 
@@ -152,9 +157,9 @@ def test_whitespace_added_to_stored_details_detected(log: AuditLog, suffix: str)
 
 def test_edited_mirror_detected(log: AuditLog) -> None:
     fill(log)
-    lines = log.mirror.read_text().splitlines()
+    lines = _mirror(log).read_text().splitlines()
     lines[1] = lines[1].replace("file1", "file9")
-    log.mirror.write_text("\n".join(lines) + "\n")
+    _mirror(log).write_text("\n".join(lines) + "\n")
     assert any("record 2: database and mirror disagree" in p for p in log.verify().problems)
 
 
@@ -165,7 +170,7 @@ def test_full_rewrite_needs_a_noted_head(log: AuditLog) -> None:
     noted = log.head()
     recs = log.records()
     sql(log, "DELETE FROM records")
-    log.mirror.write_text("")
+    _mirror(log).write_text("")
     for r in recs:
         log.append(r.action, actor=r.actor, target="rewritten" if r.seq == 2 else r.target)
     assert log.verify().ok  # self-consistent forgery
@@ -177,8 +182,8 @@ def test_truncation_needs_a_noted_head(log: AuditLog) -> None:
     fill(log, 4)
     noted = log.head()
     sql(log, "DELETE FROM records WHERE seq = 4")
-    lines = log.mirror.read_text().splitlines()[:3]
-    log.mirror.write_text("\n".join(lines) + "\n")
+    lines = _mirror(log).read_text().splitlines()[:3]
+    _mirror(log).write_text("\n".join(lines) + "\n")
     assert log.verify().ok
     assert "is missing (log truncated or rewritten)" in log.verify(expect=[noted]).problems[0]
 

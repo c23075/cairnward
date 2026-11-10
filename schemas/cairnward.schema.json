@@ -682,6 +682,27 @@
       "title": "ServerConfig",
       "type": "object"
     },
+    "StorageConfig": {
+      "additionalProperties": false,
+      "description": "SQLCipher \"encrypt everything\" mode (ADR-0019). Turned on with `cairnward store encrypt`;\nthe database key is then wrapped with a passphrase asked at start.",
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "optional, a weakening: a reference ('env:NAME' or 'keyring:NAME') to the database key itself, so an unattended start needs no passphrase",
+          "title": "Key"
+        }
+      },
+      "title": "StorageConfig",
+      "type": "object"
+    },
     "TelemetryConfig": {
       "additionalProperties": false,
       "description": "OpenTelemetry export of model and tool calls (FR-AUD-5): off unless an endpoint is set.",
@@ -819,6 +840,12 @@
         "gateway_host": "127.0.0.1",
         "gateway_port": 8484,
         "socket_path": null
+      }
+    },
+    "storage": {
+      "$ref": "#/$defs/StorageConfig",
+      "default": {
+        "key": null
       }
     },
     "telemetry": {

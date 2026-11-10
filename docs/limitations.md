@@ -93,8 +93,13 @@ disagree with the code, the code was checked, and this page follows it.
 **The vault**
 - **Unlocked conversations aren't protected from someone with the disk.** Each conversation's
   key sits unwrapped in `keys.db`, on the same disk as the vault. Per-conversation encryption is
-  there to make deletion reliable (crypto-shredding). Only two things keep the data from someone
-  who has the disk: locking a conversation with a passphrase, and full-disk encryption (A7).
+  there to make deletion reliable (crypto-shredding). Three things keep the data from someone
+  who has the disk: locking a conversation with a passphrase, database encryption (`store
+  encrypt`, D80, off by default and Linux x86-64 only), and full-disk encryption (A7).
+- **With database encryption on,** the files are protected only while Cairnward isn't running
+  with the key in memory, and only as well as the passphrase. A `[storage] key` reference is as
+  safe as wherever it points. Earlier plaintext stays in the disk's free space and in older
+  backups, and the audit log has no plaintext mirror to cross-check against.
 - **With `crypto_shred = "off"`** (the Open preset), conversation bodies and titles are stored as
   plain text.
 - **Metadata stays readable** even when content is encrypted: when a conversation was created

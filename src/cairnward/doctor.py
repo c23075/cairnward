@@ -428,7 +428,18 @@ def check_data(cfg: Config) -> list[Check]:
             "" if free > 2 else "free some space; the vault and models need room",
         )
     )
-    if (cfg.paths.data_dir / "audit.db").exists():
+    storage = check_storage(cfg)
+    out.append(storage)
+    from cairnward.store import dbkey
+    from cairnward.store.db import DatabaseKeyError
+
+    try:
+        readable = storage.status != "fail" and (dbkey.key_for(cfg.paths) is not None
+                                                 or not dbkey.enabled(cfg.paths))  # fmt: skip
+    except DatabaseKeyError as exc:
+        readable = False
+        out.append(Check("audit log", "skip", f"not checked: {exc}"))
+    if (cfg.paths.data_dir / "audit.db").exists() and readable:
         from cairnward.audit import AuditLog
 
         with AuditLog.open(cfg.paths) as log:
@@ -441,8 +452,39 @@ def check_data(cfg: Config) -> list[Check]:
                 "" if res.ok else "cairnward audit verify  (shows what changed)",
             )
         )
-    out.append(check_anchoring(cfg))
+    if readable:
+        out.append(check_anchoring(cfg))
     return out
+
+
+def check_storage(cfg: Config) -> Check:
+    """SQLCipher mode (ADR-0019): all three databases agree, and the key can be had."""
+    from cairnward.store import dbkey
+    from cairnward.store.db import DatabaseKeyError, is_encrypted
+
+    files = [cfg.paths.data_dir / n for n in dbkey.DATABASES]
+    encrypted = [p.name for p in files if is_encrypted(p)]
+    present = [p.name for p in files if p.exists()]
+    if dbkey.pending_file(cfg.paths).exists():
+        return Check("database encryption", "fail", "an encryption was interrupted",
+                     "cairnward store encrypt  (finishes it with the same passphrase)")  # fmt: skip
+    if not dbkey.enabled(cfg.paths):
+        if encrypted:
+            return Check("database encryption", "fail",
+                         f"{', '.join(encrypted)} encrypted but {dbkey.KEY_FILE} is missing",
+                         f"restore {dbkey.KEY_FILE} from a backup")  # fmt: skip
+        return Check("database encryption", "skip", "off (plain SQLite; ADR-0019)")
+    if sorted(encrypted) != sorted(present):
+        plain = sorted(set(present) - set(encrypted))
+        return Check("database encryption", "fail", f"{', '.join(plain)} still plain",
+                     "cairnward store encrypt")  # fmt: skip
+    try:
+        dbkey.key_for(cfg.paths, ask=False)
+    except DatabaseKeyError:
+        return Check("database encryption", "ok", "SQLCipher; the passphrase is asked at start")
+    if weak := dbkey.weakenings(cfg.paths):
+        return Check("database encryption", "warn", "SQLCipher, key held by reference", weak[0])
+    return Check("database encryption", "ok", "SQLCipher")
 
 
 def check_anchoring(cfg: Config) -> Check:

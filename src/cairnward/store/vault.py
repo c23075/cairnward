@@ -117,8 +117,11 @@ class Vault:
 
     @classmethod
     def open(cls, paths: Paths) -> Self:
-        vault_engine = make_engine(paths.data_dir / "vault.db")
-        keys_engine = make_engine(paths.data_dir / "keys.db")
+        from cairnward.store import dbkey
+
+        key = dbkey.key_for(paths)  # None unless SQLCipher mode is on (ADR-0019)
+        vault_engine = make_engine(paths.data_dir / "vault.db", key)
+        keys_engine = make_engine(paths.data_dir / "keys.db", key)
         upgrade(vault_engine, "vault")
         upgrade(keys_engine, "keys")
         return cls(vault_engine, keys_engine, paths.data_dir)

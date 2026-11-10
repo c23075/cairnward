@@ -79,15 +79,16 @@ def is_encrypted(path: Path) -> bool:
         return fh.read(16) != _PLAIN_HEADER
 
 
-def connect(path: Path, key: bytes | None = None) -> Any:
+def connect(path: Path, key: bytes | None = None, *, readonly: bool = False) -> Any:
     """A DB-API connection: plain sqlite3 without a key, SQLCipher with one. A wrong key, or a key
     for a plain file, raises DatabaseKeyError rather than failing later on the first query."""
+    target = f"file:{path.as_posix()}?mode=ro" if readonly else str(path)
     if key is None:
         if is_encrypted(path):
             raise DatabaseKeyError(f"{path.name} is encrypted: its key is needed")
-        return sqlite3.connect(path, check_same_thread=False)
+        return sqlite3.connect(target, uri=readonly, check_same_thread=False)
     mod = _cipher()
-    conn = mod.connect(str(path), check_same_thread=False)
+    conn = mod.connect(target, uri=readonly, check_same_thread=False)
     try:
         conn.execute(_key_pragma(key))
         conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
