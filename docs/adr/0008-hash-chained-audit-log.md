@@ -13,7 +13,7 @@ The audit log must reveal tampering, be verifiable without passphrases, avoid st
 3. OpenTelemetry traces only: standard tooling; not tamper-evident.
 
 ## Decision
-Option 1 for Phase 0, with Ed25519-signed, exportable checkpoints. Optional OpenTelemetry export using the GenAI semantic conventions for observability (off by default, local only unless the user opts in). Merkle checkpoints in Phase 3.
+Option 1 for Phase 0, with Ed25519-signed, exportable checkpoints. Optional OpenTelemetry export using the GenAI semantic conventions for observability (off by default, local only unless the user opts in). Merkle checkpoints in Phase 3. ("Phase 3" is now "Later" in [spec §9](../spec.md#9-delivery-plan-summary), with no date.)
 
 ## Consequences
 - `cairn audit verify` is O(n) over the log; fine at single-user scale.

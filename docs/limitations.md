@@ -20,6 +20,10 @@ disagree with the code, the code was checked, and this page follows it.
   - It has never run on real WSL2, so Windows support is unproven (A1, I19).
   - A real backup has never been restored (A5).
   - The release and signing workflow has never run on GitHub (A8).
+  - The egress proxy and audit log, the most security-critical parts, are Python with a large
+    dependency tree (hash-locked). A Rust rewrite is deferred with no date (ADR-0003, spec §9).
+  - The threat model maps to the OWASP Top 10 for LLM Applications, not yet to the Top 10 for
+    Agentic Applications ([landscape.md](landscape.md)).
   - See the status page's testing lists for the full picture.
 - **Isolation is Linux-only.** The OS sandbox (srt, bubblewrap) runs on Linux, and on Windows only
   through WSL2. On other systems, or with `isolation = "off"`, every network and file rule is
@@ -53,9 +57,13 @@ disagree with the code, the code was checked, and this page follows it.
   - It checks method and path, but passes request bodies on without redacting them.
   - It offers only HTTP/1.1, and doesn't read WebSocket messages after the upgrade.
   - It breaks tools that pin certificates or ignore `SSL_CERT_FILE` (I27, I30).
-  - Its CA key could impersonate any site to the tools that trust it (T-33).
+  - Its CA key could impersonate any site to the tools that trust it (T-33). Sandboxed runs
+    can't read it, but with isolation off an agent running as you can (I37).
 - **Plain HTTP is allowed in two places,** with a warning or an audit record but no requirement
   to encrypt: to backends on your local network (I3), and from tools to allowed hosts (I4).
+- **The gateway doesn't check `Origin`,** so desktop apps that send one keep working. A web page
+  is still refused by the `Host` check, the API keys and the absence of CORS headers (spec §4.1,
+  T-01, I38). The dashboard does check `Origin`.
 - **Programs that aren't sandboxed** can reach local model servers, such as Ollama on
   127.0.0.1:11434, directly, bypassing Cairnward (spec §3.2). That includes chat clients not run
   in the provided containers.
@@ -136,6 +144,8 @@ disagree with the code, the code was checked, and this page follows it.
   - Even with anchoring, records newer than the last anchor (up to an hour by default) can be
     changed by someone controlling the machine.
   - Timestamps come from the machine's clock unless a timestamp server is set (`tsa_url`).
+  - Merkle checkpoints, which would make partial verification cheaper, are deferred with no
+    date (ADR-0008, spec §9).
 - **Auditing can be switched off** like any protection. Then only settings snapshots and
   `audit.disabled` / `audit.enabled` markers are written.
 
@@ -150,5 +160,8 @@ disagree with the code, the code was checked, and this page follows it.
 - **You can weaken any protection.** Each setting is switchable by design (D55). Weakening it is
   shown (badge, `privacy show`, dashboard) and audited, but not prevented. Nothing stops the
   machine's owner from loosening policy.
+- **A client's own API key can name any environment** in the model it asks for
+  (`cw/<environment>:<effort>`), and so pick a more open privacy level. Only run keys from
+  `cairnward run` and plugins are pinned to one environment (spec §4.1, I39).
 - **The configuration is plain files in your config folder.** There's no central policy, signing
   or enforcement across machines.

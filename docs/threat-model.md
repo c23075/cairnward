@@ -41,7 +41,7 @@ The model is **not** a trusted component: anything it decides passes through the
 
 | ID | STRIDE | Threat | Controls | Spec | Verified by |
 |---|---|---|---|---|---|
-| T-01 | Spoofing | A malicious web page sends requests to the local dashboard or gateway (CSRF / DNS rebinding) | Unix socket for CLI; Host allowlist; Origin check; SameSite cookie + CSRF token; no CORS; per-client API keys on the gateway | §3.1 | FR-DASH-1, FR-GW-2 |
+| T-01 | Spoofing | A malicious web page sends requests to the local dashboard or gateway (CSRF / DNS rebinding) | Unix socket for CLI; Host allowlist; Origin check (dashboard only; the gateway skips it so desktop apps work, I38); SameSite cookie + CSRF token; no CORS; per-client API keys on the gateway | §3.1 | FR-DASH-1, FR-GW-2 |
 | T-02 | Spoofing | Another local process uses the gateway as if it were a configured client | Per-client API keys; socket/token file mode 0600 | §3.1 | FR-GW-2 |
 | T-03 | Tampering | Audit records edited or deleted after the fact | Hash chain; signed checkpoints **anchored to a private git repo (hourly by default)**; `audit verify --anchors`. Residual: records newer than the last anchor can be altered by someone controlling the machine (visible as a missing/late anchor) | §5.2 | FR-AUD-2, FR-AUD-4 |
 | T-04 | Tampering | MCP server changes its tool descriptions after approval (rug pull) or ships hidden instructions (tool poisoning) | Version + hash pinning; tool-definition hashes; disable on change; description scan; sandboxed servers | §4.2 | FR-MCP-3 |
@@ -114,7 +114,8 @@ The model is **not** a trusted component: anything it decides passes through the
 - Unlocked conversations' keys are stored unwrapped in `keys.db` on the same disk, so only locking and full-disk encryption protect them from someone with the disk; per-conversation keys make deletion reliable. (Corrected 2026-11-06: an earlier version said a plaintext search index existed, but vault search decrypts as it goes and keeps no index.) Deleting is best effort on SSDs.
 - A recovery key opens every locked conversation it covers; it's shown once and never stored, so keeping it safe is up to the user.
 - Content of third-party tools' own HTTPS traffic to allowed hosts can't be inspected unless the environment turns on TLS inspection, and even then bodies aren't redacted (T-17).
-- With TLS inspection on, the local CA's key is as valuable as the sites it can impersonate to the run's tools (T-33).
+- With TLS inspection on, the local CA's key is as valuable as the sites it can impersonate to the run's tools (T-33); with isolation off an agent can read it (I37).
+- A client's own API key can choose any environment, and so a more open privacy level; only run keys are pinned (spec §4.1, I39).
 - With `sandbox = "openshell"`, OpenShell is trusted to enforce the sandbox, and has never been run with Cairnward for real (T-36).
 - Copies of conversations inside clients' own databases (T-18).
 - Records newer than the last audit anchor can be altered by someone with full control of the machine (T-03).
