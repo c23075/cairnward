@@ -1,0 +1,22 @@
+[package]
+name = "cairnward-egress"
+version = "0.1.0"
+description = "Cairnward's egress data path in Rust (ADR-0020). Stage 1: the destination address checks."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "cairnward-egress-rs"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"

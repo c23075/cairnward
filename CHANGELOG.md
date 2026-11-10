@@ -12,6 +12,10 @@
   An optional `[storage] key` reference allows unattended starts, with a warning. Needs the
   `sqlcipher` extra, Linux x86-64 only. An encrypted audit log keeps no plaintext mirror.
 
+- The start of the Rust egress data path (ADR-0020, stage 1): a `rust/` workspace whose
+  address checks are compared with the Python ones on generated addresses in CI. Not used by
+  `serve` yet.
+
 ### Security
 - TLS inspection: method and path rules now match the normalized path (escaped unreserved
   characters decoded, `//`, `.` and `..` resolved), and a path with an encoded slash, backslash

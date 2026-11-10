@@ -25,6 +25,6 @@ ADRs are never edited after acceptance except to change their status; a changed 
 | [0017](0017-research-as-a-plugin.md) | Research as a separate plugin, under a standard plugin contract | Accepted |
 | [0018](0018-openshell-sandbox-and-tls-inspection.md) | OpenShell as an opt-in second sandbox; TLS inspection in egress, off by default | Accepted |
 | [0019](0019-sqlcipher-encrypt-everything.md) | SQLCipher "encrypt everything" mode, key wrapped with a passphrase (D80) | Accepted |
-| [0020](0020-rust-egress-and-audit.md) | Rust egress data path and audit writer, split from Python policy, in stages | Proposed |
+| [0020](0020-rust-egress-and-audit.md) | Rust egress data path and audit writer, split from Python policy, in stages | Accepted; stage 1 in progress |
 
 Template: copy [`template.md`](template.md).

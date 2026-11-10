@@ -52,6 +52,30 @@ jobs:
         if: runner.os == 'Linux'
         run: uv run coverage json -o coverage.json && uv run python scripts/check_coverage.py coverage.json
 
+  rust:
+    # ADR-0020: the Rust egress data path, checked against the Python one it replaces
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain (pinned; rustup is on the runner image)
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.97.0
+      - working-directory: rust
+        run: cargo fmt --all --check
+      - working-directory: rust
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - working-directory: rust
+        run: cargo test --locked
+      - working-directory: rust
+        run: cargo build --locked
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uv sync
+      - name: Rust and Python agree (differential tests)
+        run: uv run pytest -q tests/test_egress_rust.py
+
   test-debian:
     runs-on: ubuntu-24.04
     container: python:3.12-slim-bookworm  # Debian 12

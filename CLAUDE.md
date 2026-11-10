@@ -16,6 +16,8 @@ uv sync
 uv run ruff check . && uv run ruff format --check . && uv run mypy   # CI's lint job
 uv run pytest -q                                                    # ~4 min
 uv run cairnward config schema   # after changing anything in config/models.py (schemas/ is committed)
+cd rust && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build
+uv run pytest -q tests/test_egress_rust.py   # Rust and Python agree (needs the cargo build)
 ```
 - Isolated-mode tests (`tests/isolation/`) skip unless the sandbox is found: run
   `cairnward sandbox install`, or point at the copy in the repo:

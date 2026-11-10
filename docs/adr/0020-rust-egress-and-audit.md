@@ -1,6 +1,6 @@
 # ADR-0020: Rewriting the egress proxy and audit log in Rust
 
-- Status: Proposed (design only; no Rust code yet)
+- Status: Accepted 2026-11-10 (owner go-ahead, A17); stage 1 in progress
 - Date: 2026-11-10
 - Spec: §3.2, §5.2, §6, §9, D9; follows [ADR-0003](0003-python-now-rust-later.md)
 
@@ -40,7 +40,7 @@ For the audit log, the same split applies:
   short, well specified and easy to test against the Python ones.
 - **Python** would only send records.
 
-## Decision (proposed)
+## Decision
 Option 2, in stages, with each stage shippable and the Python implementation kept as the
 reference until the Rust one passes the same tests:
 1. **Differential test harness.** Run the existing egress tests (`tests/test_egress*.py`,
@@ -73,3 +73,20 @@ reference until the Rust one passes the same tests:
 - **Unchanged:** the threat model's boundaries. The data path moves process; trust doesn't.
   Each stage still needs a threat-model review (NFR-S2).
 - **To decide before stage 2:** the owner's go-ahead for a Rust toolchain in CI and releases.
+
+## Progress
+- **Stage 1, started 2026-11-10:**
+  - **The Rust workspace:** `rust/`, crate `cairnward-egress`, binary `cairnward-egress-rs`,
+    with `Cargo.lock` committed. It has no third-party dependencies yet, and forbids `unsafe`.
+  - **Address checks:** `special_reason`, ported from `egress/addresses.py` with the same
+    reasons.
+  - **Differential test:** `tests/test_egress_rust.py` feeds 12,000 generated addresses to both
+    implementations and requires identical answers. The addresses are random IPv4 and IPv6,
+    special ranges, and special IPv4 inside IPv4-mapped, 6to4 and NAT64 forms. The test was
+    checked to fail when the Rust 6to4 rule is broken.
+  - **CI job `rust`:** a pinned toolchain (1.97.0), `cargo fmt --check`, `clippy -D warnings`
+    (pedantic), `cargo test`, then the differential test.
+- **Still in stage 1:**
+  - the decision-socket protocol between the Rust data path and Python policy;
+  - running `tests/test_egress.py` against either implementation through a shared fixture.
+- **When the crate takes its first dependency:** add `cargo audit` (or `cargo deny`) to CI.

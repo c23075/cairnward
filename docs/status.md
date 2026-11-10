@@ -164,6 +164,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
+- Rust rewrite, stage 1 started (2026-11-10, [ADR-0020](adr/0020-rust-egress-and-audit.md)): a `rust/` workspace with the address checks ported and checked against Python on 12,000 generated addresses, and a CI job. Nothing in production uses it yet
 - Database encryption built (2026-11-10, D80, [ADR-0019](adr/0019-sqlcipher-encrypt-everything.md)): `cairnward store encrypt`, a passphrase-wrapped key, optional key by reference (A16: option c). Not yet tried in isolated mode with the real sandbox, or with replication
 - Merkle checkpoints built (2026-11-10, D79): anchors sign a Merkle root; `audit prove` and `audit check-proof` for single records. Tested with a local git repository and real `ssh-keygen`, not yet with a real remote
 - Trade-offs written down (2026-11-10): I37–I39 (CA key readable with isolation off, no `Origin` check on the gateway, client keys not pinned to an environment); deferred work (Rust rewrite, Merkle checkpoints, OWASP agentic mapping) in [limitations](limitations.md); "Phase 3" now reads "Later" (spec §9)
