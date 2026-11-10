@@ -254,6 +254,16 @@
           "title": "Idle Timeout S",
           "type": "integer"
         },
+        "implementation": {
+          "default": "python",
+          "description": "the data path: python, or rust (cairnward-egress-rs, ADR-0020; no TLS inspection yet: inspecting sessions are refused)",
+          "enum": [
+            "python",
+            "rust"
+          ],
+          "title": "Implementation",
+          "type": "string"
+        },
         "max_connections": {
           "default": 64,
           "maximum": 4096,
@@ -788,6 +798,7 @@
         "approval_timeout_s": 120,
         "connect_timeout_s": 15,
         "idle_timeout_s": 300,
+        "implementation": "python",
         "max_connections": 64
       }
     },

@@ -77,6 +77,11 @@ class ServerConfig(_Strict):
 
 
 class EgressConfig(_Strict):
+    implementation: Literal["python", "rust"] = Field(
+        default="python",
+        description="the data path: python, or rust (cairnward-egress-rs, ADR-0020; no TLS "
+        "inspection yet: inspecting sessions are refused)",
+    )
     max_connections: int = Field(default=64, ge=1, le=4096)
     connect_timeout_s: int = Field(default=15, ge=1, le=300)
     idle_timeout_s: int = Field(default=300, ge=5, le=86400)

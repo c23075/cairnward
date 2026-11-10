@@ -33,8 +33,9 @@ import uvicorn
 from cairnward.audit import AuditLog, enabled_for, record_settings
 from cairnward.config.edit import apply_edit
 from cairnward.config.loader import Config
-from cairnward.egress import EgressProxy, Session, Sessions
+from cairnward.egress import Session, Sessions
 from cairnward.egress.control import EgressControl, LocalEgress, RemoteEgress, control_app
+from cairnward.egress.rust import make_egress
 from cairnward.policy import ApprovalInbox, PolicyEngine, RemoteApprover
 from cairnward.sandbox import SandboxSpec, SandboxUnavailable, require, secret_dirs, srt_hosts, wrap
 from cairnward.store import Vault
@@ -399,10 +400,12 @@ def serve_single(cfg: Config, *, with_egress: bool, log: Log) -> None:
                 *core_background(cfg, vault, hub, log),
             ]
             if with_egress:
-                proxy = EgressProxy(cfg, PolicyEngine(cfg, approver=inbox, audit=audit), sessions)
+                proxy = make_egress(cfg, PolicyEngine(cfg, approver=inbox, audit=audit), sessions,
+                                    socket_dir=sockets(cfg)["egress"].parent)  # fmt: skip
                 await proxy.start()
                 tasks.append(proxy.serve_forever())
-                log(f"cairnward-egress on 127.0.0.1:{proxy.port}")
+                rust = " (Rust data path)" if cfg.main.egress.implementation == "rust" else ""
+                log(f"cairnward-egress on 127.0.0.1:{proxy.port}{rust}")
             log(
                 f"Cairnward gateway on http://{server.gateway_host}:{server.gateway_port}/v1 "
                 f"(privacy: {cfg.privacy().label}; single process, core not isolated)"
@@ -522,7 +525,7 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
         # Asks go to the inbox in the core (its management socket).
         asker = RemoteApprover(str(socks["management"]), cfg.main.egress.approval_timeout_s)
         engine = PolicyEngine(cfg, approver=asker, audit=audit)
-        proxy = EgressProxy(cfg, engine, sessions)
+        proxy = make_egress(cfg, engine, sessions, socket_dir=socks["egress"].parent)
         bridge = BridgeLauncher(
             LocalLauncher(
                 cfg,
@@ -600,7 +603,8 @@ def serve_isolated(cfg: Config, *, log: Log) -> int:
                     core.stdin.write(db_key.hex().encode() + b"\n")
                     await core.stdin.drain()
                     core.stdin.close()
-                log(f"cairnward-egress on 127.0.0.1:{proxy.port} (only networked process)")
+                rust = ", Rust data path" if cfg.main.egress.implementation == "rust" else ""
+                log(f"cairnward-egress on 127.0.0.1:{proxy.port} (only networked process{rust})")
                 log(
                     f"Cairnward gateway on http://127.0.0.1:{server.gateway_port}/v1 "
                     f"(privacy: {cfg.privacy().label}; core isolated, pid {core.pid})"
@@ -838,6 +842,13 @@ def serve(cfg: Config, *, with_egress: bool = True, log: Log) -> int:
 
     for warning in dbkey.weakenings(cfg.paths):
         log(f"warning: {warning}")
+    if cfg.main.egress.implementation == "rust":
+        inspecting = [n for n, e in cfg.environments.items() if e.tls_inspection.enabled]
+        if inspecting:
+            log(
+                f"warning: the Rust egress data path has no TLS inspection yet: runs in "
+                f"{', '.join(inspecting)} are refused rather than tunnelled unread (ADR-0020)"
+            )
     try:
         dbkey.key_for(cfg.paths)  # ask for the passphrase once, before anything starts
     except DatabaseKeyError as exc:

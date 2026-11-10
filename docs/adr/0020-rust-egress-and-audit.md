@@ -1,6 +1,6 @@
 # ADR-0020: Rewriting the egress proxy and audit log in Rust
 
-- Status: Accepted 2026-11-10 (owner go-ahead, A17); stage 1 in progress
+- Status: Accepted 2026-11-10 (owner go-ahead, A17); stages 1 and 2 done (opt-in), stage 3 next
 - Date: 2026-11-10
 - Spec: §3.2, §5.2, §6, §9, D9; follows [ADR-0003](0003-python-now-rust-later.md)
 
@@ -92,6 +92,32 @@ reference until the Rust one passes the same tests:
     `closed`. The answers come from the Python proxy's own methods, and the three-way connect
     decision moved into one shared method, `EgressProxy.connect_decision`, so neither path can
     drift. Tested over a real socket (`tests/test_egress_decisions.py`).
-- **Moved to stage 2:** running `tests/test_egress.py` against either implementation through a
-  shared fixture. It needs the Rust proxy to exist, and that proxy is what stage 2 builds.
-- **When the crate takes its first dependency:** add `cargo audit` (or `cargo deny`) to CI.
+- **Stage 2, done 2026-11-10 (opt-in):**
+  - **The proxy** (`cairnward-egress-rs serve`): CONNECT and absolute-form HTTP. It checks heads
+    as the Python path does: control characters, a 64 KiB limit, the request line and headers.
+    It resolves once, checks special addresses and dials what it checked. Plain HTTP is one
+    request per connection, with `Host` from the checked URL and two `Host` headers refused.
+    Bodies are framed exactly (Content-Length or chunked), so nothing after a request's body is
+    forwarded. Byte counts, connect and idle timeouts, and a connection limit are kept.
+  - **Dependencies:** only `tokio` and `serde_json`, with HTTP parsed by hand.
+  - **Decisions:** the proxy asks the decision service for each connection over its own socket
+    connection. The protocol gained a `session` operation, so a client without a valid token
+    gets 407 before anything else is looked at, and a `status` field on `closed`.
+  - **`[egress] implementation = "rust"`** (default `python`): `egress/rust.py` runs the binary
+    and the decision service behind `EgressProxy`'s interface, for `serve` in either mode and for
+    `cairnward egress`. Sessions that should be TLS-inspected are refused, not tunnelled unread,
+    until stage 3, and `serve` warns when that applies.
+  - **The shared fixture:** every test in `tests/test_egress.py` and the egress fuzz tests in
+    `tests/test_fuzz.py` now runs against both data paths. This found a difference that's now
+    fixed: an unclosed IPv6 bracket in a URL got 403 from Rust instead of Python's 400. Tests
+    that inject DNS answers run against Python only, and a test that uses the real resolver
+    covers both. `serve` with the Rust path is tested end to end with the real sandbox, both
+    beside the isolated core and in a single process.
+  - **Still to do before it can become the default (stage 5):**
+    - bytes are counted raw (with chunk framing) rather than as decoded body bytes;
+    - a request's 100-continue is answered locally, as h11 does;
+    - not yet measured against the Strict overhead target (I14);
+    - not yet run for real outside tests.
+- **Next, stage 3:** TLS inspection in Rust (rustls), with the path readings from I36.
+- **Open from stage 1, now due:** the crate has dependencies (`tokio`, `serde_json`, locked in
+  `Cargo.lock`), so `cargo audit` or `cargo deny` should join CI.

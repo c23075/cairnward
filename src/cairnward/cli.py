@@ -850,7 +850,7 @@ def _cmd_egress(args: argparse.Namespace) -> int:
     import asyncio
 
     from cairnward.audit import AuditLog, enabled_for, record_settings
-    from cairnward.egress import EgressProxy, Session, Sessions
+    from cairnward.egress import Session, Sessions
     from cairnward.policy import DenyApprover, PolicyEngine, TerminalApprover
 
     cfg = _load(args)
@@ -864,7 +864,11 @@ def _cmd_egress(args: argparse.Namespace) -> int:
         engine = PolicyEngine(cfg, approver=approver, audit=log)
         sessions = Sessions()
         token = sessions.create(Session(environment=env, client=args.client, actor="user"))
-        proxy = EgressProxy(cfg, engine, sessions, port=args.port)
+        from cairnward.core.server import sockets
+        from cairnward.egress.rust import make_egress
+
+        proxy = make_egress(cfg, engine, sessions, port=args.port,
+                            socket_dir=sockets(cfg)["egress"].parent)  # fmt: skip
 
         async def run() -> None:
             port = await proxy.start()

@@ -8,6 +8,9 @@ path uses, so there is one implementation of each decision, not two.
 Protocol: one JSON object per line each way; every request gets exactly one reply, in order.
 A `ticket` names one connection from `connect` until `closed` or `denied`.
 
+- `{"op": "session", "authorization": <Proxy-Authorization header or null>}` ->
+  `{"ok": true, "valid": bool}`: is this a known session token? Asked first, so a client without
+  one gets 407 before anything else about its request is looked at, as in the Python path.
 - `{"op": "connect", "authorization": <Proxy-Authorization header or null>, "method": str,
    "host": str, "port": int}`
   -> `{"ok": true, "allow": bool, "status": 200|403|407, "reason": str, "ticket": str|null,
@@ -23,8 +26,8 @@ A `ticket` names one connection from `connect` until `closed` or `denied`.
   with high risk, as the Python path does. Ends the ticket.
 - `{"op": "opened", "ticket": str}` -> `{"ok": true}`: dialled; writes the `pre` record.
 - `{"op": "closed", "ticket": str, "outcome": "ok"|"error", "bytes_up": int,
-   "bytes_down": int, "duration_s": float, "address": str, "error": str|null}` -> `{"ok": true}`:
-  writes the `post` record. Ends the ticket.
+   "bytes_down": int, "duration_s": float, "address": str, "error": str|null,
+   "status": int (plain HTTP only)}` -> `{"ok": true}`: writes the `post` record. Ends the ticket.
 
 Errors: `{"ok": false, "error": str}` (unknown op or ticket, malformed line); the connection
 stays usable. Lines over 64 KiB close it. Only the owner can connect (0600 socket in a private
@@ -96,6 +99,9 @@ class DecisionService:
     async def answer(self, req: dict[str, Any]) -> dict[str, Any]:
         """One reply for one request (also callable directly, without the socket)."""
         op = req.get("op")
+        if op == "session":
+            return {"ok": True, "valid": self.proxy.sessions.lookup(req.get("authorization"))
+                    is not None}  # fmt: skip
         if op == "connect":
             return await self._connect(req)
         ticket = self._tickets.get(str(req.get("ticket")))
@@ -121,6 +127,8 @@ class DecisionService:
                 "duration_s": round(float(req["duration_s"]), 3),
                 "address": str(req["address"])[:64],
             }  # fmt: skip
+            if isinstance(req.get("status"), int):  # plain HTTP: the response's status
+                details["status"] = req["status"]
             if req.get("error"):
                 details["error"] = str(req["error"])[:200]
             outcome = "ok" if req.get("outcome") == "ok" else "error"

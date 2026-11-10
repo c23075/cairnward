@@ -21,7 +21,7 @@ disagree with the code, the code was checked, and this page follows it.
   - A real backup has never been restored (A5).
   - The release and signing workflow has never run on GitHub (A8).
   - The egress proxy and audit log, the most security-critical parts, are Python with a large
-    dependency tree (hash-locked). A staged Rust rewrite has started: so far only the address checks exist in Rust, and nothing runs them in production yet (ADR-0020).
+    dependency tree (hash-locked). A Rust data path exists as an opt-in (`[egress] implementation = "rust"`, ADR-0020). It has no TLS inspection yet, hasn't been measured or run for real outside tests, and the audit writer is still Python.
   - The threat model maps to the OWASP Top 10 for LLM Applications, not yet to the Top 10 for
     Agentic Applications ([landscape.md](landscape.md)).
   - See the status page's testing lists for the full picture.

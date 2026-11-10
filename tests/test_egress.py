@@ -122,9 +122,21 @@ def _recv_all(s: socket.socket) -> bytes:
     return out
 
 
-@pytest.fixture
-def start(tmp_path: Path) -> Iterator[Callable[..., Running]]:
+def _rust_binary() -> Path | None:
+    from tests.test_egress_rust import BINARY
+
+    return BINARY
+
+
+@pytest.fixture(params=["python", "rust"])
+def start(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Callable[..., Running]]:
+    """A running egress data path: the Python one, or the Rust one (ADR-0020) asking a decision
+    service built from the same objects, so every test here checks both."""
+    impl: str = request.param
+    if impl == "rust" and _rust_binary() is None:
+        pytest.skip("Rust egress binary not built")
     loops: list[tuple[asyncio.AbstractEventLoop, EgressProxy, AuditLog]] = []
+    procs: list[Any] = []
 
     def _start(
         privacy: str,
@@ -145,12 +157,36 @@ def start(tmp_path: Path) -> Iterator[Callable[..., Running]]:
         token = sessions.create(Session(environment="e", client="test", actor="agent:test"))
         proxy = EgressProxy(cfg, engine, sessions, port=0, resolver=resolver)
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(proxy.start())
+        if impl == "python":
+            loop.run_until_complete(proxy.start())
+        else:
+            if resolver is not None:
+                pytest.skip("this test injects DNS answers into the Python data path")
+            import subprocess
+            import tempfile
+
+            from cairnward.egress.decisions import DecisionService
+
+            sock = Path(tempfile.mkdtemp(prefix="cw-rs-", dir="/tmp")) / "d.sock"
+            loop.run_until_complete(DecisionService(proxy).start(sock))
+            limits = cfg.main.egress
+            proc = subprocess.Popen(
+                [str(_rust_binary()), "serve", "--listen", "127.0.0.1:0", "--decisions", str(sock),
+                 "--connect-timeout", str(limits.connect_timeout_s),
+                 "--idle-timeout", str(limits.idle_timeout_s)],
+                stdout=subprocess.PIPE, text=True)  # fmt: skip
+            procs.append(proc)
+            line = proc.stdout.readline() if proc.stdout else ""
+            assert line.startswith("listening "), line
+            proxy.port = int(line.split()[1])
         threading.Thread(target=loop.run_forever, daemon=True).start()
         loops.append((loop, proxy, log))
         return Running(proxy, token, log, approver)
 
     yield _start
+    for proc in procs:
+        proc.terminate()
+        proc.wait(5)
     for loop, proxy, log in loops:
         asyncio.run_coroutine_threadsafe(proxy.close(), loop).result(5)
         loop.call_soon_threadsafe(loop.stop)
@@ -195,6 +231,20 @@ def test_connect_tunnel(start: Callable[..., Running], echo: int) -> None:
     assert resp.endswith(b"ping through the tunnel")
     post = wait_records(r.log, 2)[-1]
     assert post.details["bytes_up"] == len(b"ping through the tunnel")
+
+
+def test_a_name_for_this_machine_is_refused_by_the_real_resolver(
+    start: Callable[..., Running],
+    origin: int,
+) -> None:
+    """Without injected DNS answers, so both data paths use the system resolver."""
+    r = start('preset = "open"')
+    for url in (f"http://localhost:{origin}/", f"http://127.0.0.1:{origin}/"):
+        resp = r.get(url)
+        assert resp.startswith(b"HTTP/1.1 403") and b"loopback" in resp, resp[:200]
+    assert Origin.seen == []
+    denies = [x for x in wait_records(r.log, 2) if x.decision == "deny"]
+    assert [x.target for x in denies] == [f"localhost:{origin}", f"127.0.0.1:{origin}"]
 
 
 def test_network_off_denies_and_records(start: Callable[..., Running], origin: int) -> None:
