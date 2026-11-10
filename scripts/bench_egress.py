@@ -97,6 +97,7 @@ def bench(impl: str, folder: Path, n: int, clients: int) -> dict[str, Any]:
     ca, server_pem = _origin_cert(folder)
     https = Server(("127.0.0.1", 0), Origin)
     ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2  # as egress itself requires
     ctx.load_cert_chain(server_pem)
     https.socket = ctx.wrap_socket(https.socket, server_side=True)
     tls_port = _serve(https)
