@@ -17,6 +17,10 @@ dependencies = [
     "uvicorn>=0.30",
 ]
 
+[project.optional-dependencies]
+# SQLCipher "encrypt everything" mode (ADR-0019): its only wheel is Linux x86-64.
+sqlcipher = ["sqlcipher3-binary>=0.6; sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
 [project.scripts]
 cairnward = "cairnward.cli:main"
 cw = "cairnward.cli:main"
@@ -31,6 +35,7 @@ dev = [
     "pip-audit>=2.7",
     "pytest-asyncio>=0.24",
     "openai>=1.40",
+    "sqlcipher3-binary>=0.6; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [build-system]

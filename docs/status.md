@@ -48,6 +48,8 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 | A10 | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
 | A11 | If you want the OpenShell sandbox: install OpenShell, set `OPENSHELL_TELEMETRY_ENABLED=false` for its gateway, and try one run with `sandbox = "openshell"` | It has only run against a stand-in. Whether a sandbox can reach Cairnward's loopback-only ports is unknown |
 | A12 | If you turn on TLS inspection: try it with your real agents and the sites they use | Only tested with httpx and curl against a local server. Agents that pin certificates will fail |
+| A16 | Choose where the SQLCipher database key lives: a secret reference, a passphrase typed at start, or both ([ADR-0019](adr/0019-sqlcipher-encrypt-everything.md)) | Wiring the "encrypt everything" mode in depends on it |
+| A17 | Go or no-go on a Rust toolchain in CI and releases, for the staged egress and audit rewrite ([ADR-0020](adr/0020-rust-egress-and-audit.md)) | Stage 2 of the rewrite can't start without it |
 
 Done on 2026-11-05:
 - **A13:** your personal email addresses stay in the public commit history, by your decision: they're
@@ -160,6 +162,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
+- SQLCipher storage layer built (2026-11-10, [ADR-0019](adr/0019-sqlcipher-encrypt-everything.md), proposed): keyed engines and conversion, tested with the real driver; not yet a setting, and the key source is for you to decide. Rust rewrite designed, not started ([ADR-0020](adr/0020-rust-egress-and-audit.md), proposed)
 - Merkle checkpoints built (2026-11-10, D79): anchors sign a Merkle root; `audit prove` and `audit check-proof` for single records. Tested with a local git repository and real `ssh-keygen`, not yet with a real remote
 - Trade-offs written down (2026-11-10): I37–I39 (CA key readable with isolation off, no `Origin` check on the gateway, client keys not pinned to an environment); deferred work (Rust rewrite, Merkle checkpoints, OWASP agentic mapping) in [limitations](limitations.md); "Phase 3" now reads "Later" (spec §9)
 - Docs reorganised (2026-11-09): an index by reader ([docs/README.md](README.md)), an [overview](overview.md) with where Cairnward sits in an agentic stack, the enterprise, LLMOps and model risk management plan moved to [plan/enterprise-poc.md](plan/enterprise-poc.md), and the spec's six longest paragraphs split into labelled points (no wording removed)

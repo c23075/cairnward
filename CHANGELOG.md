@@ -7,6 +7,8 @@
   record so far, `audit verify --anchors` checks each root against the log and that each
   checkpoint extends the last, and `audit prove` / `audit check-proof` show one record is in a
   signed checkpoint without the rest of the log. Older checkpoints still verify.
+- An optional `sqlcipher` extra (Linux x86-64) and a storage layer that opens and converts
+  SQLCipher databases (ADR-0019, proposed). Not yet a setting: nothing is encrypted this way yet.
 
 ### Security
 - TLS inspection: method and path rules now match the normalized path (escaped unreserved
