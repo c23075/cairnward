@@ -33,6 +33,29 @@ See [Getting started](getting-started.md#8-back-up). What to keep off this machi
 
 `cairnward backup restore` brings back conversations, artifacts, jobs and plugins' data, and locked ones stay locked. Each item comes back whole or not at all: anything already here is left as it is, and a purged conversation's artifacts stay gone. Stop the server first if a plugin's data is coming back. `--to <folder>` only extracts the backup, if you'd rather look first. Audit records, settings and the plugin's installed engines aren't brought back: they're in the extracted copy, apart from engines, which you install again.
 
+## Encrypt the databases
+`cairnward store encrypt` (with the server stopped) puts the vault, its keys and the audit log under
+SQLCipher. You're then asked for its passphrase whenever Cairnward starts. `cairnward store
+passphrase` changes the passphrase, and `cairnward store decrypt` turns it off. For a machine that
+must start unattended, `[storage] key = "keyring:NAME"` (or `env:NAME`) in `cairnward.toml` can hold
+the key itself. That's a weakening, and Cairnward warns about it. It needs `uv sync --extra
+sqlcipher` and Linux x86-64. See [spec §5.5](spec.md#55-encryption-and-deletion).
+
+## Check the audit log independently
+`cairnward audit verify` checks the chain, and with `--anchors` the signed checkpoints and their
+Merkle roots. `cairnward audit prove <seq> --out proof.json` makes a proof that one record is in a
+signed checkpoint, which someone else can check with `cairnward audit check-proof proof.json
+--signers <signers file>`, without the log. For a check that doesn't rely on Cairnward's own
+Python code, build the Rust verifier (`cargo build --release --manifest-path rust/Cargo.toml`) and
+run `rust/target/release/cairnward-audit-rs verify <export>` on `cairnward audit log --json
+--last 1000000` saved to a file.
+
+## Try the Rust egress data path
+Build it (`cargo build --release --manifest-path rust/Cargo.toml`), set `[egress] implementation =
+"rust"` in `cairnward.toml`, and restart the server. `serve` says "Rust data path" when it's in use.
+It behaves like the Python one, TLS inspection included; it's opt-in until it has run for real
+([ADR-0020](adr/0020-rust-egress-and-audit.md), status A18).
+
 ## Remove it
 1. Stop the server, and disable the service if you installed it.
 2. Delete `~/.config/cairnward`, `~/.local/share/cairnward` and `~/.local/state/cairnward`. **This deletes your conversations, audit log and keys for good.**

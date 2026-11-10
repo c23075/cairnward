@@ -1,7 +1,7 @@
 # Requirements status
 
 Every requirement in [requirements.md](../requirements.md), checked against the tests that exist
-and the measurements, as of 2026-11-05. Current work and next steps are in the newest
+and the measurements, as of 2026-11-10. Current work and next steps are in the newest
 `handoff-*.md` here.
 
 **Key:**
@@ -54,7 +54,7 @@ real tests are named here.
 | FR-ISO-4 container templates for server clients | 🧪 | checked with `docker compose config` only; not run with Podman/Docker |
 | FR-ISO-5 doctor + isolation self-test | ✅ | `test_doctor_setup.py`; passed on this machine |
 | FR-NET-1 network off by default, allow-list, ask, logged | ✅ | `test_egress.py`, `test_tool_egress.py` |
-| FR-NET-2 TLS interception | 🧪 | built (D78): `test_tls_inspection.py`, with real TLS, httpx and curl against a local HTTPS origin; not tried against outside sites or real agents |
+| FR-NET-2 TLS interception | 🧪 | built (D78): `test_tls_inspection.py`, with real TLS, httpx and curl against a local HTTPS origin, on both the Python and the opt-in Rust data path (ADR-0020); path rules match every reading of the path (I36); not tried against outside sites or real agents |
 | FR-EGR-1 egress report | ✅ | `test_egress_report.py` |
 | FR-POL-1 allow/ask/deny outside the model | ✅ | `test_policy.py` |
 | FR-POL-2 risk tiers | ✅ | `test_policy.py`, `test_approvals.py` |
@@ -86,6 +86,7 @@ real tests are named here.
 | FR-ENC-1 lock with passphrase, recovery key | ◐ | conversations, their artifacts, finished jobs, run artifact repositories, research libraries and the recovery key (`security/test_lock.py`, `test_recovery_key.py`, `test_artifact_lock.py`, `test_item_lock.py`, `test_library_lock.py`); **run snapshots not covered** |
 | FR-ENC-2 passphrase never leaks | ✅ | `security/test_lock.py`, `security/test_recovery_key.py` |
 | FR-ENC-5 crypto-shredding on purge | ✅ | `test_store.py` |
+| FR-ENC-6 database encryption | ✅ | built (D80, 2026-11-10): `test_sqlcipher.py` with the real SQLCipher driver; `tests/isolation/test_encrypted_storage.py` with `serve` in the real sandbox, isolated and not, checking no process has the key in its environment; reviewed (`docs/reviews/threat-model-2026-11-10.md`). Linux x86-64 only. Not tried with replication |
 
 ### Plugins
 | ID | Status | Notes |
@@ -107,8 +108,9 @@ Research requirements (FR-RES-*) are tracked in the `literature-review-agent-plu
 | FR-AUD-1 pre/post records for every effect | ✅ | `test_audit.py` |
 | FR-AUD-2 hash chain, `audit verify` | ✅ | `test_audit.py` |
 | FR-AUD-3 audit browser, export | ✅ | browser test, `test_audit.py` |
-| FR-AUD-4 signed checkpoints to a private git repo | ✅ | `test_anchoring.py` (local bare repo); a real private remote not set up yet |
+| FR-AUD-4 signed checkpoints to a private git repo | ✅ | `test_anchoring.py` (local bare repo, real `ssh-keygen` signatures); since 2026-11-10 each checkpoint also signs a Merkle root (D79); a real private remote not set up yet |
 | FR-AUD-5 OpenTelemetry export | ✅ | `test_otel.py` (mock collector) |
+| FR-AUD-6 Merkle proofs and an independent verifier | ✅ | built (D79, D81, 2026-11-10): `test_merkle.py` (RFC 6962 reference roots, Hypothesis), `test_anchoring.py` (`audit prove` / `check-proof` end to end), `test_audit_rust.py` (the Rust verifier agrees with Python on generated records and catches the same tampering) |
 | (RFC 3161 timestamps, added) | ✅ | `test_timestamp.py` (real `openssl ts` authority); no public TSA tried |
 | FR-RED-1 built-in scanner | ✅ | `security/test_redaction.py` |
 | FR-RED-2 Presidio | ✅ | checked with the real package; small model misses some names |
@@ -141,7 +143,7 @@ Research requirements (FR-RES-*) are tracked in the `literature-review-agent-plu
 | NFR-R1 no data loss, jobs resumable | ✅ | `test_jobs_resume.py`, atomic writes |
 | NFR-R2 audit before every effect | ✅ | as FR-AUD-1 |
 | NFR-S1 Strict: no outbound unless allow-listed | ✅ | isolation suite, `test_egress.py` |
-| NFR-S2 threat model reviewed each milestone | ◐ | first review recorded (`docs/reviews/threat-model-2026-11-03.md`), PR template prompts for more; **no review yet by anyone but the assistant that wrote the code** |
+| NFR-S2 threat model reviewed each milestone | ◐ | reviews recorded in `docs/reviews/` (latest 2026-11-10: path rules, database encryption, the Rust data path; threat model v0.7); the PR template prompts for more; **no review yet by anyone but the assistant that wrote the code** |
 | NFR-S4 isolation holds for every sandbox type | ✅ | isolation suite in CI |
 | NFR-PORT-1 Linux; unit tests on Windows | ✅ | CI (Ubuntu, Debian, Windows) |
 | NFR-PORT-2 WSL2 | 🧪 | D74: detection, hiding Windows drives and programs, doctor checks (`test_wsl.py`, `isolation/test_wsl_sandbox.py`: stand-in `/proc` and folders in the real sandbox); **never run on real WSL2**; checklist in `docs/wsl2.md` |
