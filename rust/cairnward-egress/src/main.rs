@@ -13,10 +13,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cairnward_egress::addresses::special_reason;
+use cairnward_egress::inspect::Tls;
 use cairnward_egress::proxy::{Limits, Proxy};
 
 const USAGE: &str = "usage: cairnward-egress-rs serve --listen ADDR --decisions SOCKET \
-[--connect-timeout S] [--idle-timeout S] [--max-connections N]\n       cairnward-egress-rs check-address";
+[--connect-timeout S] [--idle-timeout S] [--max-connections N] [--upstream-roots PEM]\n       cairnward-egress-rs check-address";
 
 fn check_addresses() -> io::Result<()> {
     let stdin = io::stdin();
@@ -40,11 +41,13 @@ struct ServeArgs {
     listen: String,
     decisions: PathBuf,
     limits: Limits,
+    upstream_roots: Option<PathBuf>,
 }
 
 fn parse_serve(args: &[String]) -> Result<ServeArgs, String> {
     let mut listen = None;
     let mut decisions = None;
+    let mut upstream_roots = None;
     let mut limits = Limits {
         connect_timeout: Duration::from_secs(15),
         idle_timeout: Duration::from_secs(300),
@@ -64,6 +67,8 @@ fn parse_serve(args: &[String]) -> Result<ServeArgs, String> {
         match flag.as_str() {
             "--listen" => listen = Some(value.clone()),
             "--decisions" => decisions = Some(PathBuf::from(value)),
+            // tests only: trust these roots for the real sites instead of Mozilla's
+            "--upstream-roots" => upstream_roots = Some(PathBuf::from(value)),
             "--connect-timeout" => limits.connect_timeout = secs()?,
             "--idle-timeout" => limits.idle_timeout = secs()?,
             "--max-connections" => {
@@ -80,6 +85,7 @@ fn parse_serve(args: &[String]) -> Result<ServeArgs, String> {
         listen: listen.ok_or("--listen is required")?,
         decisions: decisions.ok_or("--decisions is required")?,
         limits,
+        upstream_roots,
     })
 }
 
@@ -91,9 +97,14 @@ fn serve(args: ServeArgs) -> io::Result<()> {
         let listener = tokio::net::TcpListener::bind(&args.listen).await?;
         println!("listening {}", listener.local_addr()?.port());
         io::stdout().flush()?;
+        let tls = match &args.upstream_roots {
+            Some(path) => Tls::with_roots(&std::fs::read(path)?).map_err(io::Error::other)?,
+            None => Tls::new().map_err(io::Error::other)?,
+        };
         let proxy = Arc::new(Proxy {
             decisions: args.decisions,
             limits: args.limits,
+            tls,
         });
         tokio::select! {
             r = proxy.serve(listener) => r,

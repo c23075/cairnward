@@ -4,4 +4,5 @@
 pub mod addresses;
 pub mod decisions;
 pub mod http;
+pub mod inspect;
 pub mod proxy;

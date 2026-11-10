@@ -7,8 +7,8 @@
 audit records stay in Python, in one implementation.
 
 The binary is found through `CAIRNWARD_EGRESS_RS`, then `cairnward-egress-rs` on PATH, then a
-build in the repository's `rust/target/`. Until stage 3, a session that should be TLS-inspected
-is refused by the Rust path, not tunnelled unread.
+build in the repository's `rust/target/`. TLS inspection (stage 3) is done in Rust with rustls;
+the certificates, the request rules and the records still come from Python.
 """
 
 from __future__ import annotations

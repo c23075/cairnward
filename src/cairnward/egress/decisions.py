@@ -29,6 +29,21 @@ A `ticket` names one connection from `connect` until `closed` or `denied`.
    "bytes_down": int, "duration_s": float, "address": str, "error": str|null,
    "status": int (plain HTTP only)}` -> `{"ok": true}`: writes the `post` record. Ends the ticket.
 
+TLS inspection (stage 3), for a ticket whose `connect` said `inspect`:
+- `{"op": "certificate", "ticket": str}` -> `{"ok": true, "chain": PEM, "key": PEM}`: the host's
+  certificate from Cairnward's local CA (leaf then CA) and its key.
+- `{"op": "request", "ticket": str, "method": str, "target": str, "hosts": [str]}` ->
+  `{"ok": true, "allow": bool, "reason": str, "request": str}`: may this request inside the
+  tunnel go out? `hosts` are its Host header values. The method and path rules (with every
+  reading of the path, I36), a CONNECT inside the tunnel, and a request naming another site
+  (fronting, T-34) are judged here, as in `inspect.Inspector`.
+- `{"op": "request_done", "ticket": str, "request": str, "status": int|null, "bytes_up": int,
+   "bytes_down": int, "error": str|null}` -> `{"ok": true}`: one `net.request` audit record,
+  with the path and query as a digest only.
+
+- `{"op": "drop", "ticket": str}` -> `{"ok": true}`: end a ticket with no further record (a
+  plain-HTTP request refused by the inspection rules, already recorded by `request_done`).
+
 Errors: `{"ok": false, "error": str}` (unknown op or ticket, malformed line); the connection
 stays usable. Lines over 64 KiB close it. Only the owner can connect (0600 socket in a private
 folder), and the service trusts what the data path reports about bytes and outcomes, as the
@@ -45,6 +60,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from cairnward.config.models import TlsInspection
+from cairnward.egress.inspect import Exchange, Verdict, check_request, fronted, request_path
 from cairnward.egress.proxy import EgressProxy, Session, _BadRequest, _split_hostport
 from cairnward.policy.engine import Action, Decision
 
@@ -56,7 +73,12 @@ class _Ticket:
     action: Action
     decision: Decision
     session: Session
+    host: str = ""
+    port: int = 0
+    inspection: TlsInspection | None = None
     pre_seq: int | None = None
+    requests: dict[str, Exchange] = field(default_factory=dict)
+    counts: dict[str, int] = field(default_factory=lambda: {"requests": 0, "denied": 0})
 
 
 @dataclass
@@ -112,6 +134,23 @@ class DecisionService:
                 ticket.action, str(req["address"]), _port(ticket.action),
                 ticket.session.any_environment)  # fmt: skip
             return {"ok": True, "allow": allowed}
+        if op == "certificate":
+            if ticket.inspection is None:
+                return {"ok": False, "error": "this connection isn't inspected"}
+            chain, key = await asyncio.to_thread(self.proxy._tls_contexts_pem, ticket.host)
+            return {"ok": True, "chain": chain.decode(), "key": key.decode()}
+        if op == "request":
+            return self._request(ticket, req)
+        if op == "request_done":
+            ex = ticket.requests.pop(str(req["request"]))
+            ex.status = int(req["status"]) if isinstance(req.get("status"), int) else None
+            ex.bytes_up, ex.bytes_down = int(req["bytes_up"]), int(req["bytes_down"])
+            ex.error = str(req["error"])[:200] if req.get("error") else None
+            await self.proxy._record_request(ticket.action, ex)
+            return {"ok": True}
+        if op == "drop":  # ended without a connection record (already recorded as refused)
+            self._tickets.pop(str(req["ticket"]))
+            return {"ok": True}
         if op == "deny":
             self._tickets.pop(str(req["ticket"]))
             refused = Decision(ticket.action, "deny", "high", str(req["reason"])[:300])
@@ -131,6 +170,8 @@ class DecisionService:
                 details["status"] = req["status"]
             if req.get("error"):
                 details["error"] = str(req["error"])[:200]
+            if ticket.inspection is not None:
+                details.update(inspected=True, **ticket.counts)
             outcome = "ok" if req.get("outcome") == "ok" else "error"
             await asyncio.to_thread(self.proxy.engine.audit_post, ticket.action, ticket.pre_seq,
                                     outcome=outcome, details=details)  # fmt: skip
@@ -159,11 +200,31 @@ class DecisionService:
             await asyncio.to_thread(self.proxy.engine.audit_deny, decision)
             return {**refused, "status": 403, "reason": decision.reason}
         ticket = secrets.token_urlsafe(12)
-        self._tickets[ticket] = _Ticket(action, decision, session)
+        inspection = self.proxy._inspection(session, host, port)
+        self._tickets[ticket] = _Ticket(action, decision, session, host, port, inspection)
         inspect = self.proxy._inspection(session, host, port) is not None
         return {"ok": True, "allow": True, "status": 200, "reason": decision.reason,
                 "ticket": ticket, "inspect": inspect,
                 "any_environment": session.any_environment}  # fmt: skip
+
+    def _request(self, ticket: _Ticket, req: dict[str, Any]) -> dict[str, Any]:
+        """One request inside an inspected tunnel, judged as `inspect.Inspector.run` judges it."""
+        if ticket.inspection is None:
+            return {"ok": False, "error": "this connection isn't inspected"}
+        method, target = str(req["method"])[:20], str(req["target"])
+        hosts = [(b"host", str(h).encode("latin-1", "replace")) for h in req.get("hosts", [])]
+        verdict = check_request(ticket.inspection, ticket.host, ticket.port, method,
+                                request_path(target))  # fmt: skip
+        if method.upper() == "CONNECT":
+            verdict = Verdict(False, "a tunnel inside an inspected tunnel", None)
+        elif why := fronted(hosts, target, ticket.host):
+            verdict = Verdict(False, why, None)
+        ticket.counts["requests"] += 1
+        if not verdict.allowed:
+            ticket.counts["denied"] += 1
+        rid = secrets.token_urlsafe(8)
+        ticket.requests[rid] = Exchange(method, target, verdict)
+        return {"ok": True, "allow": verdict.allowed, "reason": verdict.reason, "request": rid}
 
 
 def _port(action: Action) -> int:

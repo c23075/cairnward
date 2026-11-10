@@ -256,7 +256,7 @@
         },
         "implementation": {
           "default": "python",
-          "description": "the data path: python, or rust (cairnward-egress-rs, ADR-0020; no TLS inspection yet: inspecting sessions are refused)",
+          "description": "the data path: python, or rust (cairnward-egress-rs, ADR-0020; opt-in while it's new)",
           "enum": [
             "python",
             "rust"

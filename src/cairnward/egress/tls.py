@@ -223,6 +223,17 @@ class Issuer:
         )
         return cert.public_bytes(serialization.Encoding.PEM), expires
 
+    def leaf_pem(self, host: str) -> tuple[bytes, bytes]:
+        """The certificate chain (leaf, then the CA) and the leaf's key, as PEM, for a data path
+        in another process that does its own TLS (the Rust one, ADR-0020 stage 3)."""
+        cert, _ = self._leaf(host.strip("[]").lower())
+        key = self._leaf_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        return cert + self.ca_pem, key
+
     def context(self, host: str) -> ssl.SSLContext:
         """A server context presenting a certificate for `host` (cached, LRU)."""
         host = host.strip("[]").lower()

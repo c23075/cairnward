@@ -311,6 +311,15 @@ class EgressProxy:
             self._upstream_ssl = tls.upstream_context()
         return self._issuer.context(host), self._upstream_ssl
 
+    def _tls_contexts_pem(self, host: str) -> tuple[bytes, bytes]:
+        """The host's certificate chain and key, for the Rust data path (decisions.py)."""
+        from cairnward.egress import tls
+
+        if self._issuer is None:
+            self._issuer = tls.Issuer(self.config.paths.data_dir)
+        chain, key = self._issuer.leaf_pem(host)
+        return chain, key
+
     async def _record_request(self, action: Action, ex: Exchange) -> None:
         """One audit record per inspected request; the path and query only as a digest."""
         req = Action(

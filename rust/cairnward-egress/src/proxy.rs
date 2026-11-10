@@ -27,6 +27,7 @@ pub struct Limits {
 pub struct Proxy {
     pub decisions: PathBuf,
     pub limits: Limits,
+    pub tls: crate::inspect::Tls,
 }
 
 const HOP: [&str; 9] = [
@@ -279,10 +280,25 @@ impl Proxy {
             _ => {}
         }
         if c.inspect {
-            let why = "TLS inspection isn't in the Rust data path yet (ADR-0020, stage 3)";
-            let _ = dec.deny(why).await;
-            deny_reply(w, &display, why).await;
-            return Ok(());
+            if let Some(path) = &target.path {
+                // plain HTTP: the request is already readable, so the same rules apply to it
+                if let Some(why) = crate::inspect::check_plain(&mut dec, &head.method, path)
+                    .await
+                    .map_err(|_| Error::Closed)?
+                {
+                    let _ = dec.drop_ticket().await;
+                    let body = format!("cairnward-egress: {} denied: {why}\n", head.method);
+                    reply(
+                        w,
+                        403,
+                        "Forbidden by cairnward",
+                        &body,
+                        &[("X-Cairnward-Decision", "deny")],
+                    )
+                    .await;
+                    return Ok(());
+                }
+            }
         }
         // resolve once, refuse special addresses, dial what was checked
         let addresses = match resolve(&target.host, target.port).await {
@@ -340,6 +356,25 @@ impl Proxy {
                 let outcome = if let Some(path) = &target.path {
                     self.forward_once(&head, path, &target.host_header, client, w, upstream)
                         .await
+                } else if c.inspect {
+                    let _ = w
+                        .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                        .await;
+                    let o = crate::inspect::tunnel(
+                        &self.tls,
+                        &mut dec,
+                        &target.host,
+                        client,
+                        w,
+                        upstream,
+                        self.limits.connect_timeout,
+                        self.limits.idle_timeout,
+                    )
+                    .await;
+                    if let Some(e) = o.error {
+                        error = Some(e);
+                    }
+                    Ok((o.bytes_up, o.bytes_down, None))
                 } else {
                     let _ = w
                         .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")

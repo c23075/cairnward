@@ -96,6 +96,57 @@ impl Decisions {
         Ok(r.get("allow").and_then(Value::as_bool).unwrap_or(false))
     }
 
+    /// The host's certificate chain and key (PEM), from Cairnward's local CA.
+    pub async fn certificate(&mut self) -> std::io::Result<(String, String)> {
+        let r = self
+            .ask(json!({"op": "certificate", "ticket": self.ticket()}))
+            .await?;
+        let field = |k: &str| r.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        Ok((field("chain"), field("key")))
+    }
+
+    /// May this request inside an inspected tunnel (or plain HTTP in an inspecting
+    /// environment) go out? Returns (allow, reason, request id).
+    pub async fn request(
+        &mut self,
+        method: &str,
+        target: &str,
+        hosts: &[&str],
+    ) -> std::io::Result<(bool, String, String)> {
+        let r = self.ask(json!({"op": "request", "ticket": self.ticket(), "method": method, "target": target, "hosts": hosts})).await?;
+        Ok((
+            r.get("allow").and_then(Value::as_bool).unwrap_or(false),
+            r.get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            r.get("request")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        ))
+    }
+
+    pub async fn request_done(
+        &mut self,
+        request: &str,
+        status: Option<u16>,
+        bytes_up: u64,
+        bytes_down: u64,
+        error: Option<&str>,
+    ) -> std::io::Result<()> {
+        self.ask(json!({"op": "request_done", "ticket": self.ticket(), "request": request, "status": status, "bytes_up": bytes_up, "bytes_down": bytes_down, "error": error}))
+            .await
+            .map(|_| ())
+    }
+
+    /// End a ticket without a record (the request was already recorded as refused).
+    pub async fn drop_ticket(&mut self) -> std::io::Result<()> {
+        self.ask(json!({"op": "drop", "ticket": self.ticket()}))
+            .await
+            .map(|_| ())
+    }
+
     pub async fn deny(&mut self, reason: &str) -> std::io::Result<()> {
         self.ask(json!({"op": "deny", "ticket": self.ticket(), "reason": reason}))
             .await

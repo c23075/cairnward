@@ -1,6 +1,6 @@
 # ADR-0020: Rewriting the egress proxy and audit log in Rust
 
-- Status: Accepted 2026-11-10 (owner go-ahead, A17); stages 1 and 2 done (opt-in), stage 3 next
+- Status: Accepted 2026-11-10 (owner go-ahead, A17); stages 1–3 done (opt-in); stage 4 (audit writer) next
 - Date: 2026-11-10
 - Spec: §3.2, §5.2, §6, §9, D9; follows [ADR-0003](0003-python-now-rust-later.md)
 
@@ -106,7 +106,7 @@ reference until the Rust one passes the same tests:
   - **`[egress] implementation = "rust"`** (default `python`): `egress/rust.py` runs the binary
     and the decision service behind `EgressProxy`'s interface, for `serve` in either mode and for
     `cairnward egress`. Sessions that should be TLS-inspected are refused, not tunnelled unread,
-    until stage 3, and `serve` warns when that applies.
+    until stage 3 (which followed the same day).
   - **The shared fixture:** every test in `tests/test_egress.py` and the egress fuzz tests in
     `tests/test_fuzz.py` now runs against both data paths. This found a difference that's now
     fixed: an unclosed IPv6 bracket in a URL got 403 from Rust instead of Python's 400. Tests
@@ -118,7 +118,28 @@ reference until the Rust one passes the same tests:
     - a request's 100-continue is answered locally, as h11 does;
     - not yet measured against the Strict overhead target (I14);
     - not yet run for real outside tests.
-- **Next, stage 3:** TLS inspection in Rust (rustls), with the path readings from I36.
+- **Stage 3, done 2026-11-10:** TLS inspection in the Rust data path.
+  - **TLS in Rust:** rustls with the `ring` provider, so there's no C toolchain. The tool's TLS
+    is ended with the host's certificate, and the upstream TLS is verified against
+    `webpki-roots` (Mozilla's roots, as certifi). Both sides use TLS 1.2 or later with ALPN
+    `http/1.1` only.
+  - **Still single-sourced in Python,** through new decision-service operations:
+    - the certificate itself (`certificate`, from the local CA; the CA key never leaves
+      Python);
+    - the verdict on each request (`request`: method and path rules with every path reading
+      from I36, a tunnel inside the tunnel, domain fronting);
+    - each request's audit record (`request_done`, the path by digest).
+  - **The request loop follows `Inspector`:** a refused request gets 403 and the connection
+    ends; 100-continue is answered locally; keep-alive is honoured; after 101 the rest is piped
+    unread. Plain HTTP in an inspecting environment is checked by the same rules before anything
+    is sent.
+  - **Tests:** every test in `tests/test_tls_inspection.py` that runs the proxy now runs against
+    both data paths. `--upstream-roots` (tests only) stands in for the Python tests' injected
+    upstream context.
+  - **Error wording differs:** in failure messages the Rust path names rustls's errors (for
+    example `InvalidCertificate(UnknownIssuer)`), not OpenSSL's.
+- **Next, stage 4:** the audit writer in Rust. Then stage 5: measure, review, and switch the
+  default.
 - **Dependency audit (2026-11-10):** CI runs `cargo audit --deny warnings` (cargo-audit 0.22.2,
   installed `--locked`) against the RustSec advisory database on every change. That fails on
   known vulnerabilities, unmaintained crates and yanked versions. Dependabot watches

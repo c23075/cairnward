@@ -842,13 +842,6 @@ def serve(cfg: Config, *, with_egress: bool = True, log: Log) -> int:
 
     for warning in dbkey.weakenings(cfg.paths):
         log(f"warning: {warning}")
-    if cfg.main.egress.implementation == "rust":
-        inspecting = [n for n, e in cfg.environments.items() if e.tls_inspection.enabled]
-        if inspecting:
-            log(
-                f"warning: the Rust egress data path has no TLS inspection yet: runs in "
-                f"{', '.join(inspecting)} are refused rather than tunnelled unread (ADR-0020)"
-            )
     try:
         dbkey.key_for(cfg.paths)  # ask for the passphrase once, before anything starts
     except DatabaseKeyError as exc:

@@ -16,8 +16,8 @@
   warnings`), and Dependabot watches `rust/Cargo.lock`.
 - An opt-in Rust egress data path, `[egress] implementation = "rust"` (ADR-0020, stage 2):
   `cairnward-egress-rs` handles connections and asks the Python decision service for policy,
-  approvals and audit records. Every egress test runs against both paths. No TLS inspection in
-  Rust yet: inspecting sessions are refused.
+  approvals and audit records. Every egress test runs against both paths. TLS inspection works in
+  the Rust path too (rustls), with certificates, request verdicts and records from Python.
 - The start of the Rust egress data path (ADR-0020, stage 1): a `rust/` workspace whose
   address checks are compared with the Python ones on generated addresses in CI, and the
   decision service (`egress/decisions.py`) a Rust data path will ask for policy and audit
