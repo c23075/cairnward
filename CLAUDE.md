@@ -34,7 +34,7 @@ uv run pytest -q tests/test_egress_rust.py tests/test_egress.py   # both data pa
 - Secrets never go in config files (use `${env:NAME}` or `env:`/`keyring:` refs), the audit
   log, or reports. Audit records hold digests of prompts/queries, not text.
 - Third-party downloads are hash-pinned (uv.lock, `redaction_engines/locks/`,
-  `tests/e2e/package-lock.json`).
+  `tests/e2e/package-lock.json`, `rust/Cargo.lock`, checked by `cargo audit` in CI).
 - Docs are plain and specific: say what was tested for real and what only against a
   stand-in. Update `docs/spec.md` (and the ADR, if a decision changes) with the code.
 - Commit only when asked; never put model identifiers in commits or docs.

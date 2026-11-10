@@ -63,6 +63,11 @@ jobs:
         run: |
           rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
           rustup default 1.97.0
+      - name: Known vulnerabilities, unmaintained or yanked crates (RustSec advisory database)
+        working-directory: rust
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit --deny warnings
       - working-directory: rust
         run: cargo fmt --all --check
       - working-directory: rust

@@ -119,5 +119,7 @@ reference until the Rust one passes the same tests:
     - not yet measured against the Strict overhead target (I14);
     - not yet run for real outside tests.
 - **Next, stage 3:** TLS inspection in Rust (rustls), with the path readings from I36.
-- **Open from stage 1, now due:** the crate has dependencies (`tokio`, `serde_json`, locked in
-  `Cargo.lock`), so `cargo audit` or `cargo deny` should join CI.
+- **Dependency audit (2026-11-10):** CI runs `cargo audit --deny warnings` (cargo-audit 0.22.2,
+  installed `--locked`) against the RustSec advisory database on every change. That fails on
+  known vulnerabilities, unmaintained crates and yanked versions. Dependabot watches
+  `rust/Cargo.lock`. The first run was clean: 24 crates, no advisories.

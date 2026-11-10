@@ -12,6 +12,8 @@
   An optional `[storage] key` reference allows unattended starts, with a warning. Needs the
   `sqlcipher` extra, Linux x86-64 only. An encrypted audit log keeps no plaintext mirror.
 
+- CI audits the Rust crates against the RustSec advisory database (`cargo audit --deny
+  warnings`), and Dependabot watches `rust/Cargo.lock`.
 - An opt-in Rust egress data path, `[egress] implementation = "rust"` (ADR-0020, stage 2):
   `cairnward-egress-rs` handles connections and asks the Python decision service for policy,
   approvals and audit records. Every egress test runs against both paths. No TLS inspection in
