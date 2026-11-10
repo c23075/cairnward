@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Merkle checkpoints (D79): each audit anchor also signs the RFC 9162 Merkle root over every
+  record so far, `audit verify --anchors` checks each root against the log and that each
+  checkpoint extends the last, and `audit prove` / `audit check-proof` show one record is in a
+  signed checkpoint without the rest of the log. Older checkpoints still verify.
+
 ### Security
 - TLS inspection: method and path rules now match the normalized path (escaped unreserved
   characters decoded, `//`, `.` and `..` resolved), and a path with an encoded slash, backslash

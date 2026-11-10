@@ -160,6 +160,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Backups | restic encrypts them before they leave |
 
 ## Recent changes
+- Merkle checkpoints built (2026-11-10, D79): anchors sign a Merkle root; `audit prove` and `audit check-proof` for single records. Tested with a local git repository and real `ssh-keygen`, not yet with a real remote
 - Trade-offs written down (2026-11-10): I37–I39 (CA key readable with isolation off, no `Origin` check on the gateway, client keys not pinned to an environment); deferred work (Rust rewrite, Merkle checkpoints, OWASP agentic mapping) in [limitations](limitations.md); "Phase 3" now reads "Later" (spec §9)
 - Docs reorganised (2026-11-09): an index by reader ([docs/README.md](README.md)), an [overview](overview.md) with where Cairnward sits in an agentic stack, the enterprise, LLMOps and model risk management plan moved to [plan/enterprise-poc.md](plan/enterprise-poc.md), and the spec's six longest paragraphs split into labelled points (no wording removed)
 - Audit fixes (2026-11-09): TLS-inspection path rules normalize the path (I36); IPv6 allow-list entries without a port now match; doc drift corrected

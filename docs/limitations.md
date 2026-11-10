@@ -144,8 +144,8 @@ disagree with the code, the code was checked, and this page follows it.
   - Even with anchoring, records newer than the last anchor (up to an hour by default) can be
     changed by someone controlling the machine.
   - Timestamps come from the machine's clock unless a timestamp server is set (`tsa_url`).
-  - Merkle checkpoints, which would make partial verification cheaper, are deferred with no
-    date (ADR-0008, spec §9).
+  - Merkle checkpoints (D79) let one record be checked against a signed checkpoint without the
+    log, but only for records the checkpoint covers; they don't protect newer ones.
 - **Auditing can be switched off** like any protection. Then only settings snapshots and
   `audit.disabled` / `audit.enabled` markers are written.
 

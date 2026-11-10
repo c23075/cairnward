@@ -372,6 +372,13 @@ class AuditLog:
             row = conn.execute(query).first()
         return _row_to_record(row) if row else None
 
+    def hashes(self, upto: int) -> list[str]:
+        """Record hashes for seq 1..upto, in order: the leaves of the Merkle tree (merkle.py)."""
+        query = (select(audit_records.c.hash).where(audit_records.c.seq <= upto)
+                 .order_by(audit_records.c.seq))  # fmt: skip
+        with self._engine.connect() as conn:
+            return [str(h) for (h,) in conn.execute(query).all()]
+
     def head(self) -> tuple[int, str]:
         rec = self.latest()
         return (rec.seq, rec.hash) if rec else (0, GENESIS)

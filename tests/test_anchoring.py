@@ -134,3 +134,115 @@ def test_checkpoints_get_rfc3161_timestamps(setup: tuple[Paths, AuditLog, Anchor
     assert timed.anchor(log) is not None
     _, checkpoints = timed._files()
     assert "tsr_error" in checkpoints.read_text().splitlines()[-1]
+
+
+# ------------------------------------------------------------------ Merkle checkpoints
+
+
+def test_checkpoints_sign_a_merkle_root_that_extends_the_last(
+    setup: tuple[Paths, AuditLog, Anchorer, Path],
+) -> None:
+    from cairnward.audit import merkle
+
+    _, log, anchorer, _ = setup
+    first = anchorer.anchor(log)
+    assert first is not None and first["v"] == 2 and first["root"] == merkle.root(log.hashes(1))
+    for i in range(6):
+        log.append("run.start", actor="user", details={"n": i})
+    second = anchorer.anchor(log)
+    assert second is not None and second["seq"] == 7
+    res = anchorer.verify(log)
+    assert res.ok and res.merkle_roots == 2, res.problems
+
+
+def test_a_forged_root_or_rewritten_history_is_caught(
+    setup: tuple[Paths, AuditLog, Anchorer, Path],
+) -> None:
+    _, log, anchorer, _ = setup
+    log.append("run.start", actor="user")
+    assert anchorer.anchor(log) is not None
+    _, checkpoints = anchorer._files()
+    entry = json.loads(checkpoints.read_text().splitlines()[-1])
+    entry["payload"]["root"] = "00" * 32  # the signature now fails too, so re-sign it
+    text = json.dumps(entry["payload"], sort_keys=True, separators=(",", ":"))
+    entry["sig"] = anchorer._sign(text)
+    checkpoints.write_text(json.dumps(entry, sort_keys=True) + "\n")
+    anchorer._sync = lambda: None  # type: ignore[method-assign]  # keep the local edit
+    res = anchorer.verify(log)
+    assert not res.ok and any("Merkle root differs" in p for p in res.problems)
+
+
+def test_version_1_checkpoints_still_verify(setup: tuple[Paths, AuditLog, Anchorer, Path]) -> None:
+    _, log, anchorer, _ = setup
+    seq, head = log.head()
+    signers, checkpoints = anchorer._files()
+    signers.parent.mkdir(parents=True, exist_ok=True)
+    signers.write_text(f"cairnward {anchorer.sign_key.with_suffix('.pub').read_text().strip()}\n")
+    payload = {"v": 1, "install": anchorer.install_id, "seq": seq, "hash": head,
+               "ts": "2026-11-01T00:00:00+00:00"}  # fmt: skip
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    checkpoints.write_text(json.dumps({"payload": payload, "sig": anchorer._sign(text)}) + "\n")
+    anchorer._sync = lambda: None  # type: ignore[method-assign]
+    res = anchorer.verify(log)
+    assert res.ok and res.anchors == 1 and res.merkle_roots == 0, res.problems
+
+
+def test_prove_and_check_a_record_without_the_log(
+    setup: tuple[Paths, AuditLog, Anchorer, Path],
+    tmp_path: Path,
+) -> None:
+    from cairnward.audit.anchor import AnchorError, check_proof, make_proof
+
+    _, log, anchorer, _ = setup
+    for i in range(9):
+        log.append("tool.call", actor="user", details={"n": i})
+    with pytest.raises(AnchorError, match="no checkpoint"):
+        make_proof(anchorer, log, 4)
+    assert anchorer.anchor(log) is not None
+    bundle = json.loads(json.dumps(make_proof(anchorer, log, 4)))  # as written to a file
+    signers, _ = anchorer._files()
+    trusted = tmp_path / "trusted-signers"
+    trusted.write_text(signers.read_text())
+    assert check_proof(bundle, trusted) == []
+    assert check_proof(bundle, None) == [
+        "signature not checked: pass the signers file you trust (--signers)"
+    ]
+    edited = json.loads(json.dumps(bundle))
+    edited["record"]["action"] = "vault.purge"
+    assert any("edited" in p for p in check_proof(edited, trusted))
+    moved = json.loads(json.dumps(bundle))
+    moved["proof"][0] = "11" * 32
+    assert any("isn't in the checkpoint" in p for p in check_proof(moved, trusted))
+    other_key = tmp_path / "other"
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(other_key)],
+                   check=True)  # fmt: skip
+    stranger = tmp_path / "stranger-signers"
+    stranger.write_text(f"cairnward {(tmp_path / 'other.pub').read_text().strip()}\n")
+    assert any("signature" in p for p in check_proof(bundle, stranger))
+
+
+def test_prove_and_check_proof_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                   capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
+    remote = tmp_path / "anchors.git"
+    subprocess.run(["git", "init", "--quiet", "--bare", "-b", "main", str(remote)], check=True)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / "cairnward.toml").write_text(f'[anchor]\nrepo = "{remote.as_uri()}"\n')
+    monkeypatch.setenv("CAIRNWARD_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CAIRNWARD_STATE_DIR", str(tmp_path / "state"))
+    base = ["--config-dir", str(cfg), "audit"]
+    assert main([*base, "anchor", "--setup"]) == 0
+    with AuditLog.open(Paths(cfg, tmp_path / "data", tmp_path / "state")) as log:
+        for _ in range(3):
+            log.append("settings.snapshot", actor="user")
+    assert main([*base, "anchor"]) == 0
+    assert main([*base, "verify", "--anchors"]) == 0
+    assert "Merkle roots OK: 1" in capsys.readouterr().out
+    proof = tmp_path / "proof.json"
+    assert main([*base, "prove", "2", "--out", str(proof)]) == 0
+    capsys.readouterr()
+    assert main(["audit", "check-proof", str(proof)]) == 2  # signature not checked
+    assert "signature not checked" in capsys.readouterr().out
+    signers = next(p for p in tmp_path.rglob("signers") if p.is_file())
+    assert main(["audit", "check-proof", str(proof), "--signers", str(signers)]) == 0
+    assert "signature OK" in capsys.readouterr().out

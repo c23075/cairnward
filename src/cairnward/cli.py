@@ -59,6 +59,20 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument(
         "--anchors", action="store_true", help="also check against the anchors repo ([anchor])"
     )
+    prove = audit_sub.add_parser(
+        "prove", help="a proof that one record is in an anchored checkpoint (Merkle, RFC 9162)"
+    )
+    prove.add_argument("seq", type=int, help="the record's sequence number")
+    prove.add_argument("--out", type=Path, help="write the proof here (default: print it)")
+    chk = audit_sub.add_parser(
+        "check-proof", help="check a proof from `audit prove`, without the log"
+    )
+    chk.add_argument("proof", type=Path, help="the proof file")
+    chk.add_argument(
+        "--signers",
+        type=Path,
+        help="the anchors repo's signers file you trust, to check the signature",
+    )
     anch = audit_sub.add_parser("anchor", help="sign and push a checkpoint to your anchors repo")
     anch.add_argument("--setup", action="store_true", help="create the keys and show what to do")
     log_cmd = audit_sub.add_parser("log", help="show records")
@@ -500,6 +514,8 @@ def _parse_expect(values: list[str]) -> list[tuple[int, str]]:
 def _cmd_audit(args: argparse.Namespace) -> int:
     from cairnward.audit import AuditLog
 
+    if args.audit_command == "check-proof":  # works anywhere: needs neither log nor config
+        return _audit_check_proof(args)
     paths = default_paths(args.config_dir)
     with AuditLog.open(paths) as log:
         if args.audit_command == "head":
@@ -508,6 +524,8 @@ def _cmd_audit(args: argparse.Namespace) -> int:
             return 0
         if args.audit_command == "anchor":
             return _audit_anchor(args, log)
+        if args.audit_command == "prove":
+            return _audit_prove(args, log)
         if args.audit_command == "verify":
             res = log.verify(_parse_expect(args.expect))
             for note in res.notes:
@@ -593,6 +611,53 @@ def _audit_anchor(args: argparse.Namespace, log: Any) -> int:
     return 0
 
 
+def _audit_prove(args: argparse.Namespace, log: Any) -> int:
+    import json
+
+    from cairnward.audit.anchor import Anchorer, AnchorError, make_proof
+
+    cfg = _load(args)
+    try:
+        bundle = make_proof(Anchorer(cfg.paths, cfg.main.anchor), log, args.seq)
+    except AnchorError as exc:
+        print(f"cairnward: {exc}", file=sys.stderr)
+        return 1
+    text = json.dumps(bundle, indent=1, sort_keys=True) + "\n"
+    if args.out:
+        args.out.write_text(text, encoding="utf-8")
+        print(f"proof for record {args.seq} in the checkpoint at seq {bundle['size']}: {args.out}")
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def _audit_check_proof(args: argparse.Namespace) -> int:
+    import json
+
+    from cairnward.audit.anchor import check_proof
+
+    try:
+        bundle = json.loads(args.proof.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"cairnward: can't read {args.proof}: {exc}", file=sys.stderr)
+        return 1
+    problems = check_proof(bundle if isinstance(bundle, dict) else {}, args.signers)
+    unsigned = [p for p in problems if p.startswith("signature not checked")]
+    if problems and problems != unsigned:
+        print("proof FAILED:", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+    rec = bundle["record"]
+    print(f"OK: record {rec['seq']} ({rec['action']}, {rec['ts']}) is in the checkpoint at seq "
+          f"{bundle['size']}, signed {bundle['checkpoint']['payload'].get('ts')}")  # fmt: skip
+    if unsigned:
+        print(f"note: {unsigned[0]}")
+        return 2
+    print("signature OK")
+    return 0
+
+
 def _audit_verify_anchors(args: argparse.Namespace, log: Any) -> int:
     from cairnward.audit.anchor import Anchorer, AnchorError
 
@@ -608,6 +673,9 @@ def _audit_verify_anchors(args: argparse.Namespace, log: Any) -> int:
         if res.timestamped:
             print(f"timestamps OK: {res.timestamped} checkpoint(s) timestamped by the authority, "
                   f"the last at {res.last_tsa_time}")  # fmt: skip
+        if res.merkle_roots:
+            print(f"Merkle roots OK: {res.merkle_roots} checkpoint(s) match the log, each "
+                  "extending the one before")  # fmt: skip
         return 0
     print(f"anchors FAILED: {len(res.problems)} problem(s)", file=sys.stderr)
     for problem in res.problems:
