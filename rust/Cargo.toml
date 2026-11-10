@@ -1,5 +1,5 @@
 [workspace]
-members = ["cairnward-egress"]
+members = ["cairnward-egress", "cairnward-audit"]
 resolver = "2"
 
 [workspace.package]

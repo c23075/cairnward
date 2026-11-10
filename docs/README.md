@@ -19,7 +19,7 @@ Grouped by what you're here to do. Start with the [overview](overview.md) if you
 - [CHANGELOG](../CHANGELOG.md): what changed in each release
 
 ## Design
-- [Specification](spec.md): the design, its decisions (D1–D80) and current behaviour
+- [Specification](spec.md): the design, its decisions (D1–D81) and current behaviour
 - [Requirements](requirements.md), with their status in [plan/requirements-status.md](plan/requirements-status.md)
 - [Architecture decisions](adr/): one ADR per significant decision
 - [Architecture in UML](architecture-uml.md): deployment, classes, request sequences and vault states

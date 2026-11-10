@@ -172,3 +172,33 @@ def test_bad_requests_get_an_error_and_the_connection_stays_usable(
         assert r["status"] == 403
 
     _run(service, script)
+
+
+def test_with_a_secret_only_its_holder_is_answered(setup: Callable[..., Any]) -> None:
+    """In isolated mode the sandboxed core can reach any Unix socket; the secret, which only the
+    Rust binary gets (on stdin), keeps it from asking for certificates or forging records."""
+    service, _, token = setup('network = "off"')
+    service.secret = "s3cret-for-the-binary"
+    connect = {"op": "connect", "authorization": _auth(token), "method": "CONNECT",
+               "host": "example.org", "port": 443}  # fmt: skip
+
+    async def script(c: Client) -> list[Any]:
+        sock = service._server.sockets[0].getsockname() if service._server else ""
+        out: list[Any] = [await c.ask(connect)]  # no hello: refused, and the connection closed
+        out.append(await c.reader.read())
+        for hello in (
+            {"op": "hello", "secret": "guess"},
+            {"op": "hello", "secret": "s3cret-for-the-binary"},
+        ):
+            reader, writer = await asyncio.open_unix_connection(sock)
+            other = Client(reader, writer)
+            out.append(await other.ask(hello))
+            if out[-1]["ok"]:
+                out.append(await other.ask(connect))
+            writer.close()
+        return out
+
+    refused, rest, wrong, ok, answered = _run(service, script)
+    assert refused == {"ok": False, "error": "not authorised"} and rest == b""
+    assert wrong == {"ok": False, "error": "not authorised"}
+    assert ok == {"ok": True} and answered["status"] == 403

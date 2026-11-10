@@ -1,6 +1,6 @@
 # ADR-0020: Rewriting the egress proxy and audit log in Rust
 
-- Status: Accepted 2026-11-10 (owner go-ahead, A17); stages 1–3 done (opt-in); stage 4 (audit writer) next
+- Status: Accepted 2026-11-10 (owner go-ahead, A17); stages 1–5 done. Stage 4 changed to an independent verifier (D81). The Rust path stays opt-in until it has run for real (A18)
 - Date: 2026-11-10
 - Spec: §3.2, §5.2, §6, §9, D9; follows [ADR-0003](0003-python-now-rust-later.md)
 
@@ -113,7 +113,7 @@ reference until the Rust one passes the same tests:
     that inject DNS answers run against Python only, and a test that uses the real resolver
     covers both. `serve` with the Rust path is tested end to end with the real sandbox, both
     beside the isolated core and in a single process.
-  - **Still to do before it can become the default (stage 5):**
+  - **Open when stage 2 ended (all since done in stages 3 and 5, except running for real):**
     - bytes are counted raw (with chunk framing) rather than as decoded body bytes;
     - a request's 100-continue is answered locally, as h11 does;
     - not yet measured against the Strict overhead target (I14);
@@ -138,8 +138,36 @@ reference until the Rust one passes the same tests:
     upstream context.
   - **Error wording differs:** in failure messages the Rust path names rustls's errors (for
     example `InvalidCertificate(UnknownIssuer)`), not OpenSSL's.
-- **Next, stage 4:** the audit writer in Rust. Then stage 5: measure, review, and switch the
-  default.
+- **Stage 4, done 2026-11-10, changed from a writer to a verifier (D81):**
+  - **Why not a writer:** database encryption (D80) came after this ADR. `audit.db` is now a
+    SQLCipher file whose key stays in Python and reaches the sandboxed core only on stdin. A
+    Rust writer that owned `audit.db` would need its own SQLCipher build and a second process
+    holding the key, which is what the 2026-11-10 review (R1) worked to avoid.
+  - **Why a verifier:** a second, independent implementation checking the first is worth more
+    for evidence. `cairnward-audit-rs` (crate `cairnward-audit`; depends on `serde_json` and
+    `sha2`) recomputes every record's hash from its fields, the chain and RFC 9162 Merkle roots
+    from a JSON-lines export (`audit log --json`, or the plaintext mirror). It also checks
+    inclusion proofs from `audit prove`. An auditor can run it without Python.
+  - **How it was matched:** the canonical JSON is Python's `json.dumps(sort_keys=True,
+    separators=(",", ":"), ensure_ascii=False)` byte for byte, floats included (Python's
+    `repr`).
+  - **Tested:** `tests/test_audit_rust.py` writes Hypothesis-generated records (non-ASCII and
+    control characters, boundary floats, nested details) through the Python log. Rust must
+    agree on the head and on Merkle roots, and catch edits, deletions and reordering. It was
+    checked to fail when Rust's float formatting is broken.
+- **Stage 5, done 2026-11-10:**
+  - **Measured:** `scripts/bench_egress.py`, results in
+    [bench/results-2026-11-10-egress-rust.md](../bench/results-2026-11-10-egress-rust.md). The
+    two paths cost the same within about a millisecond, and Rust is slightly faster on
+    TLS-inspected requests. Measuring found an audit-log failure under load affecting both
+    paths (I41, fixed) and a 38 ms Nagle delay in Rust (fixed).
+  - **Reviewed:** [reviews/rust-data-path-2026-11-10.md](../reviews/rust-data-path-2026-11-10.md).
+    The isolated core could reach the decision socket; the fix is a secret given to the binary
+    on stdin, and threat model v0.7 adds B10 and T-39.
+  - **The default stays `python`.** The criterion set above, running for real and not only
+    against stand-ins, isn't met yet. It's an owner action (A18): run
+    `[egress] implementation = "rust"` on a real machine with real agents and sites, then
+    switch the default and later drop the Python data path.
 - **Dependency audit (2026-11-10):** CI runs `cargo audit --deny warnings` (cargo-audit 0.22.2,
   installed `--locked`) against the RustSec advisory database on every change. That fails on
   known vulnerabilities, unmaintained crates and yanked versions. Dependabot watches

@@ -1,5 +1,7 @@
 import json
+import os
 import threading
+import time
 from collections.abc import Iterator
 from itertools import pairwise
 from pathlib import Path
@@ -309,3 +311,41 @@ def test_audit_schema_matches_migrations(log: AuditLog) -> None:
 
     with log._engine.connect() as conn:
         assert compare_metadata(MigrationContext.configure(conn), METADATA["audit"]) == []
+
+
+def test_many_appenders_wait_their_turn_on_a_slow_disk(
+    paths: Paths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bench_egress.py found appends failing with "database is locked" under load: a slow fsync
+    kept SQLite's lock past busy_timeout. Appenders in one process now queue on a lock with no
+    time limit, so a short busy_timeout and a slow disk drop nothing."""
+    from cairnward.store import db
+
+    monkeypatch.setattr(db, "PRAGMAS", tuple(
+        "PRAGMA busy_timeout=50" if p.startswith("PRAGMA busy_timeout") else p
+        for p in db.PRAGMAS))  # fmt: skip
+    real_fsync = os.fsync
+
+    def slow_fsync(fd: int) -> None:
+        time.sleep(0.03)
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", slow_fsync)
+    errors: list[BaseException] = []
+    with AuditLog.open(paths) as audit:
+
+        def worker(n: int) -> None:
+            try:
+                for i in range(4):
+                    audit.append("tool.call", actor="agent:t", details={"w": n, "i": i})
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in range(16)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors, errors[0]
+        res = audit.verify()
+        assert res.ok and res.records == 64

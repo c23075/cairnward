@@ -26,6 +26,8 @@ pub struct Limits {
 
 pub struct Proxy {
     pub decisions: PathBuf,
+    /// said first on every decision connection, when the service asks for one
+    pub secret: Option<String>,
     pub limits: Limits,
     pub tls: crate::inspect::Tls,
 }
@@ -188,6 +190,9 @@ impl Proxy {
         let slots = Arc::new(Semaphore::new(self.limits.max_connections));
         loop {
             let (stream, _) = listener.accept().await?;
+            // as asyncio does: small writes (TLS records, heads) go out at once, not after the
+            // peer's delayed ACK (40 ms each time)
+            let _ = stream.set_nodelay(true);
             let permit = Arc::clone(&slots)
                 .acquire_owned()
                 .await
@@ -225,7 +230,7 @@ impl Proxy {
     ) -> Result<(), Error> {
         let raw = http::read_head(client, Duration::from_secs(30)).await?;
         let head = http::parse_head(&raw)?;
-        let mut dec = Decisions::open(&self.decisions)
+        let mut dec = Decisions::open(&self.decisions, self.secret.as_deref())
             .await
             .map_err(|_| Error::Closed)?;
         // the token first, as Python does: a client without one learns nothing more
@@ -353,6 +358,7 @@ impl Proxy {
             Err(_) => error = Some("connect failed: TimeoutError".to_string()),
             Ok(Err(e)) => error = Some(format!("connect failed: {}", error_name(&e))),
             Ok(Ok(upstream)) => {
+                let _ = upstream.set_nodelay(true);
                 let outcome = if let Some(path) = &target.path {
                     self.forward_once(&head, path, &target.host_header, client, w, upstream)
                         .await

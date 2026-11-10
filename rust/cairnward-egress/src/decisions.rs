@@ -22,13 +22,18 @@ pub struct Connect {
 }
 
 impl Decisions {
-    pub async fn open(path: &Path) -> std::io::Result<Self> {
+    /// Connect, and say the secret first when there is one (`--secret-stdin`).
+    pub async fn open(path: &Path, secret: Option<&str>) -> std::io::Result<Self> {
         let (r, w) = UnixStream::connect(path).await?.into_split();
-        Ok(Self {
+        let mut me = Self {
             reader: BufReader::new(r),
             writer: w,
             ticket: None,
-        })
+        };
+        if let Some(s) = secret {
+            me.ask(json!({"op": "hello", "secret": s})).await?;
+        }
+        Ok(me)
     }
 
     async fn ask(&mut self, req: Value) -> std::io::Result<Value> {

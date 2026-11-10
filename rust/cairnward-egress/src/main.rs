@@ -17,7 +17,7 @@ use cairnward_egress::inspect::Tls;
 use cairnward_egress::proxy::{Limits, Proxy};
 
 const USAGE: &str = "usage: cairnward-egress-rs serve --listen ADDR --decisions SOCKET \
-[--connect-timeout S] [--idle-timeout S] [--max-connections N] [--upstream-roots PEM]\n       cairnward-egress-rs check-address";
+[--connect-timeout S] [--idle-timeout S] [--max-connections N] [--upstream-roots PEM] [--secret-stdin]\n       cairnward-egress-rs check-address";
 
 fn check_addresses() -> io::Result<()> {
     let stdin = io::stdin();
@@ -42,12 +42,14 @@ struct ServeArgs {
     decisions: PathBuf,
     limits: Limits,
     upstream_roots: Option<PathBuf>,
+    secret_stdin: bool,
 }
 
 fn parse_serve(args: &[String]) -> Result<ServeArgs, String> {
     let mut listen = None;
     let mut decisions = None;
     let mut upstream_roots = None;
+    let mut secret_stdin = false;
     let mut limits = Limits {
         connect_timeout: Duration::from_secs(15),
         idle_timeout: Duration::from_secs(300),
@@ -55,6 +57,11 @@ fn parse_serve(args: &[String]) -> Result<ServeArgs, String> {
     };
     let mut it = args.iter();
     while let Some(flag) = it.next() {
+        if flag == "--secret-stdin" {
+            // the decision service's secret: the first line of stdin, never argv or the env
+            secret_stdin = true;
+            continue;
+        }
         let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
         let secs = || {
             value
@@ -86,6 +93,7 @@ fn parse_serve(args: &[String]) -> Result<ServeArgs, String> {
         decisions: decisions.ok_or("--decisions is required")?,
         limits,
         upstream_roots,
+        secret_stdin,
     })
 }
 
@@ -101,8 +109,16 @@ fn serve(args: ServeArgs) -> io::Result<()> {
             Some(path) => Tls::with_roots(&std::fs::read(path)?).map_err(io::Error::other)?,
             None => Tls::new().map_err(io::Error::other)?,
         };
+        let secret = if args.secret_stdin {
+            let mut line = String::new();
+            io::stdin().read_line(&mut line)?;
+            Some(line.trim().to_string())
+        } else {
+            None
+        };
         let proxy = Arc::new(Proxy {
             decisions: args.decisions,
+            secret,
             limits: args.limits,
             tls,
         });

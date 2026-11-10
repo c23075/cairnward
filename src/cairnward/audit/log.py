@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -172,6 +173,10 @@ class AuditLog:
         self.mirror = mirror
         self.enabled_for = enabled_for or (lambda _env: True)
         self._writer = engine.execution_options(isolation_level="AUTOCOMMIT")
+        # Appenders in this process queue here, without a time limit, before SQLite's lock: a
+        # slow fsync under load once made them wait past busy_timeout and fail with "database is
+        # locked", dropping the connection they were recording (found by bench_egress.py).
+        self._appending = threading.Lock()
 
     @classmethod
     def open(cls, paths: Paths, enabled_for: Callable[[str | None], bool] | None = None) -> Self:
@@ -199,8 +204,9 @@ class AuditLog:
 
     @contextmanager
     def _write_lock(self) -> Iterator[Connection]:
-        """SQLite's write lock serialises appenders across processes (BEGIN IMMEDIATE)."""
-        with self._writer.connect() as conn:
+        """One appender at a time: a lock within this process, then SQLite's write lock across
+        processes (BEGIN IMMEDIATE; the outer process and the isolated core share the file)."""
+        with self._appending, self._writer.connect() as conn:
             conn.exec_driver_sql("BEGIN IMMEDIATE")
             try:
                 yield conn

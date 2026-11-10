@@ -44,6 +44,13 @@ TLS inspection (stage 3), for a ticket whose `connect` said `inspect`:
 - `{"op": "drop", "ticket": str}` -> `{"ok": true}`: end a ticket with no further record (a
   plain-HTTP request refused by the inspection rules, already recorded by `request_done`).
 
+With a secret (as `serve` always runs it), each connection must first send
+`{"op": "hello", "secret": str}` -> `{"ok": true}`; anything else, or a wrong secret, gets an
+error and the connection is closed. In isolated mode the sandboxed core may connect to any Unix
+socket, and the secret, given to the Rust binary on its stdin, is what keeps it from asking
+here for certificates or recording on egress's behalf (threat-model review 2026-11-10, Rust
+data path, R1).
+
 Errors: `{"ok": false, "error": str}` (unknown op or ticket, malformed line); the connection
 stays usable. Lines over 64 KiB close it. Only the owner can connect (0600 socket in a private
 folder), and the service trusts what the data path reports about bytes and outcomes, as the
@@ -86,6 +93,7 @@ class DecisionService:
     """Answers a data path's questions with `proxy`'s decision logic (never started itself)."""
 
     proxy: EgressProxy
+    secret: str | None = None  # required as the first line of each connection when set
     _tickets: dict[str, _Ticket] = field(default_factory=dict)
     _server: asyncio.AbstractServer | None = None
 
@@ -104,6 +112,18 @@ class DecisionService:
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
+            if self.secret is not None:
+                hello: Any = None
+                with contextlib.suppress(ValueError):
+                    hello = json.loads(await reader.readline())
+                given = str(hello.get("secret", "")) if isinstance(hello, dict) else ""
+                if not (isinstance(hello, dict) and hello.get("op") == "hello"
+                        and secrets.compare_digest(given, self.secret)):  # fmt: skip
+                    writer.write(b'{"ok": false, "error": "not authorised"}\n')
+                    await writer.drain()
+                    return
+                writer.write(b'{"ok": true}\n')
+                await writer.drain()
             while line := await reader.readline():
                 try:
                     reply = await self.answer(json.loads(line))

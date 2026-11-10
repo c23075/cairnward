@@ -12,6 +12,9 @@
   An optional `[storage] key` reference allows unattended starts, with a warning. Needs the
   `sqlcipher` extra, Linux x86-64 only. An encrypted audit log keeps no plaintext mirror.
 
+- `cairnward-audit-rs`, an independent Rust verifier for exported audit logs: record hashes,
+  the chain, Merkle roots and inclusion proofs (ADR-0020 stage 4, D81).
+- `scripts/bench_egress.py`: the Python and Rust data paths measured side by side.
 - CI audits the Rust crates against the RustSec advisory database (`cargo audit --deny
   warnings`), and Dependabot watches `rust/Cargo.lock`.
 - An opt-in Rust egress data path, `[egress] implementation = "rust"` (ADR-0020, stage 2):
@@ -24,6 +27,9 @@
   records. Not used by `serve` yet.
 
 ### Security
+- The Rust data path's decision socket requires a secret, given to the binary on stdin: the
+  isolated core can reach any Unix socket and could otherwise have asked it for CA-signed
+  certificates (review 2026-11-10, T-39).
 - Backups build their plain export in memory (`$XDG_RUNTIME_DIR`) and remove it even when
   restic fails; `[backup] staging = "disk"` keeps the old place (I40).
 - TLS inspection: method and path rules now match the normalized path (escaped unreserved
@@ -34,6 +40,8 @@
   against the rule checker only.
 
 ### Fixed
+- Under load, an audit append could fail with "database is locked" after a slow `fsync`,
+  dropping the egress connection it was recording (I41, both data paths).
 - Host patterns (`network_allow_hosts`, `skip_hosts`, inspection rules) now match IPv6
   addresses written without a port, with or without brackets (`::1`, `[::1]`); before, only
   `[::1]:443` matched, so such an entry was ignored and the connection denied or asked about.

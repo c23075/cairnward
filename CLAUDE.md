@@ -4,7 +4,7 @@ A local privacy gateway (model gateway, egress proxy, policy engine, audit log, 
 vault, MCP proxy, plugin contract) for one person's machine. Literature research is a separate project
 (`literature-review-agent-plugin`, ADR-0017): nothing here may depend on it.
 Python 3.12+, uv, Apache-2.0. Docs index by reader: `docs/README.md`; overview and stack
-position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D80), ADRs in
+position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D81), ADRs in
 `docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. The current
 state and next steps are in the newest `docs/plan/handoff-*.md`; requirement status is in
 `docs/plan/requirements-status.md`, so a new handoff doesn't copy it. `docs/status.md` is the
@@ -17,7 +17,8 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy   # CI's lint
 uv run pytest -q                                                    # ~4 min
 uv run cairnward config schema   # after changing anything in config/models.py (schemas/ is committed)
 cd rust && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo build
-uv run pytest -q tests/test_egress_rust.py tests/test_egress.py   # both data paths (needs the cargo build)
+uv run pytest -q tests/test_egress_rust.py tests/test_egress.py tests/test_audit_rust.py   # Rust and Python agree (needs the cargo build)
+uv run python scripts/bench_egress.py --dir <folder on the data disk>   # both egress data paths
 ```
 - Isolated-mode tests (`tests/isolation/`) skip unless the sandbox is found: run
   `cairnward sandbox install`, or point at the copy in the repo:

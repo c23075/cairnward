@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import secrets
 import shutil
 from pathlib import Path
 from typing import Any
@@ -51,7 +52,8 @@ class RustEgress:
         self.config, self.engine, self.sessions = config, engine, sessions
         self.host, self.port = host, self.decider.port
         self.socket = decisions_socket
-        self._service = DecisionService(self.decider)
+        self._secret = secrets.token_urlsafe(32)  # to the binary on stdin, never env or argv
+        self._service = DecisionService(self.decider, secret=self._secret)
         self._proc: asyncio.subprocess.Process | None = None
 
     async def start(self) -> int:
@@ -68,10 +70,14 @@ class RustEgress:
             "--decisions", str(self.socket),
             "--connect-timeout", str(limits.connect_timeout_s),
             "--idle-timeout", str(limits.idle_timeout_s),
-            "--max-connections", str(limits.max_connections),
-            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            "--max-connections", str(limits.max_connections), "--secret-stdin",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             env={"PATH": os.environ.get("PATH", "")},  # nothing secret, nothing it needs
         )  # fmt: skip
+        if self._proc.stdin is not None:
+            self._proc.stdin.write(self._secret.encode() + b"\n")
+            await self._proc.stdin.drain()
+            self._proc.stdin.close()
         if self._proc.stdout is None:  # can't happen: stdout=PIPE
             raise RustEgressError("no output from cairnward-egress-rs")
         line = (await asyncio.wait_for(self._proc.stdout.readline(), 15)).decode()

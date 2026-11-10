@@ -43,7 +43,7 @@ PRAGMAS = (
     "PRAGMA synchronous=FULL",
     "PRAGMA foreign_keys=ON",
     "PRAGMA secure_delete=ON",
-    "PRAGMA busy_timeout=5000",
+    "PRAGMA busy_timeout=30000",  # another process's write, behind a slow fsync, may take seconds
 )
 
 
