@@ -1,7 +1,7 @@
 # Project status
 
-Last updated 2026-11-05, after PR 28 (TLS inspection and the OpenShell sandbox, ADR-0018) was
-merged. This is the owner's view of where Cairnward stands. Detail on each
+Last updated 2026-11-10, after PR 49 was merged (Merkle checkpoints, database encryption, the
+opt-in Rust egress data path and audit verifier, and their reviews). This is the owner's view of where Cairnward stands. Detail on each
 requirement is in [requirements-status.md](plan/requirements-status.md), and the
 [handoff](plan/) is working notes for agents.
 
@@ -13,11 +13,11 @@ it. Those are below.
 
 Literature research is a separate project with its own status page: `docs/status.md` in
 [`literature-review-agent-plugin`](https://github.com/c23075/literature-review-agent-plugin)
-([ADR-0017](adr/0017-research-as-a-plugin.md)). Of the 104 requirements tracked (91 here and 13 there):
+([ADR-0017](adr/0017-research-as-a-plugin.md)). Of the 106 requirements tracked (93 here and 13 there):
 
 | State | Count |
 |---|---|
-| Done and covered by tests or measurements | 82 |
+| Done and covered by tests or measurements | 84 |
 | Built, but only tested against a stand-in | 14 |
 | Partly done | 6 |
 | Left out by decision (Ollama-compatible endpoint, Anthropic driver) | 2 |

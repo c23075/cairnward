@@ -16,11 +16,14 @@ tamper-evident log, and runs tools in a sandbox whose only network route goes th
   with a separate API key per client.
 - **Isolation enforced by the OS.** Agents, MCP servers and Cairnward's own core run in a
   sandbox with no network of their own. Their only way out is the egress proxy, which applies
-  your allow-list.
+  your allow-list. An opt-in Rust version of the proxy is being tried ([ADR-0020](docs/adr/0020-rust-egress-and-audit.md)).
 - **Tamper-evident audit log.** A hash-chained record of every effect, written before it
-  happens. It stores digests of prompts, not the text. `cairnward audit verify` checks the chain.
+  happens. It stores digests of prompts, not the text. `cairnward audit verify` checks the chain,
+  signed checkpoints can carry Merkle proofs for single records, and an independent verifier
+  (`cairnward-audit-rs`) re-checks an export without Python.
 - **Your own copy of conversations.** A searchable vault, whichever client you used, encrypted
-  per conversation. Lock with a passphrase, or purge by destroying the key.
+  per conversation. Lock with a passphrase, or purge by destroying the key. Optionally, the
+  whole vault and audit databases are encrypted too (`cairnward store encrypt`, Linux x86-64).
 - **Approvals outside the model.** Risky actions wait for your answer, and a model can't approve
   its own. Changed MCP tools are detected and disabled.
 - **Reviewable agent runs.** `cairnward run` snapshots the project before and after, so you can

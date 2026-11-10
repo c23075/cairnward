@@ -96,6 +96,7 @@ All security requirements below describe what each protection does **when it is 
 | FR-ENC-1 | Lock conversation / artifacts with passphrase (age, key wrapping, recovery key optional) | M | M2 | `test_lock.py`, `test_recovery_key.py`, `test_artifact_lock.py`, `test_item_lock.py`, `test_library_lock.py`; run snapshots not covered |
 | FR-ENC-2 | Passphrase never in model context, tool args, logs or audit | M | M2 | `tests/security/test_lock.py`, `tests/security/test_recovery_key.py` |
 | FR-ENC-5 | Crypto-shredding on purge | M | M1 | `test_store.py` |
+| FR-ENC-6 | Optional whole-database encryption (vault, keys, audit) with a passphrase-wrapped key; a key reference for unattended starts is a visible weakening (D80) | C | M3 | `test_sqlcipher.py`, `tests/isolation/test_encrypted_storage.py` |
 
 ### Research workflows
 FR-RES-1 to FR-RES-13 moved to the `literature-review-agent-plugin` repository with ADR-0017 (D75).
@@ -124,6 +125,7 @@ FR-RES-1 to FR-RES-13 moved to the `literature-review-agent-plugin` repository w
 | FR-AUD-3 | Audit browser (per client/run/conversation), export | M | M2 | e2e |
 | FR-AUD-4 | Signed checkpoints anchored hourly + on demand to a private git repo (deploy key scoped to it); `audit verify --anchors` | M | M2 | `test_anchoring.py` with local bare repo |
 | FR-AUD-5 | OpenTelemetry GenAI export (local), off by default | C | M3 | integration |
+| FR-AUD-6 | Merkle checkpoints: single-record inclusion proofs checkable without the log; an independent verifier for exported logs (D79, D81) | C | M3 | `test_merkle.py`, `test_anchoring.py`, `test_audit_rust.py` |
 
 ### Redaction
 | ID | Requirement | Pri | MS | Verification |
