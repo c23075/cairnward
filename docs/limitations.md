@@ -3,7 +3,7 @@
 Written 2026-11-06. This page collects in one place what Cairnward's protections don't do. The
 detail is spread across the [threat model](threat-model.md) (residuals in each row, and §6
 accepted risks), the [status page](status.md) (known issues, I-numbers) and the
-[spec](spec.md). Those stay the sources of record; this page points to them. Where they
+[spec](spec.md). Those stay the sources of record. This page points to them. Where they
 disagree with the code, the code was checked, and this page follows it.
 
 ## Scope and maturity
@@ -40,7 +40,7 @@ disagree with the code, the code was checked, and this page follows it.
   but it can't prove the sandbox correct.
 - **In the core's sandbox,** srt's own seccomp helper is off, because the core needs Unix
   sockets. The core's own filter refuses VM sockets and io_uring (I1). srt's refusal to create
-  namespaces stays off there; srt documents that dropping all capabilities is then what keeps
+  namespaces stays off there. srt's documentation says that dropping all capabilities is then what keeps
   hidden paths hidden (T-28).
 - **OpenShell** (`sandbox = "openshell"`) is trusted to enforce its sandbox, and has never been
   run with Cairnward for real. It pulls images itself, outside egress and the audit. Its gateway
@@ -70,7 +70,7 @@ disagree with the code, the code was checked, and this page follows it.
 
 **Agents, tools and plugins**
 - **Inside the workspace, an agent can do anything:** read, change, delete, or run any command
-  in the sandbox. Snapshots let you review and undo changes; they don't prevent them.
+  in the sandbox. Snapshots let you review and undo changes. They don't prevent them.
 - **What a run can still read** with the home folder hidden: `~/.gitconfig`, where a token in a
   URL is readable, the agent's own state folder, and for most profiles `~/.cache` (T-12).
   - With `home_access = "readable"`, the agent reads the whole home folder except the known
@@ -135,7 +135,7 @@ disagree with the code, the code was checked, and this page follows it.
 
 **What the log records**
 - **Records are content-free.** The log holds digests, so on its own it can't show what was said
-  or sent; that needs the vault, which may have been purged.
+  or sent. That needs the vault, which may have been purged.
 - **A digest of something short and predictable,** such as a URL path or a common prompt, can be
   reversed by guessing (T-35).
 - **Activity outside Cairnward isn't recorded:** unsandboxed programs, direct connections with
@@ -147,12 +147,12 @@ disagree with the code, the code was checked, and this page follows it.
   reordering. Someone with write access can still rewrite every record from some point on, or cut
   records off the end, and the chain alone won't show it (T-03).
 - **Proof from outside the machine needs anchoring.** The Strict preset turns anchoring on, but
-  it needs a private repository set up first; on the owner's setup it's off (I13).
+  it needs a private repository set up first. On the owner's setup it's off (I13).
   - Even with anchoring, records newer than the last anchor (up to an hour by default) can be
     changed by someone controlling the machine.
   - Timestamps come from the machine's clock unless a timestamp server is set (`tsa_url`).
   - Merkle checkpoints (D79) let one record be checked against a signed checkpoint without the
-    log, but only for records the checkpoint covers; they don't protect newer ones.
+    log, but only for records the checkpoint covers. They don't protect newer ones.
 - **Auditing can be switched off** like any protection. Then only settings snapshots and
   `audit.disabled` / `audit.enabled` markers are written.
 
