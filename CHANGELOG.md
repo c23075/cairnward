@@ -13,8 +13,9 @@
   `sqlcipher` extra, Linux x86-64 only. An encrypted audit log keeps no plaintext mirror.
 
 - The start of the Rust egress data path (ADR-0020, stage 1): a `rust/` workspace whose
-  address checks are compared with the Python ones on generated addresses in CI. Not used by
-  `serve` yet.
+  address checks are compared with the Python ones on generated addresses in CI, and the
+  decision service (`egress/decisions.py`) a Rust data path will ask for policy and audit
+  records. Not used by `serve` yet.
 
 ### Security
 - TLS inspection: method and path rules now match the normalized path (escaped unreserved

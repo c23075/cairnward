@@ -86,7 +86,12 @@ reference until the Rust one passes the same tests:
     checked to fail when the Rust 6to4 rule is broken.
   - **CI job `rust`:** a pinned toolchain (1.97.0), `cargo fmt --check`, `clippy -D warnings`
     (pedantic), `cargo test`, then the differential test.
-- **Still in stage 1:**
-  - the decision-socket protocol between the Rust data path and Python policy;
-  - running `tests/test_egress.py` against either implementation through a shared fixture.
+  - **The decision service** (`egress/decisions.py`): the protocol the Rust data path will use
+    to ask Python for policy, approvals and audit records. It's JSON lines over a 0600 Unix
+    socket, with tickets per connection: `connect`, `allow_special`, `deny`, `opened`,
+    `closed`. The answers come from the Python proxy's own methods, and the three-way connect
+    decision moved into one shared method, `EgressProxy.connect_decision`, so neither path can
+    drift. Tested over a real socket (`tests/test_egress_decisions.py`).
+- **Moved to stage 2:** running `tests/test_egress.py` against either implementation through a
+  shared fixture. It needs the Rust proxy to exist, and that proxy is what stage 2 builds.
 - **When the crate takes its first dependency:** add `cargo audit` (or `cargo deny`) to CI.
