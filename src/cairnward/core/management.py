@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from cairnward import __version__
@@ -146,6 +146,30 @@ def management_app(
             "egress_port": server.egress_port if egress else None,
             "active_runs": len(runs),
         }
+
+    # Read-only views for an observer such as Cairnward Keep (D82). They change nothing, so they
+    # aren't audited, and they return no keys or tokens.
+
+    @app.get("/v1/runs")
+    def list_runs() -> dict[str, Any]:
+        now = time.monotonic()
+        return {
+            "runs": [
+                {"run_id": run_id, "environment": r.environment, "client": r.client,
+                 "profile": r.profile, "age_s": round(now - r.started, 3)}
+                for run_id, r in runs.items()
+            ]
+        }  # fmt: skip
+
+    @app.get("/v1/audit/since")
+    def audit_since(
+        seq: int = Query(0, ge=0), limit: int = Query(500, ge=1, le=1000)
+    ) -> dict[str, Any]:
+        """Records after `seq`, oldest first, as `cairnward audit log --json` writes them."""
+        if audit is None:
+            return {"records": [], "head_seq": 0}
+        records = [asdict(r) for r in audit.since(seq, limit)]
+        return {"records": records, "head_seq": audit.head()[0]}
 
     @app.post("/v1/plugins/session")
     def plugin_session(body: PluginSessionIn) -> dict[str, str]:

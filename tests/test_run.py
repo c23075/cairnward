@@ -172,6 +172,17 @@ async def test_run_lifecycle(paths: Paths) -> None:
             }
             run = (await c.post("/v1/runs", json=body)).json()
             assert run_keys.identify(run["gateway_key"]) == ("aider", run["run_id"])
+            # Read-only views for an observer (D82): no keys or tokens in them.
+            (listed,) = (await c.get("/v1/runs")).json()["runs"]
+            assert listed["run_id"] == run["run_id"] and listed["environment"] == "e"
+            assert run["gateway_key"] not in json.dumps(listed)
+            since = (await c.get("/v1/audit/since", params={"seq": 0})).json()
+            assert [r["action"] for r in since["records"]][-1] == "run.start"
+            assert since["head_seq"] == since["records"][-1]["seq"]
+            assert since["records"][-1]["hash"] == audit.head()[1]
+            later = (await c.get("/v1/audit/since", params={"seq": since["head_seq"]})).json()
+            assert later["records"] == []
+            assert (await c.get("/v1/audit/since", params={"limit": 5000})).status_code == 422
             auth = (
                 "Basic "
                 + __import__("base64").b64encode(f"x:{run['egress_token']}".encode()).decode()

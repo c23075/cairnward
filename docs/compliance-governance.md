@@ -189,4 +189,4 @@ system behind Cairnward. The step numbers in the table match the list below.
 
 A plan to extend Cairnward into an enterprise proof of concept, with LLMOps and model risk
 management (inventory, validation, monitoring), is in
-[plan/enterprise-poc.md](plan/enterprise-poc.md). Nothing in it is built yet.
+[plan/enterprise-poc.md](plan/enterprise-poc.md). Only its fleet view is built, as [Cairnsteward](https://github.com/c23075/cairnsteward); the rest is proposed there (spec v0.3) and in [ADR-0021](adr/0021-managed-mode.md).
