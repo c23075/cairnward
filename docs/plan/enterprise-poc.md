@@ -1,6 +1,6 @@
 # Plan: an enterprise proof of concept, LLMOps and model risk management
 
-Written 2026-11-09 (moved here from compliance-governance.md). A plan: **nothing new in it is built yet.** The owner intends
+Written 2026-11-09 (moved here from compliance-governance.md). A plan. **One piece is built:** the fleet view, as [Cairnward Keep](https://github.com/c23075/cairnward-keep), a separate observe-only control plane (2026-11-11, D82). The rest isn't built yet. The owner intends
 to extend Cairnward into a proof of concept of an enterprise agent-governance stack, as an LLMOps
 portfolio project, with model risk management (MRM) and model validation as a focus.
 
@@ -43,7 +43,7 @@ Each would be the smallest thing that demonstrates the pattern:
 | **Identity** | Each sidecar's client keys tied to a service account in an identity provider (for example OIDC workload identity), and approvers identified through SSO instead of "the host's owner" |
 | **Central audit** | A log shipper (Vector or Fluent Bit) sending `audit.jsonl` to a SIEM or OpenSearch, and a scheduled central `audit verify --anchors` across all hosts |
 | **Central approvals** | An inbox that gathers pending requests from several sidecars, with a named approver for each. The largest new piece |
-| **Fleet view** | A dashboard listing the sidecars: version, privacy level, weakened settings, recent denials |
+| **Fleet view** | A dashboard listing the sidecars: version, privacy level, weakened settings, recent denials. **Built** as [Cairnward Keep](https://github.com/c23075/cairnward-keep): an agent per host reads the management socket (read-only, D82) and reports over mutual TLS; the server shows every session and checks each audit chain off the host |
 | **Reference workloads** | Two or three containerised agents (a coding agent, a retrieval agent over an internal document store, an agent using a CRM tool), each with its own sidecar and data class |
 
 ## Model risk management: today and the gaps

@@ -66,4 +66,4 @@ flowchart TB
 control outside the model, which is treated as untrusted. It fits best where central products are
 weak: local or self-hosted models with regulated data, separating data classes or matters, and
 agents on people's own machines. The central layers are what a company [must add](compliance-governance.md#what-the-company-must-add),
-and the [planned control plane](plan/enterprise-poc.md) would supply some of them.
+and the [planned control plane](plan/enterprise-poc.md) would supply some of them. Its first piece, a read-only fleet view of sessions across instances, is [Cairnward Keep](https://github.com/c23075/cairnward-keep).
