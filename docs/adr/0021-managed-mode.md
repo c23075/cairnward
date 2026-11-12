@@ -42,8 +42,9 @@ Option 2, all of it inert until `cairnward steward enroll`:
   their profiles; Cairnward checks this on every model call and `cairnward run` and refuses with
   the reason `profile` (closing I39 for managed mode).
 - **Approvals stay local:** the bundle carries approval policy per environment; the person at the
-  instance answers, as today. On an unattended workload sidecar, `ask` becomes `deny` unless an
-  approver is named. The control plane only audits approval records.
+  instance answers, as today. On a workload sidecar, the workload's owner named in the bundle
+  answers through that sidecar's dashboard; without one, `ask` becomes `deny`. The control plane
+  only audits approval records.
 - **Users:** a bundle's users arrive as hashed keys and act as clients named `user:<id>`, so audit
   records carry the user. On a workload sidecar, each conversation's key (ADR-0006) is wrapped to
   its user's age public key from the bundle, so the sidecar writes transcripts it can't read back,
