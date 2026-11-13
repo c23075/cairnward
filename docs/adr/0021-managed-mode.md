@@ -1,6 +1,6 @@
 # ADR-0021: Managed mode, an opt-in link to an enterprise control plane (Cairnsteward)
 
-- Status: Proposed 2026-11-11, revised 2026-11-12, for the owner's review with Cairnsteward's spec v0.4
+- Status: Proposed 2026-11-11, revised 2026-11-12 and 2026-11-13, for the owner's review with Cairnsteward's spec v0.5
 - Date: 2026-11-11
 - Spec: §4.1, §5.0, §5.2, §5.3, D55, D79, D82; the [enterprise plan](../plan/enterprise-poc.md), item 1
 
@@ -10,7 +10,7 @@ control plane may use, its trust boundary with the sidecars, and how validation 
 the policy engine. The control plane is now specified as
 [Cairnsteward](https://github.com/c23075/cairnsteward) (spec v0.3, proposed): users and roles,
 model risk management, signed receipts for audit records, and evidence for GRC tools. Its
-decisions are recorded there (K13–K37, ADRs 0005–0013); this ADR records what they ask of
+decisions are recorded there (K13–K42, ADRs 0005–0014); this ADR records what they ask of
 Cairnward.
 
 Cairnward is a personal privacy gateway first, and must stay one for anyone who doesn't enrol.
@@ -53,6 +53,12 @@ Option 2, all of it inert until `cairnward steward enroll`:
   gateway, sending a short-lived model-access token (received with each bundle poll) and the
   user's ID. Revocation is enforced at the gateway. Local models and third-party providers are
   used only where a profile allows them.
+- **Login:** `cairnward steward login` runs the OAuth 2.0 device authorization flow (RFC 8628)
+  against the company's identity provider; the control plane issues model-access tokens for a
+  user only while that login is fresh. Cairnward keeps no passwords.
+- **Upstream digests:** each model call's audit records also carry the digest of the body sent to
+  the model gateway and of the answer received, because the gateway stores every request and
+  answer centrally (Cairnsteward's K41) and the control plane proves the stored copy matches.
 - **Validation status reaches the policy engine** through the bundle's inventory entries: a new
   environment setting `model_validation = off | warn | ask | enforce` (switchable, D55; `off`
   unless set) checks each model call's version `(backend, model, digest)`. A version not approved
@@ -69,8 +75,11 @@ Option 2, all of it inert until `cairnward steward enroll`:
   check that personal mode adds no overhead.
 - New code: a managed-mode client in the outer process, environments and profiles from bundles,
   a per-key environment check, approval policy from bundles, per-user key wrapping in the vault,
-  model-access tokens on backend calls, the `model_validation` check, digest reporting, receipt
-  storage and verification. Each needs a
+  model-access tokens on backend calls, the `model_validation` check, digest reporting, upstream
+  digests, `steward login`, receipt storage and verification.
+- In managed mode, the company keeps a central copy of every prompt and answer sent to its model
+  server (Cairnsteward's choice for enterprise deployments). Personal mode sends nothing anywhere
+  but to the models its owner configures. Each needs a
   threat-model review here when built.
 - A compromised control-plane signer, or two colluding admins, can loosen managed hosts within
   managed mode (Cairnsteward's T-17). The host owner can always tighten, or leave.
