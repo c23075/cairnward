@@ -1,6 +1,6 @@
 # ADR-0021: Managed mode, an opt-in link to an enterprise control plane (Cairnsteward)
 
-- Status: Proposed 2026-11-11, revised 2026-11-12 and 2026-11-13, for the owner's review with Cairnsteward's spec v0.5
+- Status: Proposed 2026-11-11, revised 2026-11-12 and 2026-11-13, for the owner's review with Cairnsteward's spec v0.6
 - Date: 2026-11-11
 - Spec: §4.1, §5.0, §5.2, §5.3, D55, D79, D82; the [enterprise plan](../plan/enterprise-poc.md), item 1
 
@@ -10,7 +10,7 @@ control plane may use, its trust boundary with the sidecars, and how validation 
 the policy engine. The control plane is now specified as
 [Cairnsteward](https://github.com/c23075/cairnsteward) (spec v0.3, proposed): users and roles,
 model risk management, signed receipts for audit records, and evidence for GRC tools. Its
-decisions are recorded there (K13–K42, ADRs 0005–0014); this ADR records what they ask of
+decisions are recorded there (K13–K44, ADRs 0005–0014); this ADR records what they ask of
 Cairnward.
 
 Cairnward is a personal privacy gateway first, and must stay one for anyone who doesn't enrol.
@@ -51,8 +51,12 @@ Option 2, all of it inert until `cairnward steward enroll`:
   and only that user can export them.
 - **Models:** by default a managed instance calls the company's private model server through a
   gateway, sending a short-lived model-access token (received with each bundle poll) and the
-  user's ID. Revocation is enforced at the gateway. Local models and third-party providers are
-  used only where a profile allows them.
+  user's ID. Revocation is enforced at the gateway. Third-party providers are reached through the
+  control plane's gateway (which routes them), not directly; local models only where a profile
+  allows them.
+- **Fail-closed:** a managed instance whose last successful poll is older than the model-access
+  token's lifetime (5 minutes) refuses every model call, local ones included, and audits the
+  refusal with the reason `steward_unreachable`. Personal mode never does this.
 - **Login:** `cairnward steward login` runs the OAuth 2.0 device authorization flow (RFC 8628)
   against the company's identity provider; the control plane issues model-access tokens for a
   user only while that login is fresh. Cairnward keeps no passwords.
