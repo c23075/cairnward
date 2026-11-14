@@ -66,4 +66,4 @@ flowchart TB
 control outside the model, which is treated as untrusted. It fits best where central products are
 weak: local or self-hosted models with regulated data, separating data classes or matters, and
 agents on people's own machines. The central layers are what a company [must add](compliance-governance.md#what-the-company-must-add),
-and the [planned control plane](plan/enterprise-poc.md) would supply some of them. Its first piece, a read-only fleet view of sessions across instances, is [Cairnsteward](https://github.com/c23075/cairnsteward), which is now planned as the full enterprise control plane: users, model risk management and evidence for GRC tools ([ADR-0021](adr/0021-managed-mode.md), proposed).
+and the [planned control plane](plan/enterprise-poc.md) would supply some of them. A read-only fleet view of sessions across instances was built as a proof of concept; it now lives in the git history of [Cairnsteward](https://github.com/c23075/cairnsteward), which has become a separate, standalone platform for model risk management that doesn't use Cairnward ([ADR-0021](adr/0021-managed-mode.md), withdrawn).
