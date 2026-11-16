@@ -44,6 +44,27 @@ enabled=false
 appendWindowsPath=false
 ```
 
+**With `systemd=true`, `enabled=false` isn't enough.** systemd registers Windows programs again
+(`/proc/sys/fs/binfmt_misc/WSLInterop` reads `enabled`, and `cairnward doctor` still warns). Remove
+the registration at each start with a small service:
+
+```bash
+sudo tee /etc/systemd/system/wsl-interop-off.service >/dev/null <<'UNIT'
+[Unit]
+Description=Remove WSL interop (Windows programs) registration
+After=systemd-binfmt.service
+ConditionPathExists=/proc/sys/fs/binfmt_misc/WSLInterop
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo -1 > /proc/sys/fs/binfmt_misc/WSLInterop'
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload && sudo systemctl enable --now wsl-interop-off.service
+```
+
 **Disk encryption.** WSL's disk is a file on the Windows drive, so turn on BitLocker or Device
 Encryption in Windows. `cairnward doctor` can't see this from inside WSL.
 
@@ -122,7 +143,9 @@ Run these inside WSL. Each is something the Linux tests can't show.
 | 7. Replication | Not tried |
 | 8. Timing | `cairnward doctor` took 3.3 s |
 
-The default main model (`qwen3:30b`) doesn't fit in 8 GB, so `doctor` reports it missing.
+With interop turned off (which needed the systemd service above), `doctor` passed every isolation
+check and gave no interop warning. The default main model (`qwen3:30b`) doesn't fit in 8 GB, so
+`doctor` reports it missing.
 
 ## Known gaps
 - **VM sockets from the core** (fixed 2026-11-05, I1): the core's sandbox has to allow Unix
