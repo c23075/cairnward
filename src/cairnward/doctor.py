@@ -276,17 +276,21 @@ def empty(path):  # a hidden folder is an empty one, a hidden file an empty one
         return not (os.listdir(path) if os.path.isdir(path) else os.path.getsize(path))
     except OSError:
         return True
-def windows_program_refused():  # "MZ" is what the kernel hands to /init as a Windows program
+def no_route_to_windows():
+    # "MZ" is what the kernel hands to /init as a Windows program. When WSL registers /init with
+    # binfmt's F flag the kernel opened it at boot, so it still starts here although it's hidden
+    # (seen on real WSL2). What matters is that it can't reach Windows: the interop sockets in
+    # /run/WSL and WSL_INTEROP are gone, and VM sockets are checked separately.
     with open("probe.exe", "wb") as f:
         f.write(b"MZ" + bytes(62))
     os.chmod("probe.exe", 0o755)
     try:
         subprocess.run(["./probe.exe"], capture_output=True, timeout=10)
     except OSError:
-        return True
+        return True  # refused outright
     except subprocess.SubprocessError:
         pass
-    return False
+    return empty("/run/WSL") and "WSL_INTEROP" not in os.environ
 got = {
     "direct_tcp": blocked(lambda: socket.create_connection(("1.1.1.1", 443), timeout=3)),
     "dns": blocked(lambda: socket.getaddrinfo("example.com", 443)),
@@ -295,7 +299,7 @@ got = {
 }
 if sys.argv[2:]:  # under WSL
     got["windows_paths"] = all(empty(p) for p in sys.argv[2:])
-    got["windows_programs"] = windows_program_refused()
+    got["windows_programs"] = no_route_to_windows()
     got["vm_socket"] = blocked(lambda: socket.socket(socket.AF_VSOCK))
 print(json.dumps(got))
 """
@@ -372,7 +376,7 @@ def self_test(srt: list[str]) -> Check:
         )
     blocked_here = "direct network, DNS, hidden folder and Unix sockets; VM sockets in the core's"
     if "windows_paths" in got:
-        blocked_here += ", Windows drives, Windows programs and VM sockets"
+        blocked_here += ", Windows drives, the route to Windows programs and VM sockets"
     return Check("isolation self-test", "ok", f"{blocked_here} blocked")
 
 
@@ -409,8 +413,8 @@ def check_wsl(cfg: Config) -> list[Check]:
                 "WSL interop",
                 "warn",
                 "Linux programs here can start Windows programs",
-                "sandboxes block this, but unsandboxed programs can: set [interop] "
-                "enabled=false in /etc/wsl.conf if you don't need it",
+                "sandboxes hide the route to Windows, but unsandboxed programs can use it: set "
+                "[interop] enabled=false in /etc/wsl.conf if you don't need it",
             )
         )
     return out
