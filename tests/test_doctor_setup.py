@@ -1,3 +1,4 @@
+import re
 import tomllib
 from pathlib import Path
 
@@ -137,3 +138,18 @@ def test_encrypted_or_local_backends_are_not_warned_about(paths: Paths) -> None:
     default = Paths(paths.config_dir / "x", paths.data_dir, paths.state_dir)
     for name, backend in load_config(default).backends.backends.items():
         assert backend.location == "local" and backend.unencrypted_warning(name) is None
+
+
+def test_memory_counts_a_shared_main_and_fast_model_once(
+    paths: Paths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = load_config(paths)
+    gb = 1024**3
+    roles = cfg.backends.roles
+    roles["main"] = roles["main"].model_copy(update={"model": roles["fast"].model})
+    monkeypatch.setattr(
+        "cairnward.doctor._meminfo", lambda: {"MemTotal": 8 * gb, "MemAvailable": 7 * gb}
+    )
+    check = _memory_check(cfg, {roles["fast"].model: int(1.4 * gb)})
+    need_main, need_both = (float(x) for x in re.findall(r"~([\d.]+) GB", check.detail))
+    assert need_main == need_both and check.status == "ok"

@@ -175,7 +175,9 @@ def _memory_check(cfg: Config, sizes: dict[str, int]) -> Check:
         return Check("memory", "skip", f"{total / GB:.1f} GB RAM; model sizes unknown")
     ctx = max((e.context_tokens for e in cfg.environments.values()), default=8192)
     need_main = sizes[main.model] + ctx * KV_BYTES_PER_TOKEN
-    need_both = need_main + (sizes.get(fast.model, 0) if fast else 0)
+    # the same model on the same backend is loaded once
+    shared = fast is not None and (fast.model, fast.backend) == (main.model, main.backend)
+    need_both = need_main + (sizes.get(fast.model, 0) if fast and not shared else 0)
     detail = (
         f"main ~{need_main / GB:.1f} GB at {ctx} tokens, with fast model "
         f"~{need_both / GB:.1f} GB; {total / GB:.1f} GB total, {avail / GB:.1f} GB available"
