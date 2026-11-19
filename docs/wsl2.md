@@ -3,9 +3,9 @@
 Cairnward runs inside WSL2, Windows' Linux virtual machine. Windows chat apps connect to it over
 `localhost`. Native Windows has no OS isolation, so Balanced and Strict can't apply there.
 
-**Status: not yet run on real WSL2.** The rules below are tested on plain Linux, using folders as
-stand-ins for the Windows drive and `/init`. Follow the [checklist](#check-it-on-your-machine)
-before relying on them.
+**Status: run on real WSL2 once (2026-11-16, Windows 11 Home, Debian, 8 GB of memory).** Checklist
+steps 1 to 6 and 8 passed after one fix to the self-test; step 7 (replication) wasn't tried. See
+[Results](#results). Follow the [checklist](#check-it-on-your-machine) on your own machine.
 
 ## Install
 In PowerShell on Windows, install a Debian WSL2 distribution:
@@ -26,7 +26,8 @@ inside WSL, not on Windows. WSL's `127.0.0.1` isn't Windows' own unless you turn
 
 ## Settings to change
 **Memory.** WSL2 gets half of Windows' memory by default, and the default main model needs about
-18 GB. To raise it, put this in `%UserProfile%\.wslconfig`, then run `wsl --shutdown`:
+18 GB. With 8 GB in Windows, give WSL about 5 GB and point every role at a small model such as
+`qwen3:1.7b`. To raise it, put this in `%UserProfile%\.wslconfig`, then run `wsl --shutdown`:
 
 ```ini
 [wsl2]
@@ -43,6 +44,27 @@ enabled=false
 appendWindowsPath=false
 ```
 
+**With `systemd=true`, `enabled=false` isn't enough.** systemd registers Windows programs again
+(`/proc/sys/fs/binfmt_misc/WSLInterop` reads `enabled`, and `cairnward doctor` still warns). Remove
+the registration at each start with a small service:
+
+```bash
+sudo tee /etc/systemd/system/wsl-interop-off.service >/dev/null <<'UNIT'
+[Unit]
+Description=Remove WSL interop (Windows programs) registration
+After=systemd-binfmt.service
+ConditionPathExists=/proc/sys/fs/binfmt_misc/WSLInterop
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo -1 > /proc/sys/fs/binfmt_misc/WSLInterop'
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload && sudo systemctl enable --now wsl-interop-off.service
+```
+
 **Disk encryption.** WSL's disk is a file on the Windows drive, so turn on BitLocker or Device
 Encryption in Windows. `cairnward doctor` can't see this from inside WSL.
 
@@ -51,8 +73,11 @@ Encryption in Windows. `cairnward doctor` can't see this from inside WSL.
   projects, papers and Cairnward's own folders in the Linux file system (`~/...`). `cairnward
   serve` refuses to start if its own folders are on a Windows drive, and a run warns if its
   workspace is on one.
-- **Starting Windows programs is blocked in every sandbox.** `/init`, which starts them, is hidden,
-  as is the socket in `/run/WSL`.
+- **Windows programs can't reach Windows from a sandbox.** WSL registers `/init` with binfmt's `F`
+  flag, so the kernel opened it at boot and still starts it for a Windows program inside a sandbox,
+  although `/init` is hidden. It then fails: the interop socket in `/run/WSL` and `WSL_INTEROP` are
+  hidden, and VM sockets are refused. Turning interop off in `/etc/wsl.conf` removes `/init`'s
+  registration too, which is the safer setting.
 - **Windows programs can reach your Linux files.** Anything running as you on Windows can open
   `\\wsl.localhost\Debian\home\...`, and Linux file permissions don't stop it. Locking still
   protects locked items. This is an accepted risk: see T-28 in the
@@ -74,8 +99,9 @@ dashboard link it prints in a Windows browser. If a browser doesn't open by itse
 ## Check it on your machine
 Run these inside WSL. Each is something the Linux tests can't show.
 
-1. **The self-test.** `isolation self-test` must report `Windows drives, Windows programs and VM
-   sockets ... blocked`. A failure means the isolation isn't holding, so don't rely on it.
+1. **The self-test.** `isolation self-test` must report `Windows drives, the route to Windows
+   programs and VM sockets blocked`. A failure means the isolation isn't holding, so don't rely
+   on it.
 
    ```bash
    uv run cairnward doctor
@@ -102,6 +128,24 @@ Run these inside WSL. Each is something the Linux tests can't show.
 7. **Replication** between this machine and your Linux one, through a real shared folder.
 8. **Measure** gateway overhead and start time. The numbers in the README are from the Linux
    reference machine, and crossing the VM boundary may change them.
+
+## Results
+2026-11-16, on a laptop with 8 GB of memory, Windows 11 Home, Debian, WSL2:
+
+| Step | Result |
+|---|---|
+| 1. Self-test | Failed at first: the probe started a Windows program. `/init` has binfmt's `F` flag, so it starts although hidden, then can't reach Windows (`cmd.exe` copied into the workspace exited 1 and printed nothing). The probe now checks the route to Windows instead of whether a program started |
+| 2. Server with isolation | Started, core isolated |
+| 3. `/v1/models` from Windows | Answered with a client key |
+| 4. A Windows chat app | Chatbox (OpenAI-compatible setting) got replies on `cw/scratch:low`. Replacing a client's key stopped the old key at once |
+| 5. Agent run | `/mnt/c` empty, `cmd.exe` not found, no `reached` |
+| 6. Workspace on `/mnt/c` | Warned, and worked |
+| 7. Replication | Not tried |
+| 8. Timing | `cairnward doctor` took 3.3 s |
+
+With interop turned off (which needed the systemd service above), `doctor` passed every isolation
+check and gave no interop warning. The default main model (`qwen3:30b`) doesn't fit in 8 GB, so
+`doctor` reports it missing.
 
 ## Known gaps
 - **VM sockets from the core** (fixed 2026-11-05, I1): the core's sandbox has to allow Unix

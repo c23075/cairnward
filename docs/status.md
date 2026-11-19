@@ -8,7 +8,7 @@ requirement is in [requirements-status.md](plan/requirements-status.md), and the
 ## Summary
 The planned code is built, and most of what remains is testing or needs you. **It isn't production
 ready yet:** the code and its tests are in good order, but the backup has never been restored, it
-has never run on real WSL2, and nobody but the assistant that wrote it has reviewed
+has run on real WSL2 only once (2026-11-16), and nobody but the assistant that wrote it has reviewed
 it. Those are below.
 
 Literature research is a separate project with its own status page: `docs/status.md` in
@@ -22,7 +22,7 @@ Literature research is a separate project with its own status page: `docs/status
 | Partly done | 6 |
 | Left out by decision (Ollama-compatible endpoint, Anthropic driver) | 2 |
 
-The biggest unknown is whether it works on Windows, because WSL2 support has never run on real WSL2.
+WSL2 ran on a real Windows laptop on 2026-11-16: isolation held, and a Windows chat app worked through the gateway.
 
 **Machines in use:** a Debian desktop and a Windows laptop. All the optional features are planned
 for use, so all their real-world checks below apply.
@@ -39,7 +39,7 @@ data. See [plugins](plugins.md) and [operations](operations.md).
 ## Decisions and actions for the owner
 | # | What | Why it matters |
 |---|---|---|
-| A1 | Run the WSL2 checklist on the laptop ([guide](wsl2.md)) | The first real evidence for Windows |
+| A1 | WSL2 checklist on the laptop ([results](wsl2.md#results)) | Done 2026-11-16 except replication (step 7). Found I42 |
 | A3 | Set up restic to a real remote | The only backup is on the same disk as the data |
 | A4 | Keep the backup password somewhere off this machine | Without it, backups can't be restored after a disk failure |
 | A5 | Try one real restore | The real repository has never been restored |
@@ -67,6 +67,7 @@ Outside reports arrive as GitHub issues. One that changes the project's state al
 | # | Issue | State |
 |---|---|---|
 | I1 | The core's sandbox could open VM sockets. Under WSL2 these could reach Windows past the network rules (T-28) | Fixed: the core installs its own seccomp filter at start, refusing VM sockets and io_uring, and won't start under WSL2 without it. Shown in a real srt sandbox on Linux, where a VM socket opened before the fix and is refused after; `doctor` now checks it. Not yet run on real WSL2 (A1) |
+| I42 | On real WSL2 the doctor's self-test reported `windows_programs` not blocked: `/init` is registered with binfmt's `F` flag, so it starts in a sandbox although hidden. It couldn't reach Windows | Fixed 2026-11-16: the probe checks the route to Windows (`/run/WSL`, `WSL_INTEROP`; VM sockets separately). Interop off in `/etc/wsl.conf` is advised. Not yet rerun on the laptop |
 | I2 | Under WSL2, any program running as you on Windows can read your Linux files | Accepted: only locking protects them |
 | I3 | Backends on the local network can use plain `http://`, so prompts cross the network unencrypted | Allowed, with a warning from `doctor`, `config check`, `serve` and the dashboard |
 | I4 | A third-party tool can send plain `http://` to a host you've allowed. Cairnward allows and audits it, but doesn't require encryption | Accepted |
@@ -118,7 +119,7 @@ Outside reports arrive as GitHub issues. One that changes the project's state al
       skipped because none has made a model call yet
 - [x] Aider's full task with the home folder hidden, 2026-11-05: passed 3 of 3 (228, 459 and 564 s). Aider's request to `raw.githubusercontent.com` was denied each run and did no harm
 - [ ] Qwen Code, opencode and Goose with the home folder hidden
-- [ ] WSL2 checklist on the laptop
+- [x] WSL2 checklist on the laptop (2026-11-16; replication not tried)
 
 ### Never run for real
 - [ ] Replication between the desktop and laptop, through real Syncthing or a NAS, and on its
@@ -157,7 +158,7 @@ Read from the code. Connections to real outside services haven't been tried yet.
 | Connection | Protection |
 |---|---|
 | Chat app or agent to Cairnward | Plain HTTP with a key, on this machine only. Cairnward refuses to listen on anything but loopback, so this never reaches a network |
-| Windows app to Cairnward in WSL2 | The same, through WSL's `localhost` forwarding. Not yet tried |
+| Windows app to Cairnward in WSL2 | The same, through WSL's `localhost` forwarding. Worked with Chatbox on 2026-11-16 |
 | One device to another | No direct connection. Replication goes through a shared folder, and its files are encrypted before they get there |
 | Cairnward to a hosted model | HTTPS required, with certificates verified |
 | Cairnward to a remote MCP server | HTTPS required; `http` only on this machine |
