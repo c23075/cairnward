@@ -379,21 +379,23 @@ Literature research is a separate repository, `literature-review-agent-plugin` (
 
 ## Checklist
 
-Status as checked on 2026-11-06, from the repository's files and GitHub's branch list. Settings
+Each open row is also a task in [plan/tasks.json](plan/tasks.json), named in its last column;
+mark it done there, and the status page follows. Status as checked on 2026-11-06, from the
+repository's files and GitHub's branch list. Settings
 that GitHub doesn't show to this check are marked "can't see"; tick them yourself.
 
 | # | Action | Where | Status |
 |---|---|---|---|
-| 1 | Protect `main`: require a PR, require the CI checks, block force pushes | Settings → Rules | ☐ GitHub lists `main` as not protected. A newer ruleset may not show in that flag, so look in Settings → Rules |
-| 2 | Automatically delete head branches | Settings → General | ☐ Not on: PR 39's branch was still there after it merged |
-| 3 | Delete the merged branches | Code → Branches, or the commands above | ◐ 18 of 31 deleted. Checked again on 2026-11-06: 11 of the 13 left are contained in `main`, and `wip/mcp-oauth`'s change is in `main` as another commit, so all 12 are safe to delete. A Claude Code session can't delete them, because its git access is limited to its own branch, so the owner deletes them. Also delete `claude/project-status-kzw0ob` once its PR has merged |
-| 4 | Allow only merge commits | Settings → General | Can't see. Every merged PR so far (38) used a merge commit |
-| 5 | Secret scanning with push protection, Dependabot alerts | Settings → Code security | Can't see. Code scanning (CodeQL) is on |
-| 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ◐ 0.1.0 prepared (version, lockfile, changelog). Tag `v0.1.0` and publish (section 9) (A8) |
+| 1 | Protect `main`: require a PR, require the CI checks, block force pushes | Settings → Rules | ☐ GitHub lists `main` as not protected. A newer ruleset may not show in that flag, so look in Settings → Rules. Task A21 |
+| 2 | Automatically delete head branches | Settings → General | ☐ Not on: PR 39's branch was still there after it merged. Task A23 |
+| 3 | Delete the merged branches | Code → Branches, or the commands above | ◐ 18 of 31 deleted. Checked again on 2026-11-06: 11 of the 13 left are contained in `main`, and `wip/mcp-oauth`'s change is in `main` as another commit, so all 12 are safe to delete. A Claude Code session can't delete them, because its git access is limited to its own branch, so the owner deletes them. Also delete `claude/project-status-kzw0ob` once its PR has merged. Task A24 |
+| 4 | Allow only merge commits | Settings → General | Can't see. Every merged PR so far (38) used a merge commit. Task A25 |
+| 5 | Secret scanning with push protection, Dependabot alerts | Settings → Code security | Can't see. Code scanning (CodeQL) is on. Task A26 |
+| 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ◐ 0.1.0 prepared (version, lockfile, changelog). Tag `v0.1.0` and publish (section 9) (A8). Task A8 |
 | 7 | Dependabot for the npm lockfiles | `.github/dependabot.yml` | ☑ Added 2026-11-06: `tests/e2e`, and the sandbox's two copies grouped (section 7) |
 | 8 | CONTRIBUTING.md and issue templates | Repository root, `.github/ISSUE_TEMPLATE/` | ☑ Added 2026-11-06 |
 | 9 | A rule linking GitHub issues and I-numbers | This page, section 10 | ☑ Adopted 2026-11-06, in section 10 and CONTRIBUTING.md |
-| 10 | Read the threat model and limitations against the code at each milestone | `docs/reviews/` | ☐ Not yet a habit. Done once on 2026-11-06, when two wrong claims were found |
-| 11 | Install the pre-commit hooks on each machine | `uv run pre-commit install` | ☐ Added 2026-11-24 (section 8). Run once on the desktop and the laptop |
-| 12 | Read Scorecard's first findings and fix the cheap ones | Security → Code scanning | ☐ Runs after this is merged (section 8) |
+| 10 | Read the threat model and limitations against the code at each milestone | `docs/reviews/` | ☐ Not yet a habit. Done once on 2026-11-06, when two wrong claims were found. Task W8 |
+| 11 | Install the pre-commit hooks on each machine | `uv run pre-commit install` | ☐ Added 2026-11-24 (section 8). Run once on the desktop and the laptop. Task A27 |
+| 12 | Read Scorecard's first findings and fix the cheap ones | Security → Code scanning | ☐ Runs after this is merged (section 8). Task A28 |
 | 13 | One instruction file for every agent | `AGENTS.md`, `CLAUDE.md` | ☑ 2026-11-24 (D83, section 13) |

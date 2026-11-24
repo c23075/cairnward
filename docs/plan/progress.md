@@ -8,6 +8,18 @@ Before 2026-11-24 each session wrote a separate handoff:
 [2026-11-10](handoff-2026-11-10.md), [2026-11-05](handoff-2026-11-05.md). They're kept as
 history; their open items are now in the task list.
 
+## 2026-11-24: every pending item in the list (PR 69, second commit)
+- The owner asked that anything pending in other docs be in the list. Swept the repository
+  checklist, requirements-status.md and limitations.md:
+  - A21 (the repository settings) split into one task per setting: A21, A23–A28. The
+    checklist's open rows now name their task.
+  - A29 and A30: the two proposed ADRs (0021, 0022) waiting for the owner's decision.
+  - W8 (the threat-model and limitations check at each milestone, NFR-S2), W9 (the OWASP
+    agentic mapping), C28 (the Drive mirror with real rclone, FR-SYNC-2).
+  - The other partly done or stand-in requirements were already checks (C3, C5, C13, C20–C27).
+- Priority shows as P1–P3, apart from the ID, which never changes.
+- `limitations.md` still said WSL2 had never run; corrected (A1 ran it on 2026-11-16).
+
 ## 2026-11-24: one task list and a progress log (PR 69)
 - Pending work moved into [tasks.json](tasks.json): the owner's A-numbers from status.md, the
   handoff's "next steps" as W1–W7, and status.md's testing checklist as C1–C27.

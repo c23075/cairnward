@@ -38,8 +38,8 @@
       "kind": "owner",
       "priority": 1,
       "state": "open",
-      "title": "Work through the GitHub settings in the repository checklist: protect `main` with a ruleset, delete merged branches, secret scanning and push protection, the pre-commit hooks on each machine, Scorecard's first findings",
-      "detail": "Settings can't be seen or changed from the code ([checklist](repository-management.md#checklist))"
+      "title": "Protect `main` with a ruleset: require a pull request and the CI checks, block force pushes and deletion",
+      "detail": "Nothing stops a merge before CI passes; PRs 22 to 24 broke `main` (I25). Use a ruleset, not classic protection, so Scorecard can read it ([steps](repository-management.md#1-protect-the-default-branch))"
     },
     {
       "id": "A22",
@@ -431,6 +431,94 @@
       "group": "Features tested only against a stand-in",
       "state": "open",
       "title": "Container templates with Docker or Podman on the desktop and laptop",
+      "detail": ""
+    },
+    {
+      "id": "A26",
+      "kind": "owner",
+      "priority": 1,
+      "state": "open",
+      "title": "Turn on secret scanning with push protection, and Dependabot alerts (Settings → Code security)",
+      "detail": "Push protection stops a secret at `git push` even where the pre-commit hook isn't installed"
+    },
+    {
+      "id": "A30",
+      "kind": "owner",
+      "priority": 1,
+      "state": "open",
+      "title": "Accept or reject ADR-0022, one task list and a progress log",
+      "detail": "Proposed in PR 69 ([ADR](adr/0022-one-task-list-and-a-progress-log.md))"
+    },
+    {
+      "id": "A23",
+      "kind": "owner",
+      "priority": 2,
+      "state": "open",
+      "title": "Turn on \"Automatically delete head branches\" (Settings → General)",
+      "detail": "Merged branches pile up; PR 39's branch was still there after it merged"
+    },
+    {
+      "id": "A27",
+      "kind": "owner",
+      "priority": 2,
+      "state": "open",
+      "title": "Install the pre-commit hooks on the desktop and the laptop: `uv sync && uv run pre-commit install`",
+      "detail": "The secret scan runs only where it's installed. After PR 68 merges"
+    },
+    {
+      "id": "A28",
+      "kind": "owner",
+      "priority": 2,
+      "state": "open",
+      "title": "Read Scorecard's first findings (Security → Code scanning) and fix the cheap ones",
+      "detail": "After PR 68 merges and the workflow has run"
+    },
+    {
+      "id": "A24",
+      "kind": "owner",
+      "priority": 3,
+      "state": "open",
+      "title": "Delete the merged branches",
+      "detail": "12 were left on 2026-11-06, all contained in `main`. An agent session can't delete them ([commands](repository-management.md#2-branches))"
+    },
+    {
+      "id": "A25",
+      "kind": "owner",
+      "priority": 3,
+      "state": "open",
+      "title": "Allow only merge commits (Settings → General)",
+      "detail": "Every merged PR so far used one; turning off squash and rebase keeps the history consistent"
+    },
+    {
+      "id": "A29",
+      "kind": "owner",
+      "priority": 3,
+      "state": "open",
+      "title": "Accept or reject ADR-0021, managed mode for Cairnsteward",
+      "detail": "Proposed 2026-11-11; nothing is built until it's accepted ([ADR](adr/0021-managed-mode.md))"
+    },
+    {
+      "id": "W8",
+      "kind": "agent",
+      "priority": 2,
+      "state": "open",
+      "title": "At each milestone, check the threat model and limitations against the code, and record it in `docs/reviews/`",
+      "detail": "Not yet a habit (NFR-S2). The last check, 2026-11-10, found two wrong claims; `limitations.md` still said WSL2 had never run until 2026-11-24"
+    },
+    {
+      "id": "W9",
+      "kind": "agent",
+      "priority": 3,
+      "state": "open",
+      "title": "Map the threat model to the OWASP Top 10 for Agentic Applications",
+      "detail": "It maps to the Top 10 for LLM Applications only ([limitations](limitations.md))"
+    },
+    {
+      "id": "C28",
+      "kind": "check",
+      "group": "Features tested only against a stand-in",
+      "state": "open",
+      "title": "The Drive mirror through real rclone (FR-SYNC-2)",
       "detail": ""
     }
   ]

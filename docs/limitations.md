@@ -17,7 +17,8 @@ disagree with the code, the code was checked, and this page follows it.
   - Several features have only been tested against stand-ins: hosted model providers, remote MCP
     servers and OAuth, chat clients, OpenShell, TLS inspection with real agents, and restic to a
     real remote.
-  - It has never run on real WSL2, so Windows support is unproven (A1, I19).
+  - It has run on real WSL2 once, on 2026-11-16 (A1), and CI doesn't test WSL2 (I19), so Windows
+    support rests on one machine.
   - A real backup has never been restored (A5).
   - The release and signing workflow has never run on GitHub (A8).
   - The egress proxy and audit log, the most security-critical parts, are Python with a large

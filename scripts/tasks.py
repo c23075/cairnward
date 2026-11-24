@@ -143,7 +143,7 @@ def render_owner(tasks: list[Task]) -> str:
         reverse=True,
     )
     lines = ["| # | Priority | What | Why it matters |", "|---|---|---|---|"]
-    lines += [f"| {t.id} | {t.priority} | {t.title} | {t.detail} |" for t in open_]
+    lines += [f"| {t.id} | P{t.priority} | {t.title} | {t.detail} |" for t in open_]
     if done:
         lines += ["", "Done:"]
         lines += [f"- **{t.id}** ({t.done or 'undated'}): {_sentence(t)}" for t in done]
@@ -156,11 +156,7 @@ def render_agent(tasks: list[Task]) -> str:
     )
     lines = []
     for t in todo:
-        when = (
-            f"waiting on {', '.join(t.blocked_by)}"
-            if t.state == "blocked"
-            else f"priority {t.priority}"
-        )
+        when = f"waiting on {', '.join(t.blocked_by)}" if t.state == "blocked" else f"P{t.priority}"
         lines.append(f"- **{t.id}** ({when}): {_sentence(t)}")
     return "\n".join(lines) if lines else "Nothing open."
 
@@ -210,7 +206,7 @@ def next_lines(tasks: list[Task], kind: str | None, limit: int) -> list[str]:
         tag = (
             f"waiting on {', '.join(t.blocked_by)}"
             if t.state == "blocked"
-            else (f"p{t.priority}" if t.priority else t.group or "")
+            else (f"P{t.priority}" if t.priority else t.group or "")
         )
         lines.append(f"{t.id:<4} {t.kind:<6} {tag:<12} {t.title}")
     return lines

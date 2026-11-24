@@ -132,14 +132,14 @@ def sample() -> list[Any]:
 
 def test_owner_table_lists_open_items_by_priority_then_done() -> None:
     text = tasks.render_owner(sample())
-    assert text.index("| A1 | 1 | First | Why |") < text.index("| A2 | 2 | Second |")
+    assert text.index("| A1 | P1 | First | Why |") < text.index("| A2 | P2 | Second |")
     assert "- **A3** (2026-11-20): Old" in text
     assert "W1" not in text and "C1" not in text
 
 
 def test_agent_list_puts_blocked_work_last() -> None:
     text = tasks.render_agent(sample())
-    assert text.index("**W2** (priority 3)") < text.index("**W1** (waiting on A1)")
+    assert text.index("**W2** (P3)") < text.index("**W1** (waiting on A1)")
 
 
 def test_checks_are_grouped_with_open_ones_first() -> None:
