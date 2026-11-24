@@ -172,18 +172,18 @@
     {
       "id": "W3",
       "kind": "agent",
-      "priority": 3,
-      "state": "open",
+      "state": "done",
       "title": "I37: refuse TLS inspection while isolation is off",
-      "detail": "A possible fix, not decided. Ask the owner first"
+      "detail": "Approved by the owner on 2026-11-24 and built (D85)",
+      "done": "2026-11-24"
     },
     {
       "id": "W4",
       "kind": "agent",
-      "priority": 3,
-      "state": "open",
+      "state": "done",
       "title": "I39: an optional list of allowed environments per client in `clients.toml`",
-      "detail": "A possible fix, not decided. Ask the owner first"
+      "detail": "Approved by the owner on 2026-11-24 and built (D86)",
+      "done": "2026-11-24"
     },
     {
       "id": "W5",
@@ -520,6 +520,22 @@
       "state": "open",
       "title": "The Drive mirror through real rclone (FR-SYNC-2)",
       "detail": ""
+    },
+    {
+      "id": "A31",
+      "kind": "owner",
+      "priority": 2,
+      "state": "open",
+      "title": "Run `cairnward doctor` and limit the client keys it warns about: `environments = [...]` in `clients.toml`, or rerun `cairnward client add <name> --environment <env>`",
+      "detail": "Keys made before D86 can use any environment, including `scratch`, which is more open than `coding` (I39)"
+    },
+    {
+      "id": "W10",
+      "kind": "agent",
+      "priority": 3,
+      "state": "open",
+      "title": "Audit MCP's environment refusals, as chat and embeddings refusals are",
+      "detail": "Found in the 2026-11-24 review (R5): MCP answers 403 for a run's or a client's other environment but records nothing"
     }
   ]
 }

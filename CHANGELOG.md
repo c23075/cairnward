@@ -27,6 +27,16 @@
   records. Not used by `serve` yet.
 
 ### Security
+- TLS inspection needs isolation (D85, I37): runs in an environment with `[tls_inspection]` on
+  and isolation off are refused, because an agent could read the local CA's key. Set
+  `allow_without_isolation = true` in that environment to accept the risk; it stays a privacy
+  warning, and turning it on is audited.
+- Environments per client (D86, I39): `environments = [...]` in `[clients.<name>]` limits which
+  environments that client's own key may use; others get `403`, audited, and `/v1/models`
+  lists only the allowed ones. **Changed:** `cairnward client add` now writes this for a client
+  not yet in `clients.toml`, with the default environment (`--environment` to choose,
+  `--any-environment` for none). Keys you already have stay unlimited; `cairnward doctor`
+  lists them.
 - The Rust data path's decision socket requires a secret, given to the binary on stdin: the
   isolated core can reach any Unix socket and could otherwise have asked it for CA-signed
   certificates (review 2026-11-10, T-39).

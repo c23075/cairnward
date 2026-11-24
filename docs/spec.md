@@ -98,6 +98,8 @@ These are the current decisions. Superseded decisions are listed at the end, wit
 | D82 | Read-only views for an observer (2026-11-11) | The management socket gains `GET /v1/runs` (active runs, without keys or tokens) and `GET /v1/audit/since?seq=&limit=` (records after a sequence number, as `audit log --json` writes them). They change nothing and aren't audited. [Cairnsteward](https://github.com/c23075/cairnsteward) (formerly Cairnward Keep), the fleet control plane, reads them through an agent on each host and never writes to the socket. | — |
 | D83 | Agent instructions and repository checks (2026-11-24) | `AGENTS.md` holds the instructions for every coding agent; `CLAUDE.md` only points to it, so Claude, Codex, OpenCode and others read the same rules. Each clone can install pre-commit hooks that refuse a commit holding a secret (gitleaks) and run ruff. OpenSSF Scorecard grades the repository's settings weekly and on each push to `main`; its results stay on GitHub. See [repository-management.md](repository-management.md). | — |
 | D84 | One task list (2026-11-24) | Pending work is kept in `docs/plan/tasks.json`: owner actions (A), agent work (W) and checks to run for real (C). `scripts/tasks.py` renders status.md's action, agent and testing sections from it, and a test fails CI when they differ. `docs/plan/progress.md` replaces the dated handoffs. | [0022](adr/0022-one-task-list-and-a-progress-log.md) |
+| D85 | TLS inspection needs isolation (2026-11-24, I37) | With `[tls_inspection]` on and the environment's isolation off, an agent running as the owner could read the local CA's key. Runs there are refused, by `cairnward run` and by the core, unless the environment sets `allow_without_isolation = true`. Either way it shows as a privacy warning, and turning inspection on or allowing it without isolation is recorded in the audit log's settings snapshot. A refused run is audited as `run.refused`. | — |
+| D86 | Environments per client (2026-11-24, I39) | `environments = [...]` in `[clients.<name>]` limits which environments that client's own key may use. A request naming another gets `403` (`client_environment`) and an audited deny; `/v1/models` lists only the allowed ones; MCP refuses them too. Unset means any, as before. `cairnward client add` gives a new client the default environment unless told otherwise (`--environment`, `--any-environment`); an existing client changes only when asked. `doctor` warns about keys that can reach a more open environment. Run keys stay pinned to their run's environment. | — |
 | D5, D19 | Model backends | Pluggable: Ollama (default), llama.cpp, or any OpenAI-compatible server. Set per role, environment or effort level. | [0004](adr/0004-pluggable-backends.md) |
 | D29 | Hosted providers | Denied by default. Tested first: Alibaba Model Studio, DeepSeek API, OpenRouter. Extended by D70. | 0004 |
 | D7, D25 | Literature sources, citations | Moved to the research plugin (ADR-0017). | [0017](adr/0017-research-as-a-plugin.md) |
@@ -198,6 +200,7 @@ See [ADR-0005](adr/0005-local-core-service-and-api-hardening.md).
 - **Approvals** are asked one at a time. A prompt that is still open after its connection timed out holds back the next one. A late answer is dropped, not remembered.
 
 **TLS inspection** (D78, [ADR-0018](adr/0018-openshell-sandbox-and-tls-inspection.md)). `[tls_inspection] enabled = true` in an environment. It is off by default, no preset sets it, and it shows as a privacy warning.
+- **Isolation required** (D85, I37). With the environment's isolation off, an agent could read the CA's key, so `cairnward run` and the core refuse runs there. `allow_without_isolation = true` accepts the risk for that environment; it stays a privacy warning, and the change is audited.
 - **How it works.** Egress ends a run's CONNECT with a certificate from Cairnward's local CA (`<data_dir>/egress-ca/`, EC P-256, file mode 0600). Host certificates are valid for seven days and kept in memory only. Egress opens its own verified TLS connection to the host and passes HTTP/1.1 through h11. ALPN offers only `http/1.1`.
 - **Rules.** Egress checks each request against `rules` (host, method, path glob, first match wins) and `unmatched`. The query is not matched.
 - **The path that rules see** is the path as a server resolves it:
@@ -301,7 +304,14 @@ A backend may name a `fallback` (and a `fallback_model`). Configuration validati
 - `/v1/chat/completions` and `/v1/embeddings` answer `403` (`run_environment`) to `cw/<other>:<effort>`. Cairnward audits this as a denied `model.call` under `X`, with `requested_environment` in the details. Nothing reaches a backend.
 - `cw/raw/<model>` uses the run's environment, not the client's default.
 - `cairnward run` refuses a `--model` from another environment before it starts the agent.
-- A client's own key is not pinned and may name any environment (I39). `/v1/models` is not filtered: a run still sees every environment.
+- `/v1/models` lists only the run's environment.
+
+**Environments per client** (D86, I39). A client's own key may use any environment unless `[clients.<name>] environments = [...]` limits it.
+- A request for another environment gets `403` (`client_environment`), audited as a denied `model.call` with the allowed list in the details. MCP answers `403` too. Nothing reaches a backend.
+- `/v1/models` lists only the allowed environments. `cw/raw/<model>` uses `default_environment`, or the first allowed environment.
+- `default_environment` must be in the list. Changes to the lists are recorded in the audit log's settings snapshot.
+- `cairnward client add <name>` writes `environments` with the default environment for a client that isn't in `clients.toml` yet (`--environment` to choose, repeatable; `--any-environment` to leave it unlimited). For a client already there, it changes nothing unless `--environment` is given.
+- `cairnward doctor` warns about each key that can reach an environment with more settings weaker than Strict than its own.
 
 **Disabled clients.** A client with `enabled = false` in `clients.toml` gets `401` with any of its keys, its run keys included, on chat, embeddings, models and MCP. Its keys work again when you switch it back on. These refusals are not audited.
 

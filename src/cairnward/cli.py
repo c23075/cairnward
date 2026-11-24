@@ -370,6 +370,20 @@ def build_parser() -> argparse.ArgumentParser:
     cli_sub = cli_cmd.add_subparsers(dest="client_command", metavar="ACTION", required=True)
     add = cli_sub.add_parser("add", help="create (or rotate) a client's API key; shown once")
     add.add_argument("name")
+    add.add_argument(
+        "--environment",
+        action="append",
+        metavar="ENV",
+        help="an environment this client's key may use (repeat for more); a new "
+        "client gets only the default environment unless told otherwise",
+    )
+    add.add_argument(
+        "--any-environment",
+        action="store_true",
+        help="let this client's key use every environment (I39)",
+    )
+    add.add_argument("--kind", choices=["chat", "agent"], default="chat",
+                     help="for a client not yet in clients.toml (default: chat)")  # fmt: skip
     rm = cli_sub.add_parser("remove", help="revoke a client's API key")
     rm.add_argument("name")
     cli_sub.add_parser("list", help="clients with API keys")
@@ -908,6 +922,15 @@ def _cmd_client(args: argparse.Namespace) -> int:
             f"Base URL: http://127.0.0.1:<gateway_port>/v1  (see {cfg.main_config})",
             file=sys.stderr,
         )
+        from cairnward.config.edit import EditError, limit_client
+
+        try:
+            note = limit_client(cfg, args.name, args.environment, kind=args.kind,
+                                any_environment=args.any_environment)  # fmt: skip
+        except EditError as exc:
+            print(f"The key works, but its environments weren't set: {exc}", file=sys.stderr)
+            return 1
+        print(note, file=sys.stderr)
         return 0
     if args.client_command == "remove":
         if keys.remove(args.name):

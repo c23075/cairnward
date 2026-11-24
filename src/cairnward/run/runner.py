@@ -271,6 +271,8 @@ def plan_run(
     ask_socket: Path | None = None,
     openshell_cli: list[str] | None = None,
 ) -> Plan:
+    if why := cfg.tls_inspection_refused(environment):
+        raise RunError(why)  # I37, D85: never plan such a run, whoever calls this
     if uses_openshell(cfg, environment):
         return _plan_openshell(cfg, environment=environment, profile=profile, model=model,
                                workspace=workspace, run=run, tmp_dir=tmp_dir,
@@ -504,6 +506,8 @@ def run_agent(
     profile = PROFILES.get(profile_name)
     if profile is None:
         raise RunError(f"unknown profile '{profile_name}' (known: {', '.join(PROFILES)})")
+    if why := cfg.tls_inspection_refused(env_name):
+        raise RunError(why)  # before anything is checked or started; the core refuses it too
     if model:
         check_model_environment(cfg, env_name, model)
     in_openshell = uses_openshell(cfg, env_name)

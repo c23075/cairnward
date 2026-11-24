@@ -63,7 +63,7 @@ def _toml(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)  # strings, lists, numbers, booleans
 
 
-def set_key(path: Path, table: str, key: str, value: str | int | None) -> None:
+def set_key(path: Path, table: str, key: str, value: str | int | list[str] | None) -> None:
     """Set (or with None remove) `key` in `[table]` of a TOML file, keeping everything else."""
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     start = next((i for i, x in enumerate(lines) if x.strip() == f"[{table}]"), None)
@@ -82,6 +82,52 @@ def set_key(path: Path, table: str, key: str, value: str | int | None) -> None:
         elif value is not None:
             lines.insert(start + 1, f"{key} = {_toml(value)}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def limit_client(
+    paths: Paths,
+    name: str,
+    environments: list[str] | None,
+    *,
+    kind: str = "chat",
+    any_environment: bool = False,
+) -> str:
+    """Which environments a client's own key may use (I39, D86), written to clients.toml. A new
+    client gets the default environment unless told otherwise; an existing one changes only when
+    environments are given. Written only if the whole configuration still loads. Returns what
+    happened, in a sentence."""
+    try:
+        cfg = load_config(paths)
+    except ConfigError as exc:
+        raise EditError(f"the configuration doesn't load ({exc.problems[0]})") from exc
+    known = cfg.clients.clients.get(name)
+    if any_environment:
+        if known is not None and known.environments is not None:
+            return (f"'{name}' keeps its limit in {paths.clients_config}: "
+                    f"{', '.join(known.environments)}. Remove `environments` there to lift "
+                    "it.")  # fmt: skip
+        return f"'{name}' can use any environment (--any-environment)."
+    if known is not None and not environments:
+        if known.environments is None:
+            return (f"'{name}' can use any environment: add `environments = [...]` to "
+                    f"[clients.{name}] in {paths.clients_config} to limit it (I39).")  # fmt: skip
+        return f"'{name}' may use: {', '.join(known.environments)}."
+    wanted = environments or [cfg.main.defaults.environment]
+    path = paths.clients_config
+    before = path.read_text(encoding="utf-8") if path.exists() else None
+    if known is None:
+        set_key(path, f"clients.{name}", "kind", kind)
+    set_key(path, f"clients.{name}", "environments", wanted)
+    try:
+        load_config(paths)
+    except ConfigError as exc:
+        if before is None:
+            path.unlink()
+        else:
+            path.write_text(before, encoding="utf-8")
+        raise EditError(exc.problems[0]) from exc
+    return (f"'{name}' may use: {', '.join(wanted)} ({path}). Use --environment to choose "
+            "others, or --any-environment.")  # fmt: skip
 
 
 def change_backup(cfg: Config, mode: str, repository: str | None,

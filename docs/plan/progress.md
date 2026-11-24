@@ -8,6 +8,23 @@ Before 2026-11-24 each session wrote a separate handoff:
 [2026-11-10](handoff-2026-11-10.md), [2026-11-05](handoff-2026-11-05.md). They're kept as
 history; their open items are now in the task list.
 
+## 2026-11-24: TLS inspection needs isolation; environments per client (W3, W4)
+- The owner approved both proposals. **W3 (I37, D85):** runs in an environment with TLS
+  inspection on and isolation off are refused by `cairnward run` and by the core (`run.refused`
+  in the audit log), unless the environment sets `allow_without_isolation`, which stays a
+  warning. Turning inspection on, or allowing it, is now in the settings snapshot.
+- **W4 (I39, D86):** `environments = [...]` per client in `clients.toml`. Other environments get
+  403 on chat and embeddings (audited) and on MCP; `/v1/models` lists only allowed ones (a
+  run's list is its own environment now too). `client add` limits a new client to the default
+  environment; `doctor` warns about unlimited keys.
+- Tested: 22 new tests with the real config loader, gateway, management app and audit log; each
+  fails with its fix switched off. Backends were fakes. Not run with the real sandbox or a real
+  client.
+- Found: the default install's `scratch` is more open than `coding`, so `doctor` warns about
+  every existing key (A31). MCP refusals aren't audited (W10). Threat model v0.8, T-40, and
+  [review](../reviews/threat-model-2026-11-24.md).
+- Tasks: W3, W4 done; A31, W10 added.
+
 ## 2026-11-24: every pending item in the list (PR 69, second commit)
 - The owner asked that anything pending in other docs be in the list. Swept the repository
   checklist, requirements-status.md and limitations.md:

@@ -118,6 +118,9 @@ Then, in another terminal, create an API key for a client and open the dashboard
 uv run cairnward client add my-chat-app
 ```
 
+The key can use only the default environment; add `--environment <name>` (repeatable) to choose
+others.
+
 ```bash
 uv run cairnward dashboard
 ```

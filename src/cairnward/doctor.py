@@ -567,7 +567,38 @@ def run_checks(paths: Paths) -> list[Check]:
     if cfg.main.replication.mode != "none":
         checks.append(check_replication(cfg))
     checks += check_plugins(cfg)
+    checks += check_client_environments(cfg)
     return checks
+
+
+def openness(cfg: Config, environment: str) -> int:
+    """How many privacy settings are weaker than Strict here: a rough order of environments."""
+    return sum(1 for s in cfg.privacy(environment).settings.values() if s.weaker_than_strict)
+
+
+def check_client_environments(cfg: Config) -> list[Check]:
+    """Client keys that can name a more open environment than their own (I39, D86). Runs are
+    pinned to theirs; a client's own key isn't, unless clients.toml lists its environments."""
+    from cairnward.gateway import ClientKeys
+
+    names = set(ClientKeys.at(cfg.paths.state_dir).names()) | set(cfg.clients.clients)
+    out = []
+    for name in sorted(names):
+        known = cfg.clients.clients.get(name)
+        if known is not None and known.environments is not None:
+            continue
+        home = (known.home_environment() if known else None) or cfg.main.defaults.environment
+        if home not in cfg.environments:
+            continue
+        opener = sorted(e for e in cfg.environments if openness(cfg, e) > openness(cfg, home))
+        if opener:
+            out.append(Check(
+                f"client {name}", "warn",
+                f"its key can use any environment, including more open ones than '{home}': "
+                f"{', '.join(opener)}",
+                f'limit it in clients.toml: [clients.{name}] environments = ["{home}"]',
+            ))  # fmt: skip
+    return out
 
 
 def check_plugins(cfg: Any) -> list[Check]:
