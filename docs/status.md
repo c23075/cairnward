@@ -30,38 +30,46 @@ WSL2 ran on a real Windows laptop on 2026-11-16: isolation held, and a Windows c
 **Machines in use:** a Debian desktop and a Windows laptop. All the optional features are planned
 for use, so all their real-world checks below apply.
 
+## Milestones
+<!-- tasks:milestones -->
+<!-- Generated from backlog/ by scripts/tasks.py; change tasks with `backlog`, not here. -->
+- **0.1.0 release**: 0 of 4 done. Still to do: TASK-4, TASK-5, TASK-6, TASK-36
+- **Production ready**: 0 of 8 done. Still to do: TASK-1, TASK-2, TASK-3, TASK-9, TASK-11, TASK-39, TASK-42, TASK-67
+<!-- /tasks:milestones -->
+
 ## Decisions and actions for the owner
-Ask an agent "what's next?", or run `uv run python scripts/tasks.py next --kind owner`.
+Ask an agent "what's next?", or run `uv run python scripts/tasks.py next --kind action` (add `--topic backup`, say, for one
+topic).
 High priority is the next thing to do, then Medium, then Low. An ID never changes, so it can be
 quoted in commits and the progress log; to reorder, change the priority. IDs before 2026-11-25
 were A, W and C numbers ([map](plan/progress.md#ids-before-2026-11-25)).
 
 <!-- tasks:owner -->
 <!-- Generated from backlog/ by scripts/tasks.py; change tasks with `backlog`, not here. -->
-| # | Priority | What | Why it matters |
-|---|---|---|---|
-| TASK-1 | High | Set up restic to a real remote | The only backup is on the same disk as the data |
-| TASK-2 | High | Keep the backup password somewhere off this machine | Without it, backups can't be restored after a disk failure |
-| TASK-3 | High | Try one real restore | The real repository has never been restored |
-| TASK-4 | High | Run the first signed release | 0.1.0 is prepared: version, lockfile and changelog. After merging, tag `v0.1.0`, check the draft's signatures and publish ([steps](repository-management.md#9-releases-and-versions)). The workflow has never run on GitHub |
-| TASK-5 | High | Protect `main` with a ruleset | Require a pull request and the CI checks; block force pushes and deletion. Nothing stops a merge before CI passes; PRs 22 to 24 broke `main` (I25). Use a ruleset, not classic protection, so Scorecard can read it ([steps](repository-management.md#1-protect-the-default-branch)) |
-| TASK-6 | High | Turn on secret scanning and push protection | Settings → Code security, with Dependabot alerts. Push protection stops a secret at `git push` even where the pre-commit hook isn't installed |
-| TASK-7 | High | Accept or reject ADR-0022, one task list and a progress log | Proposed in PR 69 ([ADR](adr/0022-one-task-list-and-a-progress-log.md)) |
-| TASK-8 | Medium | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
-| TASK-9 | Medium | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
-| TASK-10 | Medium | Try the Rust egress data path for real | Set `[egress] implementation = "rust"` with your real agents and the sites they use, TLS inspection included (build with `cargo build --release --manifest-path rust/Cargo.toml`). ADR-0020 switches the default only after a real run; it's only been tested against local stand-ins |
-| TASK-11 | Medium | Rerun `cairnward doctor` on the laptop under WSL2 | I42's fix (the probe checks the route to Windows) hasn't been rerun on the laptop |
-| TASK-12 | Medium | Move your server to the research plugin | Your running server and data are still on the old setup. Restart `cairnward serve` from `main`, take a backup, then run `cairnward-research install-plugin` and `cairnward-research import`. The import has only run in tests ([plugins](plugins.md), [operations](operations.md)) |
-| TASK-13 | Medium | Turn on "Automatically delete head branches" (Settings → General) | Merged branches pile up; PR 39's branch was still there after it merged |
-| TASK-14 | Medium | Install the pre-commit hooks on both machines | `uv sync && uv run pre-commit install` on the desktop and the laptop. The secret scan runs only where it's installed. After PR 68 merges |
-| TASK-15 | Medium | Read Scorecard's first findings (Security → Code scanning) and fix the cheap ones | After PR 68 merges and the workflow has run |
-| TASK-16 | Medium | Limit the client keys `doctor` warns about | Run `cairnward doctor`, then set `environments = [...]` in `clients.toml`, or rerun `cairnward client add <name> --environment <env>`. Keys made before D86 can use any environment, including `scratch`, which is more open than `coding` (I39) |
-| TASK-17 | Low | Try the OpenShell sandbox, if you want it | Install OpenShell, set `OPENSHELL_TELEMETRY_ENABLED=false` for its gateway, and try one run with `sandbox = "openshell"`. It has only run against a stand-in. Whether a sandbox can reach Cairnward's loopback-only ports is unknown |
-| TASK-18 | Low | If you turn on TLS inspection: try it with your real agents and the sites they use | Only tested with httpx and curl against a local server. Agents that pin certificates will fail |
-| TASK-19 | Low | Run `scripts/bench_startup.py --existing` on the desktop | Confirms I15's start-time fix on the reference machine; so far measured only in a cloud session |
-| TASK-20 | Low | Delete the merged branches | 12 were left on 2026-11-06, all contained in `main`. An agent session can't delete them ([commands](repository-management.md#2-branches)) |
-| TASK-21 | Low | Allow only merge commits (Settings → General) | Every merged PR so far used one; turning off squash and rebase keeps the history consistent |
-| TASK-22 | Low | Accept or reject ADR-0021, managed mode for Cairnsteward | Proposed 2026-11-11; nothing is built until it's accepted ([ADR](adr/0021-managed-mode.md)) |
+| # | Priority | Topic | What | Why it matters |
+|---|---|---|---|---|
+| TASK-1 | High | backup | Set up restic to a real remote | The only backup is on the same disk as the data |
+| TASK-2 | High | backup, security | Keep the backup password somewhere off this machine | Without it, backups can't be restored after a disk failure |
+| TASK-3 | High | backup | Try one real restore | The real repository has never been restored |
+| TASK-4 | High | release | Run the first signed release | 0.1.0 is prepared: version, lockfile and changelog. After merging, tag `v0.1.0`, check the draft's signatures and publish ([steps](repository-management.md#9-releases-and-versions)). The workflow has never run on GitHub |
+| TASK-5 | High | repo | Protect `main` with a ruleset | Require a pull request and the CI checks; block force pushes and deletion. Nothing stops a merge before CI passes; PRs 22 to 24 broke `main` (I25). Use a ruleset, not classic protection, so Scorecard can read it ([steps](repository-management.md#1-protect-the-default-branch)) |
+| TASK-6 | High | repo, security | Turn on secret scanning and push protection | Settings → Code security, with Dependabot alerts. Push protection stops a secret at `git push` even where the pre-commit hook isn't installed |
+| TASK-7 | High | decision, repo | Accept or reject ADR-0022, one task list and a progress log | Proposed in PR 69 ([ADR](adr/0022-one-task-list-and-a-progress-log.md)) |
+| TASK-8 | Medium | security | Turn on disk encryption on both machines (LUKS, or BitLocker on Windows) | Protects unlocked conversations if a disk is stolen |
+| TASK-9 | Medium | security | Find an outside reviewer | Only the assistant that wrote the code has reviewed it |
+| TASK-10 | Medium | egress | Try the Rust egress data path for real | Set `[egress] implementation = "rust"` with your real agents and the sites they use, TLS inspection included (build with `cargo build --release --manifest-path rust/Cargo.toml`). ADR-0020 switches the default only after a real run; it's only been tested against local stand-ins |
+| TASK-11 | Medium | wsl2 | Rerun `cairnward doctor` on the laptop under WSL2 | I42's fix (the probe checks the route to Windows) hasn't been rerun on the laptop |
+| TASK-12 | Medium | plugins | Move your server to the research plugin | Your running server and data are still on the old setup. Restart `cairnward serve` from `main`, take a backup, then run `cairnward-research install-plugin` and `cairnward-research import`. The import has only run in tests ([plugins](plugins.md), [operations](operations.md)) |
+| TASK-13 | Medium | repo | Turn on "Automatically delete head branches" (Settings → General) | Merged branches pile up; PR 39's branch was still there after it merged |
+| TASK-14 | Medium | repo, security | Install the pre-commit hooks on both machines | `uv sync && uv run pre-commit install` on the desktop and the laptop. The secret scan runs only where it's installed. After PR 68 merges |
+| TASK-15 | Medium | repo, security | Read Scorecard's first findings (Security → Code scanning) and fix the cheap ones | After PR 68 merges and the workflow has run |
+| TASK-16 | Medium | clients, security | Limit the client keys `doctor` warns about | Run `cairnward doctor`, then set `environments = [...]` in `clients.toml`, or rerun `cairnward client add <name> --environment <env>`. Keys made before D86 can use any environment, including `scratch`, which is more open than `coding` (I39) |
+| TASK-17 | Low | sandbox | Try the OpenShell sandbox, if you want it | Install OpenShell, set `OPENSHELL_TELEMETRY_ENABLED=false` for its gateway, and try one run with `sandbox = "openshell"`. It has only run against a stand-in. Whether a sandbox can reach Cairnward's loopback-only ports is unknown |
+| TASK-18 | Low | egress, security | If you turn on TLS inspection: try it with your real agents and the sites they use | Only tested with httpx and curl against a local server. Agents that pin certificates will fail |
+| TASK-19 | Low | performance | Run `scripts/bench_startup.py --existing` on the desktop | Confirms I15's start-time fix on the reference machine; so far measured only in a cloud session |
+| TASK-20 | Low | repo | Delete the merged branches | 12 were left on 2026-11-06, all contained in `main`. An agent session can't delete them ([commands](repository-management.md#2-branches)) |
+| TASK-21 | Low | repo | Allow only merge commits (Settings → General) | Every merged PR so far used one; turning off squash and rebase keeps the history consistent |
+| TASK-22 | Low | decision | Accept or reject ADR-0021, managed mode for Cairnsteward | Proposed 2026-11-11; nothing is built until it's accepted ([ADR](adr/0021-managed-mode.md)) |
 
 Done:
 - **TASK-54** (2026-11-16): WSL2 checklist on the laptop. Done except replication (step 7), which is TASK-31. Found I42 ([results](wsl2.md#results))
@@ -75,14 +83,14 @@ Done:
 ## Next for agents
 <!-- tasks:agent -->
 <!-- Generated from backlog/ by scripts/tasks.py; change tasks with `backlog`, not here. -->
-- **TASK-23** (High): Test replication with encrypted databases (D80). `replication.py` opens the vault through `Vault.open`, so it should work, but there's no test
-- **TASK-24** (Medium): Pin the Rust binary by hash, as plugins are pinned (Rust review R4)
-- **TASK-25** (Medium): Check the threat model and limitations at each milestone. Against the code, recorded in `docs/reviews/`. Not yet a habit (NFR-S2). The last check, 2026-11-10, found two wrong claims; `limitations.md` still said WSL2 had never run until 2026-11-24
-- **TASK-26** (Low): Let `cairnward audit verify --rust` call `cairnward-audit-rs` when it's built. Today an auditor runs the binary by hand ([operations.md](operations.md))
-- **TASK-27** (Low): Map the threat model to the OWASP Top 10 for Agentic Applications. It maps to the Top 10 for LLM Applications only ([limitations](limitations.md))
-- **TASK-28** (Low): Audit MCP's environment refusals, as chat and embeddings refusals are. Found in the 2026-11-24 review (R5): MCP answers 403 for a run's or a client's other environment but records nothing
-- **TASK-67** (Low): Check whether the 2026-11-16 WSL2 run covered I1, and update I1 and wsl2.md. I1 and wsl2.md's known gaps say the VM-socket fix hasn't run on real WSL2, but on 2026-11-16 `doctor`, which checks it, passed every isolation check there ([results](wsl2.md#results))
-- **TASK-29** (waiting on TASK-10): Switch the egress default to Rust. Then remove the Python data path, keeping the decision service. Only after the owner's real run (ADR-0020)
+- **TASK-23** (High; backup): Test replication with encrypted databases (D80). `replication.py` opens the vault through `Vault.open`, so it should work, but there's no test
+- **TASK-24** (Medium; egress, security): Pin the Rust binary by hash, as plugins are pinned (Rust review R4)
+- **TASK-25** (Medium; security): Check the threat model and limitations at each milestone. Against the code, recorded in `docs/reviews/`. Not yet a habit (NFR-S2). The last check, 2026-11-10, found two wrong claims; `limitations.md` still said WSL2 had never run until 2026-11-24
+- **TASK-26** (Low; audit): Let `cairnward audit verify --rust` call `cairnward-audit-rs` when it's built. Today an auditor runs the binary by hand ([operations.md](operations.md))
+- **TASK-27** (Low; security): Map the threat model to the OWASP Top 10 for Agentic Applications. It maps to the Top 10 for LLM Applications only ([limitations](limitations.md))
+- **TASK-28** (Low; audit): Audit MCP's environment refusals, as chat and embeddings refusals are. Found in the 2026-11-24 review (R5): MCP answers 403 for a run's or a client's other environment but records nothing
+- **TASK-67** (Low; wsl2, security): Check whether the 2026-11-16 WSL2 run covered I1, and update I1 and wsl2.md. I1 and wsl2.md's known gaps say the VM-socket fix hasn't run on real WSL2, but on 2026-11-16 `doctor`, which checks it, passed every isolation check there ([results](wsl2.md#results))
+- **TASK-29** (waiting on TASK-10; egress): Switch the egress default to Rust. Then remove the Python data path, keeping the decision service. Only after the owner's real run (ADR-0020)
 <!-- /tasks:agent -->
 
 ## Known issues
@@ -176,6 +184,66 @@ Outside reports arrive as GitHub issues. One that changes the project's state al
 - [ ] `llama-server` on the desktop and laptop (TASK-46)
 - [ ] Container templates with Docker or Podman on the desktop and laptop (TASK-47)
 - [ ] The Drive mirror through real rclone (FR-SYNC-2) (TASK-48)
+
+### audit
+- [ ] A private remote for audit anchoring, and a public timestamp server (TASK-43)
+
+### backup
+- [ ] Replication between the desktop and laptop: Through real Syncthing or a NAS, and on its schedule under an isolated server. (TASK-31)
+- [ ] restic to a real remote (TASK-1) (TASK-42)
+- [ ] The Drive mirror through real rclone (FR-SYNC-2) (TASK-48)
+
+### clients
+- [ ] Qwen Code, opencode and Goose with the home folder hidden (TASK-30)
+- [ ] Chat clients: Open WebUI, Jan, LibreChat (TASK-41)
+- [ ] A real remote MCP server and OAuth provider (TASK-45)
+
+### dashboard
+- [ ] Manual accessibility: keyboard only, a screen reader, 200% zoom (TASK-40)
+- [x] Locking a conversation and its artifacts from the dashboard on a live isolated server: Found and fixed a bug (`tests/isolation/test_owner_flows.py`) (TASK-58)
+- [x] Dashboard settings and "back up now" in isolated mode: Settings never worked there, now fixed (`tests/isolation/test_owner_flows.py`) (TASK-59)
+
+### deploy
+- [ ] The systemd unit under real systemd: `deploy/systemd/cairnward.service`; only `systemd-analyze verify` so far. (TASK-37)
+- [ ] Container templates with Docker or Podman on the desktop and laptop (TASK-47)
+- [x] Clean install as a new user, following the READMEs: From the public repositories, with an empty home on this machine. The core worked, and the plugin's steps needed a fix. Not a fresh VM, so system packages weren't tested (TASK-60)
+
+### egress
+- [ ] TLS inspection with real agents and outside sites (TASK-18) (TASK-35)
+
+### evals
+- [ ] Qwen Code, opencode and Goose with the home folder hidden (TASK-30)
+- [x] Full check on `main`, 2026-11-04: Overall fail (report on the `dev` branch). The coding eval passed; research results are in the plugin's repository. Chat clients were skipped because none has made a model call yet (TASK-61)
+- [x] Aider's full task with the home folder hidden, 2026-11-05: Passed 3 of 3 (228, 459 and 564 s). Aider's request to `raw.githubusercontent.com` was denied each run and did no harm (TASK-62)
+
+### models
+- [ ] Hosted model providers (TASK-44)
+- [ ] `llama-server` on the desktop and laptop (TASK-46)
+- [x] The `cut_off` warning, 2026-11-05: A real model limit returned `finish_reason` `length` through the gateway, and a workflow reported it (TASK-64)
+
+### performance
+- [x] Start time on a large data folder, 2026-11-05: 3,000 conversations (23 MB) start as fast as empty data (I15) (TASK-65)
+
+### plugins
+- [ ] A plugin other than research and a test plugin running the contract (TASK-38)
+- [x] Locking a plugin's item (a research library) through a live isolated server, 2026-11-05 (TASK-63)
+
+### release
+- [ ] Release workflow on GitHub (TASK-4) (TASK-36)
+
+### sandbox
+- [ ] Locking jobs and runs through a live isolated server (TASK-32)
+- [ ] OAuth token refresh inside the sandbox (TASK-33)
+- [ ] A run with `sandbox = "openshell"` against a real OpenShell gateway (TASK-17) (TASK-34)
+- [x] Locking a conversation and its artifacts from the dashboard on a live isolated server: Found and fixed a bug (`tests/isolation/test_owner_flows.py`) (TASK-58)
+- [x] Dashboard settings and "back up now" in isolated mode: Settings never worked there, now fixed (`tests/isolation/test_owner_flows.py`) (TASK-59)
+- [x] Locking a plugin's item (a research library) through a live isolated server, 2026-11-05 (TASK-63)
+
+### security
+- [ ] Outside review (TASK-9) (TASK-39)
+
+### wsl2
+- [x] WSL2 checklist on the laptop, 2026-11-16: Replication not tried (TASK-31) (TASK-66)
 <!-- /tasks:checks -->
 
 ## How connections are secured

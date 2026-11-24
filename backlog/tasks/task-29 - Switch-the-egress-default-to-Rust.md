@@ -5,8 +5,9 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-11-24T15:57:30Z'
-updated_date: '2026-11-24T15:58:19Z'
-labels: []
+updated_date: '2026-11-24T16:35:34Z'
+labels:
+  - egress
 dependencies:
   - TASK-10
 type: work

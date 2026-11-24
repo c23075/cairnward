@@ -4,9 +4,10 @@ title: Start the enterprise plan with an ADR for the control-plane split
 status: Done
 assignee:
   - '@agent'
-updated_date: '2026-11-11T00:00:00Z'
 created_date: '2026-11-24T15:57:35Z'
-labels: []
+updated_date: '2026-11-11T00:00:00Z'
+labels:
+  - decision
 dependencies: []
 type: work
 ordinal: 55000

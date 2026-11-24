@@ -4,9 +4,10 @@ title: A run with `sandbox = "openshell"` against a real OpenShell gateway (TASK
 status: To Do
 assignee: []
 created_date: '2026-11-24T15:57:31Z'
-updated_date: '2026-11-24T15:58:20Z'
+updated_date: '2026-11-24T16:35:36Z'
 labels:
   - never-run-for-real
+  - sandbox
 dependencies: []
 type: check
 ordinal: 34000

@@ -5,7 +5,11 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-11-24T16:04:19Z'
-labels: []
+updated_date: '2026-11-24T16:35:43Z'
+labels:
+  - wsl2
+  - security
+milestone: m-1
 dependencies: []
 priority: low
 type: work

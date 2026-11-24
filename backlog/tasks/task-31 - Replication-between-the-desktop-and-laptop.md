@@ -4,9 +4,10 @@ title: Replication between the desktop and laptop
 status: To Do
 assignee: []
 created_date: '2026-11-24T15:57:30Z'
-updated_date: '2026-11-24T15:58:19Z'
+updated_date: '2026-11-24T16:35:35Z'
 labels:
   - never-run-for-real
+  - backup
 dependencies: []
 type: check
 ordinal: 31000

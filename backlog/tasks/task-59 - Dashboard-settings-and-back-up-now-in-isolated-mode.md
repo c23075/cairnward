@@ -6,6 +6,8 @@ assignee: []
 created_date: '2026-11-24T15:57:36Z'
 labels:
   - never-run-for-real
+  - sandbox
+  - dashboard
 dependencies: []
 type: check
 ordinal: 59000

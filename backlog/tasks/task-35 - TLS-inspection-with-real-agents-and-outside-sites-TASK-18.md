@@ -4,9 +4,10 @@ title: TLS inspection with real agents and outside sites (TASK-18)
 status: To Do
 assignee: []
 created_date: '2026-11-24T15:57:31Z'
-updated_date: '2026-11-24T15:58:21Z'
+updated_date: '2026-11-24T16:35:36Z'
 labels:
   - never-run-for-real
+  - egress
 dependencies: []
 type: check
 ordinal: 35000

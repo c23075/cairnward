@@ -4,9 +4,11 @@ title: 'I39: an optional list of allowed environments per client in `clients.tom
 status: Done
 assignee:
   - '@agent'
-updated_date: '2026-11-24T00:00:00Z'
 created_date: '2026-11-24T15:57:35Z'
-labels: []
+updated_date: '2026-11-24T00:00:00Z'
+labels:
+  - security
+  - clients
 dependencies: []
 type: work
 ordinal: 57000

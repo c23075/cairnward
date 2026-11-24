@@ -46,7 +46,9 @@ Option 5, Backlog.md, with Cairnward's own CI check on top.
 - **`backlog/`** holds every piece of pending work, one file per task (`TASK-n`). The type says
   whose it is: `action` (the owner's, assignee `@owner`), `work` (an agent's, `@agent`) or
   `check` (something to run for real, labelled with its group). Priority is High, Medium or Low.
-  A task waiting on another names it as a dependency. Finished tasks are `Done`.
+  Every task has at least one topic label (`backup`, `release`, `security` …), and a task that
+  must be done before a milestone (`0.1.0 release`, `Production ready`) belongs to it. A task
+  waiting on another names it as a dependency. Finished tasks are `Done`.
 - **Changes go through the CLI or its MCP tools** (`backlog task create | edit`), which refuse
   values that aren't configured. `backlog browser` shows the board on 127.0.0.1.
 - **The CLI is pinned** in `tools/backlog` (package-lock.json with each platform's hash) and
@@ -57,7 +59,8 @@ Option 5, Backlog.md, with Cairnward's own CI check on top.
 - **CI** (the `tasks` job) installs the pinned CLI and runs `scripts/tasks.py check`:
   Backlog.md's `doctor` (duplicate IDs, dependency loops), then Cairnward's rules on every task
   (configured values, type and assignee agree, open work has a priority unless it waits on
-  another task, a check has one group), then whether status.md's generated sections match. So a
+  another task, every task has a topic, a check has one group, milestones exist), then whether
+  status.md's generated sections match. So a
   hand-edited file is caught at the pull request.
 - **`docs/plan/progress.md`** replaces the dated handoffs: one entry per session or merged
   change, newest first. It records what happened; it doesn't hold pending work.

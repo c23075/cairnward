@@ -7,6 +7,7 @@ created_date: '2026-11-24T15:57:38Z'
 updated_date: '2026-11-16T00:00:00Z'
 labels:
   - could-reveal-bugs
+  - wsl2
 dependencies: []
 type: check
 ordinal: 66000

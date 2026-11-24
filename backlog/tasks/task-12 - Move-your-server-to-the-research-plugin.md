@@ -5,7 +5,9 @@ status: To Do
 assignee:
   - '@owner'
 created_date: '2026-11-24T15:57:26Z'
-labels: []
+updated_date: '2026-11-24T16:35:30Z'
+labels:
+  - plugins
 dependencies: []
 priority: medium
 type: action

@@ -4,9 +4,11 @@ title: 'I37: refuse TLS inspection while isolation is off'
 status: Done
 assignee:
   - '@agent'
-updated_date: '2026-11-24T00:00:00Z'
 created_date: '2026-11-24T15:57:35Z'
-labels: []
+updated_date: '2026-11-24T00:00:00Z'
+labels:
+  - security
+  - egress
 dependencies: []
 type: work
 ordinal: 56000

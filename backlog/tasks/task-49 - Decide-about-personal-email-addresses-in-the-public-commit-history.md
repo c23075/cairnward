@@ -4,9 +4,11 @@ title: Decide about personal email addresses in the public commit history
 status: Done
 assignee:
   - '@owner'
-updated_date: '2026-11-05T00:00:00Z'
 created_date: '2026-11-24T15:57:34Z'
-labels: []
+updated_date: '2026-11-05T00:00:00Z'
+labels:
+  - decision
+  - repo
 dependencies: []
 type: action
 ordinal: 49000

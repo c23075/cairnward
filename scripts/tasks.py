@@ -10,7 +10,9 @@ then Cairnward's rules on every task:
 - type, status, priority and labels are ones configured in backlog/config.yml;
 - an `action` is the owner's (assignee @owner), `work` is an agent's (@agent);
 - open actions and work have a priority, unless they wait on another task;
-- a `check` has exactly one label, its group;
+- every task has at least one topic label; a `check` also has exactly one group label, and
+  only checks have one;
+- a milestone, if set, is one that exists;
 - dependencies name tasks that exist.
 Then it checks that docs/status.md's generated sections match the list.
 
@@ -35,7 +37,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 STATUS = ROOT / "docs" / "status.md"
 TOOL = ROOT / "tools" / "backlog" / "node_modules" / ".bin"
-BLOCKS = ("owner", "agent", "checks")
+BLOCKS = ("milestones", "owner", "agent", "checks")
+GROUP_NAMES = {
+    "could-reveal-bugs": "Could reveal real bugs",
+    "never-run-for-real": "Never run for real",
+    "project-level": "Project-level",
+    "stand-in-only": "Features tested only against a stand-in",
+}  # a check's group; every other configured label is a topic
 NOTE = (
     "<!-- Generated from backlog/ by scripts/tasks.py; change tasks with `backlog`, not here. -->"
 )
@@ -59,6 +67,15 @@ class Task:
     dependencies: tuple[str, ...]
     updated: str | None
     description: str = ""
+    milestone: str | None = None
+
+    @property
+    def topics(self) -> tuple[str, ...]:
+        return tuple(label for label in self.labels if label not in GROUP_NAMES)
+
+    @property
+    def groups(self) -> tuple[str, ...]:
+        return tuple(label for label in self.labels if label in GROUP_NAMES)
 
     @property
     def number(self) -> int:
@@ -74,8 +91,8 @@ class Settings:
     statuses: tuple[str, ...]
     types: tuple[str, ...]
     priorities: tuple[str, ...]
-    labels: tuple[str, ...]  # the check groups, in the order status.md shows them
-    final: str = field(default="Done")
+    labels: tuple[str, ...]  # groups first, in the order status.md shows them, then topics
+    milestones: dict[str, str] = field(default_factory=dict)  # id (m-0) -> title
 
 
 # ------------------------------------------------------------------ the Backlog.md CLI
@@ -119,7 +136,9 @@ def settings(run: Runner = run_cli) -> Settings:
     def get(key: str) -> tuple[str, ...]:
         return tuple(v.strip() for v in run(["config", "get", key]).strip().split(",") if v.strip())
 
-    return Settings(get("statuses"), get("types"), get("priorities"), get("labels"))
+    listed = run(["milestone", "list", "--plain", "--show-completed"])
+    milestones = dict(re.findall(r"^\s+(m-\d+): (.+?) \(\d+/\d+ done\)$", listed, re.M))
+    return Settings(get("statuses"), get("types"), get("priorities"), get("labels"), milestones)
 
 
 def from_json(raw: dict[str, Any], description: str | None = None) -> Task:
@@ -135,6 +154,7 @@ def from_json(raw: dict[str, Any], description: str | None = None) -> Task:
         dependencies=tuple(raw.get("dependencies") or ()),
         updated=raw.get("updatedAt"),
         description=(description if description is not None else raw.get("description")) or "",
+        milestone=raw.get("milestone"),
     )
 
 
@@ -179,8 +199,14 @@ def problems(tasks: list[Task], cfg: Settings) -> list[str]:
         open_work = t.type in ("action", "work") and not t.done
         if open_work and t.priority is None and not waiting_on(t, tasks):
             bad("open actions and work need a priority, unless they wait on another task")
-        if t.type == "check" and len(t.labels) != 1:
-            bad(f"a check has exactly one label, its group ({', '.join(cfg.labels)})")
+        if not t.topics:
+            bad("needs at least one topic label (see backlog/config.yml)")
+        if t.type == "check" and len(t.groups) != 1:
+            bad(f"a check has exactly one group label ({', '.join(GROUP_NAMES)})")
+        if t.type != "check" and t.groups:
+            bad(f"only checks have a group label, not {', '.join(t.groups)}")
+        if t.milestone is not None and t.milestone not in cfg.milestones:
+            bad(f"milestone {t.milestone} doesn't exist (backlog milestone list)")
         for dep in t.dependencies:
             if dep not in ids:
                 bad(f"depends on {dep}, which isn't in the list")
@@ -225,13 +251,14 @@ def render_owner(tasks: list[Task]) -> str:
     done = sorted(
         (t for t in mine if t.done), key=lambda t: (t.updated or "", t.number), reverse=True
     )
-    lines = ["| # | Priority | What | Why it matters |", "|---|---|---|---|"]
+    lines = ["| # | Priority | Topic | What | Why it matters |", "|---|---|---|---|---|"]
     for t in open_:
         what = one_line(t.title)
         if wait := waiting_on(t, tasks):
             what += f" (waiting on {', '.join(wait)})"
         lines.append(
-            f"| {t.id} | {(t.priority or '').capitalize()} | {what} | {one_line(t.description)} |"
+            f"| {t.id} | {(t.priority or '').capitalize()} | {', '.join(t.topics)} | {what} "
+            f"| {one_line(t.description)} |"
         )
     if done:
         lines += ["", "Done:"]
@@ -246,16 +273,8 @@ def render_agent(tasks: list[Task]) -> str:
     for t in todo:
         wait = waiting_on(t, tasks)
         when = f"waiting on {', '.join(wait)}" if wait else (t.priority or "").capitalize()
-        lines.append(f"- **{t.id}** ({when}): {_sentence(t)}")
+        lines.append(f"- **{t.id}** ({when}; {', '.join(t.topics)}): {_sentence(t)}")
     return "\n".join(lines) if lines else "Nothing open."
-
-
-GROUP_NAMES = {
-    "could-reveal-bugs": "Could reveal real bugs",
-    "never-run-for-real": "Never run for real",
-    "project-level": "Project-level",
-    "stand-in-only": "Features tested only against a stand-in",
-}
 
 
 def render_checks(tasks: list[Task], cfg: Settings) -> str:
@@ -273,12 +292,25 @@ def render_checks(tasks: list[Task], cfg: Settings) -> str:
     return "\n".join(out).lstrip("\n")
 
 
+def render_milestones(tasks: list[Task], cfg: Settings) -> str:
+    lines = []
+    for mid, title in cfg.milestones.items():
+        items = sorted((t for t in tasks if t.milestone == mid), key=lambda t: t.number)
+        if not items:
+            continue
+        done = sum(t.done for t in items)
+        left = ", ".join(t.id for t in items if not t.done) or "nothing"
+        lines.append(f"- **{title}**: {done} of {len(items)} done. Still to do: {left}")
+    return "\n".join(lines) if lines else "No milestones."
+
+
 def _block(name: str) -> re.Pattern[str]:
     return re.compile(rf"(<!-- tasks:{name} -->\n)(?:.*?\n)?(<!-- /tasks:{name} -->)", re.DOTALL)
 
 
 def render_status(text: str, tasks: list[Task], cfg: Settings) -> str:
     bodies = {
+        "milestones": render_milestones(tasks, cfg),
         "owner": render_owner(tasks),
         "agent": render_agent(tasks),
         "checks": render_checks(tasks, cfg),
@@ -296,8 +328,14 @@ def render_status(text: str, tasks: list[Task], cfg: Settings) -> str:
     return text
 
 
-def next_lines(tasks: list[Task], kind: str | None, limit: int) -> list[str]:
-    todo = [t for t in tasks if not t.done and (kind is None or t.type == kind)]
+def next_lines(
+    tasks: list[Task], kind: str | None, limit: int, topic: str | None = None
+) -> list[str]:
+    todo = [
+        t
+        for t in tasks
+        if not t.done and (kind is None or t.type == kind) and (topic is None or topic in t.topics)
+    ]
     todo.sort(key=lambda t: (bool(waiting_on(t, tasks)), *_urgency(t)))
     lines = []
     for t in todo[:limit]:
@@ -315,6 +353,7 @@ def main(argv: list[str] | None = None, run: Runner = run_cli) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     nx = sub.add_parser("next", help="open work, most urgent first")
     nx.add_argument("--kind", choices=["action", "work", "check"])
+    nx.add_argument("--topic", help="only tasks with this topic label")
     nx.add_argument("--limit", type=int, default=15)
     sub.add_parser("render", help="rewrite the generated blocks in docs/status.md")
     sub.add_parser("check", help="Backlog.md's doctor, Cairnward's rules, status.md current")
@@ -322,7 +361,9 @@ def main(argv: list[str] | None = None, run: Runner = run_cli) -> int:
     try:
         tasks = load(run)
         if args.cmd == "next":
-            print("\n".join(next_lines(tasks, args.kind, args.limit)) or "Nothing open.")
+            print(
+                "\n".join(next_lines(tasks, args.kind, args.limit, args.topic)) or "Nothing open."
+            )
             return 0
         cfg = settings(run)
         found = problems(tasks, cfg)

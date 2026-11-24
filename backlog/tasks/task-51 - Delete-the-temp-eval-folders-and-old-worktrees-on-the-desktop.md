@@ -4,9 +4,10 @@ title: Delete the temp eval folders and old worktrees on the desktop
 status: Done
 assignee:
   - '@owner'
-updated_date: '2026-11-05T00:00:00Z'
 created_date: '2026-11-24T15:57:34Z'
-labels: []
+updated_date: '2026-11-05T00:00:00Z'
+labels:
+  - repo
 dependencies: []
 type: action
 ordinal: 51000

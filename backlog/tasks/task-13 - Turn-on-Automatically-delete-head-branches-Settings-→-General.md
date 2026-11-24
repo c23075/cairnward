@@ -5,7 +5,9 @@ status: To Do
 assignee:
   - '@owner'
 created_date: '2026-11-24T15:57:26Z'
-labels: []
+updated_date: '2026-11-24T16:35:31Z'
+labels:
+  - repo
 dependencies: []
 priority: medium
 type: action

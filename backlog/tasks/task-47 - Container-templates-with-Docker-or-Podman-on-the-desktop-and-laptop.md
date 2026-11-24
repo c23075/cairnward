@@ -4,8 +4,10 @@ title: Container templates with Docker or Podman on the desktop and laptop
 status: To Do
 assignee: []
 created_date: '2026-11-24T15:57:34Z'
+updated_date: '2026-11-24T16:35:39Z'
 labels:
   - stand-in-only
+  - deploy
 dependencies: []
 type: check
 ordinal: 47000

@@ -9,6 +9,19 @@ Before 2026-11-24 each session wrote a separate handoff:
 [2026-11-10](handoff-2026-11-10.md), [2026-11-05](handoff-2026-11-05.md). They're kept as
 history; their open items are now in the task list.
 
+## 2026-11-25: topics and milestones
+- The owner asked for categories. Every task now has at least one topic label (16 topics:
+  audit, backup, clients, dashboard, decision, deploy, egress, evals, models, performance,
+  plugins, release, repo, sandbox, security, wsl2), and checks keep their group label.
+- Two milestones: **0.1.0 release** (TASK-4, TASK-5, TASK-6, TASK-36: the release, and the
+  repository safety settings to have on before it) and **Production ready** (TASK-1, TASK-2,
+  TASK-3, TASK-42 for a restored backup; TASK-11, TASK-67 for WSL2; TASK-9, TASK-39 for an outside
+  review), taken from status.md's summary. Topics and milestone choices are a first pass for the
+  owner to adjust.
+- The CI check now requires a topic on every task, a group label on checks only, and milestones
+  that exist. status.md gains a Milestones section and a Topic column; `tasks.py next --topic`.
+- Done through the CLI; finish dates kept. Tested: tests/test_tasks.py, 31 tests.
+
 ## 2026-11-25: the task list moves to Backlog.md
 - The owner chose Backlog.md (option 5 in the revised [ADR-0022](../adr/0022-one-task-list-and-a-progress-log.md)),
   with a CI check. `docs/plan/tasks.json` is gone; tasks are in [backlog/](../../backlog/), one

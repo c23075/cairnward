@@ -5,7 +5,9 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-11-24T15:57:28Z'
-labels: []
+updated_date: '2026-11-24T16:35:33Z'
+labels:
+  - backup
 dependencies: []
 priority: high
 type: work

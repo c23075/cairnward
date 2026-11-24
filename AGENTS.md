@@ -37,15 +37,22 @@ Install the pinned CLI once per clone: `cd tools/backlog && npm ci --ignore-scri
 $B task list --plain -s "To Do" --sort priority        # open tasks
 $B task view TASK-12 --plain
 $B task edit TASK-12 -s Done                             # finished
-$B task create "What to do" --type work -a @agent --priority medium -d "Why it matters"
-$B task create "What the owner does" --type action -a @owner --priority high -d "Why"
-$B task create "What to run for real" --type check -a "" -l never-run-for-real
+$B task create "What to do" --type work -a @agent --priority medium -l egress -d "Why it matters"
+$B task create "What the owner does" --type action -a @owner --priority high -l backup -d "Why"
+$B task create "What to run for real" --type check -a "" -l never-run-for-real,sandbox
+$B task edit TASK-12 --add-label security -m "Production ready"   # another topic; a milestone
+$B milestone list --plain
 $B task edit TASK-29 --dep TASK-10                       # waits on another task
 $B browser                                               # the board, on 127.0.0.1
 ```
 - **Types:** `action` is the owner's (`-a @owner`), `work` is an agent's (`-a @agent`), `check` is
   something to run for real, with one group label (see `backlog/config.yml`). Open actions and
   work need a priority (High, Medium, Low) unless they wait on another task.
+- **Topics:** every task has at least one topic label, such as `backup`, `release`, `repo`,
+  `security`, `egress` or `wsl2` (the full list is in `backlog/config.yml`; add one there if none
+  fits). `scripts/tasks.py next --topic backup` shows one topic.
+- **Milestones:** `0.1.0 release` and `Production ready`. Put a task in one when it has to be done
+  before that milestone; status.md shows each milestone's progress.
 - **Agents with MCP** can use `$B mcp start` (stdio) instead of the CLI.
 - **Keep titles short** (the file is named after it) and put details in the description. Links
   in a task are from the repository root: `[ops](/docs/operations.md)`.

@@ -5,8 +5,10 @@ status: To Do
 assignee:
   - '@owner'
 created_date: '2026-11-24T15:57:27Z'
-updated_date: '2026-11-24T15:58:15Z'
-labels: []
+updated_date: '2026-11-24T16:35:31Z'
+labels:
+  - clients
+  - security
 dependencies: []
 priority: medium
 type: action

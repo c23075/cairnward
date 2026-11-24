@@ -4,9 +4,11 @@ title: Decide on the Rust rewrite
 status: Done
 assignee:
   - '@owner'
-updated_date: '2026-11-10T00:00:00Z'
 created_date: '2026-11-24T15:57:35Z'
-labels: []
+updated_date: '2026-11-10T00:00:00Z'
+labels:
+  - decision
+  - egress
 dependencies: []
 type: action
 ordinal: 53000

@@ -6,6 +6,7 @@ assignee: []
 created_date: '2026-11-24T15:57:36Z'
 labels:
   - project-level
+  - deploy
 dependencies: []
 type: check
 ordinal: 60000

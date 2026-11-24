@@ -3,10 +3,11 @@ id: TASK-64
 title: The `cut_off` warning
 status: Done
 assignee: []
-updated_date: '2026-11-05T00:00:00Z'
 created_date: '2026-11-24T15:57:37Z'
+updated_date: '2026-11-05T00:00:00Z'
 labels:
   - never-run-for-real
+  - models
 dependencies: []
 type: check
 ordinal: 64000

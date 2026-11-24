@@ -4,8 +4,10 @@ title: The Drive mirror through real rclone (FR-SYNC-2)
 status: To Do
 assignee: []
 created_date: '2026-11-24T15:57:34Z'
+updated_date: '2026-11-24T16:35:39Z'
 labels:
   - stand-in-only
+  - backup
 dependencies: []
 type: check
 ordinal: 48000

@@ -5,7 +5,10 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-11-24T15:57:29Z'
-labels: []
+updated_date: '2026-11-24T16:35:33Z'
+labels:
+  - egress
+  - security
 dependencies: []
 priority: medium
 type: work
