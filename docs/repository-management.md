@@ -279,9 +279,13 @@ the new merge. Never move a tag that was published.
 - One place where work is tracked, with labels, templates and a triage habit.
 - Outside reports answered promptly.
 
-**Here, two trackers:**
-- [status.md](status.md) holds the owner's list (I-numbers for issues, A-numbers for the owner's
-  actions). Every PR updates it.
+**Here (changed 2026-11-24, ADR-0022):**
+- **Pending work** is one list, [plan/tasks.json](plan/tasks.json): owner actions (A), agent
+  work (W) and checks to run for real (C). [status.md](status.md) shows it in generated
+  sections, and `tests/test_tasks.py` fails CI when they differ. Run
+  `uv run python scripts/tasks.py next` to see what's next.
+- **Known issues** (I-numbers) stay in status.md as a register. An issue that needs work gets a
+  task that names it.
 - GitHub issues receive outside reports, such as #36 from an outside contributor, which became
   I35.
 
@@ -308,7 +312,8 @@ the new merge. Never move a tag that was published.
 - AGENTS.md requires updating `docs/spec.md`, and the ADR if a decision changes, with the code,
   and keeping `docs/status.md` current.
 - Decisions are in `docs/adr/` and the spec's decision log (D1 to D78).
-- Each working session ends with a handoff in `docs/plan/`.
+- Each working session ends with an entry in [plan/progress.md](plan/progress.md) and the task
+  list brought up to date (before 2026-11-24, a dated handoff file).
 - **Docs still drift:** on 2026-11-06, the spec's architecture diagram was out of date, and the
   threat model held two claims the code didn't support. Both were fixed, and
   [limitations.md](limitations.md) now collects the limits in one place.
