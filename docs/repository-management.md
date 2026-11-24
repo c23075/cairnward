@@ -103,7 +103,7 @@ deleted.
 - Subjects follow this ("Fix I15: start the isolated core faster").
 - Bodies explain the cause and how it was tested.
 - Commits made with an AI assistant carry a `Co-Authored-By` trailer and a session link.
-- CLAUDE.md adds two rules: never put model identifiers in commits or docs, and commit only when
+- AGENTS.md adds two rules: never put model identifiers in commits or docs, and commit only when
   asked.
 - The commit history is public and shows the owner's personal email addresses. The owner decided
   to keep them (A13, 2026-11-05).
@@ -206,6 +206,15 @@ keeping.
   plainly that there's no outside review, and that only the latest release gets fixes.
 - **No secrets in the repository,** by design. Config uses `env:` and `keyring:` references, and
   CI checks that secrets never reach the audit log.
+- **Secrets are stopped before a commit** (added 2026-11-24): `.pre-commit-config.yaml` runs
+  gitleaks on the staged changes, with ruff and a few file checks. Each clone turns it on with
+  `uv run pre-commit install`. On 2026-11-24 gitleaks found nothing in the 278 commits of
+  history once the redaction tests' made-up keys were allowed, one by one, in `.gitleaks.toml`.
+  The hook runs only where someone installed it, so it isn't a gate; push protection is.
+- **The settings are graded** (added 2026-11-24): `.github/workflows/scorecard.yml` runs OpenSSF
+  Scorecard weekly and on each push to `main`. Its findings appear under Security → Code
+  scanning. It reads rulesets with the default token, but not classic branch protection, so
+  section 1's rule is best set as a ruleset. Results aren't published outside GitHub.
 - **Code scanning is on:** CodeQL runs on every PR (seen on PR 39).
 - **Check:** secret scanning and push protection (Settings → Code security), and two-factor
   authentication on the owner's account.
@@ -296,7 +305,7 @@ the new merge. Never move a tag that was published.
 - Design decisions are recorded where they're made.
 
 **Here:**
-- CLAUDE.md requires updating `docs/spec.md`, and the ADR if a decision changes, with the code,
+- AGENTS.md requires updating `docs/spec.md`, and the ADR if a decision changes, with the code,
   and keeping `docs/status.md` current.
 - Decisions are in `docs/adr/` and the spec's decision log (D1 to D78).
 - Each working session ends with a handoff in `docs/plan/`.
@@ -316,10 +325,10 @@ record that it was done in `docs/reviews/`.
 
 **Here:**
 - Apache-2.0 (`LICENSE`).
-- CLAUDE.md serves as the setup and testing guide for AI coding sessions.
+- AGENTS.md serves as the setup and testing guide for AI coding sessions.
 - `CONTRIBUTING.md` (added 2026-11-06) covers setup, the checks CI runs, the optional isolation
   and browser tests, how to propose a change, the conventions, the issue rule and the licence. It
-  follows the commands in CLAUDE.md.
+  follows the commands in AGENTS.md.
 - There's no CODEOWNERS.
 
 **To do:** CODEOWNERS can wait until there's a second maintainer.
@@ -335,8 +344,9 @@ own.
 - The agent's instructions are in the repository, and agent-written commits are marked as such.
 
 **Here:**
-- **Instructions in the repository:** CLAUDE.md holds the agent's instructions (commands,
-  conventions, testing lessons).
+- **Instructions in the repository:** AGENTS.md holds the agents' instructions (commands,
+  conventions, repository rules, testing lessons). It's the shared file that Codex, OpenCode,
+  Cursor and other agents read; CLAUDE.md only points to it (D83, 2026-11-24).
 - **Branches and PRs:** each session works on a `claude/...` branch and opens PRs. The owner
   merges.
 - **Marked commits:** agent commits carry `Co-Authored-By` and a session link.
@@ -379,3 +389,6 @@ that GitHub doesn't show to this check are marked "can't see"; tick them yoursel
 | 8 | CONTRIBUTING.md and issue templates | Repository root, `.github/ISSUE_TEMPLATE/` | ☑ Added 2026-11-06 |
 | 9 | A rule linking GitHub issues and I-numbers | This page, section 10 | ☑ Adopted 2026-11-06, in section 10 and CONTRIBUTING.md |
 | 10 | Read the threat model and limitations against the code at each milestone | `docs/reviews/` | ☐ Not yet a habit. Done once on 2026-11-06, when two wrong claims were found |
+| 11 | Install the pre-commit hooks on each machine | `uv run pre-commit install` | ☐ Added 2026-11-24 (section 8). Run once on the desktop and the laptop |
+| 12 | Read Scorecard's first findings and fix the cheap ones | Security → Code scanning | ☐ Runs after this is merged (section 8) |
+| 13 | One instruction file for every agent | `AGENTS.md`, `CLAUDE.md` | ☑ 2026-11-24 (D83, section 13) |

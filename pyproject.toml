@@ -36,6 +36,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "openai>=1.40",
     "sqlcipher3-binary>=0.6; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "pre-commit>=4",
 ]
 
 [build-system]

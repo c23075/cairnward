@@ -204,7 +204,7 @@ uv run pytest -q
 ```
 
 The sandbox and browser tests skip when their prerequisites are missing, so a passing run
-doesn't always mean they ran. See [CLAUDE.md](CLAUDE.md) for how to enable them, and
+doesn't always mean they ran. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to enable them, and
 `uv run cairnward check` for the full real-model check on your machine.
 
 ## License

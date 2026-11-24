@@ -1,0 +1,42 @@
+# Checks that run on your machine before each commit. Set up once with:
+#   uv sync && uv run pre-commit install
+# Run on every file with `uv run pre-commit run --all-files`.
+#
+# Third-party hooks are pinned by commit hash, with the version in a comment, like the
+# actions in .github/workflows. Update them with `uv run pre-commit autoupdate --freeze`.
+# Ruff runs from uv.lock (a local hook), so it is the same version CI uses.
+repos:
+  # Secrets: refuses a commit whose staged changes hold a key, token or password.
+  # A finding means rotate the secret, not only remove it.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      # Private keys are left to gitleaks: detect-private-key matches the bare key header the
+      # redaction tests use, where gitleaks looks for a whole key.
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: check-yaml
+        # Docker Compose's !reset tag isn't plain YAML.
+        exclude: docker-compose[^/]*\.ya?ml$
+      - id: check-toml
+
+  # The first two checks of CI's lint job. mypy and the tests stay in CI: they are too slow
+  # to run on every commit.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format --check
+        entry: uv run ruff format --check
+        language: system
+        types_or: [python, pyi]
