@@ -1,0 +1,20 @@
+# Cairnward's task list (ADR-0022). Edit tasks with `backlog task ...`, then run
+# `uv run python scripts/tasks.py render`. Network use is off: no remote git operations,
+# no automatic commits, and git hooks are never bypassed.
+project_name: "cairnward"
+default_status: "To Do"
+statuses: ["To Do", "In Progress", "Done"]
+labels: ["could-reveal-bugs", "never-run-for-real", "project-level", "stand-in-only"]
+types: ["action", "work", "check"]
+date_format: "yyyy-mm-dd"
+max_column_width: 20
+auto_open_browser: false
+default_port: 6420
+browser_hostname: "127.0.0.1"
+remote_operations: false
+auto_commit: false
+filesystem_only: false
+bypass_git_hooks: false
+check_active_branches: false
+active_branch_days: 30
+task_prefix: "task"

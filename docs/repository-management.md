@@ -17,7 +17,7 @@ seen from the code, so confirm them under the repository's Settings on GitHub.
 **To fix, in order:**
 1. Protect `main`, so nothing merges before CI passes. PRs 22 to 24 did, and broke `main` (I25).
 2. Turn on automatic deletion of merged branches, and delete the 31 merged ones.
-3. Make the first release (A8). 0.1.0 is prepared (version and changelog); tag and publish it.
+3. Make the first release (TASK-4). 0.1.0 is prepared (version and changelog); tag and publish it.
 4. ~~Decide how GitHub issues and the status page's I-numbers relate.~~ Done: the rule is in
    section 10 and CONTRIBUTING.md.
 5. ~~Add a short CONTRIBUTING.md, and issue templates.~~ Done on 2026-11-06.
@@ -82,7 +82,7 @@ deleted.
   - a checklist: spec updated, threat model reviewed (NFR-S2), protections switchable, no secrets.
 - PRs link issues: #38 fixed #36, which closed on merge.
 - **One gap: review.** Every PR so far was written by the owner or an AI coding assistant and
-  reviewed by the same people, so no independent person reviews the code (A10). The template's
+  reviewed by the same people, so no independent person reviews the code (TASK-9). The template's
   threat-model box was once left unchecked without the work being done (I32), and that was found
   only later.
 
@@ -106,7 +106,7 @@ deleted.
 - AGENTS.md adds two rules: never put model identifiers in commits or docs, and commit only when
   asked.
 - The commit history is public and shows the owner's personal email addresses. The owner decided
-  to keep them (A13, 2026-11-05).
+  to keep them (TASK-49, 2026-11-05).
 
 **To do:** nothing required. GitHub's no-reply address (Settings → Emails) would keep new commits
 from showing a personal address.
@@ -240,7 +240,7 @@ aren't on.
   - the version is set in `pyproject.toml`, `src/cairnward/__init__.py`, `uv.lock` and
     `api/openapi.json`, and tests keep them equal;
   - the changelog's entries are under 0.1.0.
-- **There are no tags yet,** and the release workflow has never run (A8).
+- **There are no tags yet,** and the release workflow has never run (TASK-4).
 
 **How to release** (the first time, and every time after):
 1. Set the version in `pyproject.toml` and `src/cairnward/__init__.py`. Run `uv lock`, and
@@ -280,10 +280,10 @@ the new merge. Never move a tag that was published.
 - Outside reports answered promptly.
 
 **Here (changed 2026-11-24, ADR-0022):**
-- **Pending work** is one list, [plan/tasks.json](plan/tasks.json): owner actions (A), agent
-  work (W) and checks to run for real (C). [status.md](status.md) shows it in generated
-  sections, and `tests/test_tasks.py` fails CI when they differ. Run
-  `uv run python scripts/tasks.py next` to see what's next.
+- **Pending work** is one list, kept with Backlog.md in [backlog/](../backlog/): owner actions,
+  agent work and checks to run for real, each a `TASK-n`. [status.md](status.md) shows it in
+  generated sections. CI's `tasks` job fails when a task breaks the rules or status.md differs.
+  Run `uv run python scripts/tasks.py next` to see what's next, or `backlog browser` for a board.
 - **Known issues** (I-numbers) stay in status.md as a register. An issue that needs work gets a
   task that names it.
 - GitHub issues receive outside reports, such as #36 from an outside contributor, which became
@@ -357,7 +357,7 @@ own.
 - **Marked commits:** agent commits carry `Co-Authored-By` and a session link.
 
 **Watch for:**
-- **Self-review:** the same assistant writes the code, the tests and the threat model (A10).
+- **Self-review:** the same assistant writes the code, the tests and the threat model (TASK-9).
   Ask for findings to be reproduced. This session's bug fixes each came with a test that fails
   without the fix.
 - **Agent sessions leave things behind:** branches, local worktrees, temporary folders. Clean
@@ -379,23 +379,23 @@ Literature research is a separate repository, `literature-review-agent-plugin` (
 
 ## Checklist
 
-Each open row is also a task in [plan/tasks.json](plan/tasks.json), named in its last column;
-mark it done there, and the status page follows. Status as checked on 2026-11-06, from the
+Each open row is also a task in [backlog/](../backlog/), named in its last column; mark it done
+there (`backlog task edit TASK-n -s Done`), and the status page follows. Status as checked on 2026-11-06, from the
 repository's files and GitHub's branch list. Settings
 that GitHub doesn't show to this check are marked "can't see"; tick them yourself.
 
 | # | Action | Where | Status |
 |---|---|---|---|
-| 1 | Protect `main`: require a PR, require the CI checks, block force pushes | Settings → Rules | ☐ GitHub lists `main` as not protected. A newer ruleset may not show in that flag, so look in Settings → Rules. Task A21 |
-| 2 | Automatically delete head branches | Settings → General | ☐ Not on: PR 39's branch was still there after it merged. Task A23 |
-| 3 | Delete the merged branches | Code → Branches, or the commands above | ◐ 18 of 31 deleted. Checked again on 2026-11-06: 11 of the 13 left are contained in `main`, and `wip/mcp-oauth`'s change is in `main` as another commit, so all 12 are safe to delete. A Claude Code session can't delete them, because its git access is limited to its own branch, so the owner deletes them. Also delete `claude/project-status-kzw0ob` once its PR has merged. Task A24 |
-| 4 | Allow only merge commits | Settings → General | Can't see. Every merged PR so far (38) used a merge commit. Task A25 |
-| 5 | Secret scanning with push protection, Dependabot alerts | Settings → Code security | Can't see. Code scanning (CodeQL) is on. Task A26 |
-| 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ◐ 0.1.0 prepared (version, lockfile, changelog). Tag `v0.1.0` and publish (section 9) (A8). Task A8 |
+| 1 | Protect `main`: require a PR, require the CI checks, block force pushes | Settings → Rules | ☐ GitHub lists `main` as not protected. A newer ruleset may not show in that flag, so look in Settings → Rules. Task TASK-5 |
+| 2 | Automatically delete head branches | Settings → General | ☐ Not on: PR 39's branch was still there after it merged. Task TASK-13 |
+| 3 | Delete the merged branches | Code → Branches, or the commands above | ◐ 18 of 31 deleted. Checked again on 2026-11-06: 11 of the 13 left are contained in `main`, and `wip/mcp-oauth`'s change is in `main` as another commit, so all 12 are safe to delete. A Claude Code session can't delete them, because its git access is limited to its own branch, so the owner deletes them. Also delete `claude/project-status-kzw0ob` once its PR has merged. Task TASK-20 |
+| 4 | Allow only merge commits | Settings → General | Can't see. Every merged PR so far (38) used a merge commit. Task TASK-21 |
+| 5 | Secret scanning with push protection, Dependabot alerts | Settings → Code security | Can't see. Code scanning (CodeQL) is on. Task TASK-6 |
+| 6 | First release: version, changelog, tag, publish the draft | `pyproject.toml`, `CHANGELOG.md`, a `v*` tag | ◐ 0.1.0 prepared (version, lockfile, changelog). Tag `v0.1.0` and publish (section 9) (TASK-4). Task TASK-4 |
 | 7 | Dependabot for the npm lockfiles | `.github/dependabot.yml` | ☑ Added 2026-11-06: `tests/e2e`, and the sandbox's two copies grouped (section 7) |
 | 8 | CONTRIBUTING.md and issue templates | Repository root, `.github/ISSUE_TEMPLATE/` | ☑ Added 2026-11-06 |
 | 9 | A rule linking GitHub issues and I-numbers | This page, section 10 | ☑ Adopted 2026-11-06, in section 10 and CONTRIBUTING.md |
-| 10 | Read the threat model and limitations against the code at each milestone | `docs/reviews/` | ☐ Not yet a habit. Done once on 2026-11-06, when two wrong claims were found. Task W8 |
-| 11 | Install the pre-commit hooks on each machine | `uv run pre-commit install` | ☐ Added 2026-11-24 (section 8). Run once on the desktop and the laptop. Task A27 |
-| 12 | Read Scorecard's first findings and fix the cheap ones | Security → Code scanning | ☐ Runs after this is merged (section 8). Task A28 |
+| 10 | Read the threat model and limitations against the code at each milestone | `docs/reviews/` | ☐ Not yet a habit. Done once on 2026-11-06, when two wrong claims were found. Task TASK-25 |
+| 11 | Install the pre-commit hooks on each machine | `uv run pre-commit install` | ☐ Added 2026-11-24 (section 8). Run once on the desktop and the laptop. Task TASK-14 |
+| 12 | Read Scorecard's first findings and fix the cheap ones | Security → Code scanning | ☐ Runs after this is merged (section 8). Task TASK-15 |
 | 13 | One instruction file for every agent | `AGENTS.md`, `CLAUDE.md` | ☑ 2026-11-24 (D83, section 13) |

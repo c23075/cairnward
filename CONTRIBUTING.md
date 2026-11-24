@@ -10,6 +10,7 @@ You need Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync
 uv run pre-commit install                                           # once per clone
+(cd tools/backlog && npm ci --ignore-scripts)                       # the task list's CLI, once
 uv run ruff check . && uv run ruff format --check . && uv run mypy   # what CI's lint job runs
 uv run pytest -q                                                    # about 4 minutes
 ```

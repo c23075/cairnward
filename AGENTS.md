@@ -9,7 +9,7 @@ vault, MCP proxy, plugin contract) for one person's machine. Literature research
 Python 3.12+, uv, Apache-2.0. Docs index by reader: `docs/README.md`; overview and stack
 position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D86), ADRs in
 `docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. All pending work is
-in `docs/plan/tasks.json` (ADR-0022); what each session did is in `docs/plan/progress.md`;
+in `backlog/`, kept with Backlog.md (ADR-0022); what each session did is in `docs/plan/progress.md`;
 requirement status is in `docs/plan/requirements-status.md`. `docs/status.md` is the owner's
 view: its action, agent and testing sections are generated from the task list, and the rest
 (known issues, recent changes) is kept current by hand.
@@ -21,13 +21,36 @@ view: its action, agent and testing sections are generated from the task list, a
    what's pending, answer from this, not from older handoff files.
 
 **End:**
-1. In `docs/plan/tasks.json`: set the state of each item you finished (`done`, with the date) or
-   that's now blocked. Add new work with the next free ID: A for the owner, W for agents, C for
-   checks to run for real. Change an item's wording only if the owner asks.
-2. `uv run python scripts/tasks.py render`. CI fails if status.md is behind the list.
+1. Update the task list with the Backlog.md CLI (below) or its MCP tools, never by editing
+   `backlog/` files by hand: mark what you finished `Done`, and add new work. Change a task's
+   wording only if the owner asks.
+2. `uv run python scripts/tasks.py render`. CI fails if status.md is behind the list, or a task
+   breaks the rules in `scripts/tasks.py`.
 3. Add an entry at the top of `docs/plan/progress.md`: what changed, what ran for real and what
    only against a stand-in, what was found, and the task IDs it touched.
 4. Update status.md's known issues and recent changes if they changed.
+
+## The task list (Backlog.md)
+Install the pinned CLI once per clone: `cd tools/backlog && npm ci --ignore-scripts`. Then, with
+`B=tools/backlog/node_modules/.bin/backlog`:
+```bash
+$B task list --plain -s "To Do" --sort priority        # open tasks
+$B task view TASK-12 --plain
+$B task edit TASK-12 -s Done                             # finished
+$B task create "What to do" --type work -a @agent --priority medium -d "Why it matters"
+$B task create "What the owner does" --type action -a @owner --priority high -d "Why"
+$B task create "What to run for real" --type check -a "" -l never-run-for-real
+$B task edit TASK-29 --dep TASK-10                       # waits on another task
+$B browser                                               # the board, on 127.0.0.1
+```
+- **Types:** `action` is the owner's (`-a @owner`), `work` is an agent's (`-a @agent`), `check` is
+  something to run for real, with one group label (see `backlog/config.yml`). Open actions and
+  work need a priority (High, Medium, Low) unless they wait on another task.
+- **Agents with MCP** can use `$B mcp start` (stdio) instead of the CLI.
+- **Keep titles short** (the file is named after it) and put details in the description. Links
+  in a task are from the repository root: `[ops](/docs/operations.md)`.
+- IDs before 2026-11-25 were A, W and C numbers; each task's notes keep its old one, and the
+  progress log has the map.
 
 ## Commands
 ```bash

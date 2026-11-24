@@ -1,7 +1,7 @@
 # Requirements status
 
 Every requirement in [requirements.md](../requirements.md), checked against the tests that exist
-and the measurements, as of 2026-11-10. Pending work is in [tasks.json](tasks.json); what each session did is
+and the measurements, as of 2026-11-10. Pending work is in [backlog/](../../backlog/); what each session did is
 in [progress.md](progress.md).
 
 **Key:**

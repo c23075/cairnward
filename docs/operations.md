@@ -54,7 +54,7 @@ run `rust/target/release/cairnward-audit-rs verify <export>` on `cairnward audit
 Build it (`cargo build --release --manifest-path rust/Cargo.toml`), set `[egress] implementation =
 "rust"` in `cairnward.toml`, and restart the server. `serve` says "Rust data path" when it's in use.
 It behaves like the Python one, TLS inspection included; it's opt-in until it has run for real
-([ADR-0020](adr/0020-rust-egress-and-audit.md), status A18).
+([ADR-0020](adr/0020-rust-egress-and-audit.md), TASK-10).
 
 ## Remove it
 1. Stop the server, and disable the service if you installed it.

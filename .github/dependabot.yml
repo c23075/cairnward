@@ -38,3 +38,10 @@ updates:
     groups:
       e2e:
         patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /tools/backlog
+    schedule:
+      interval: weekly
+    groups:
+      backlog:
+        patterns: ["*"]

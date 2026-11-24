@@ -1,13 +1,16 @@
-"""The task list (docs/plan/tasks.json) and the parts of docs/status.md generated from it.
+"""The task list in backlog/ (Backlog.md, ADR-0022) and docs/status.md's sections made from it.
 
-ADR-0022: one list holds all pending work, and status.md shows it. This test is what keeps
-them from drifting apart: CI fails until `scripts/tasks.py render` has been run.
+Backlog.md checks fields when they're changed through its CLI, not when a file is edited by hand,
+so scripts/tasks.py adds Cairnward's rules and checks status.md. CI runs `tasks.py check` with the
+pinned CLI (the `tasks` job). Tests marked `needs_cli` run the real CLI and skip without it.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -15,11 +18,11 @@ from typing import Any
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "tasks.py"
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def load_tasks() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("tasks_script", SCRIPT)
+def load_script() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("tasks_script", ROOT / "scripts" / "tasks.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module  # dataclasses need the module registered
@@ -27,154 +30,216 @@ def load_tasks() -> ModuleType:
     return module
 
 
-tasks = load_tasks()
+tasks = load_script()
 
 
-def item(**over: Any) -> dict[str, Any]:
-    base: dict[str, Any] = {
-        "id": "A1", "kind": "owner", "priority": 1, "state": "open", "title": "Do it", "detail": "",
-    }  # fmt: skip
-    return {**base, **over}
+def have_cli() -> bool:
+    try:
+        tasks.backlog_bin()
+    except tasks.TaskError:
+        return False
+    return True
 
 
-# ------------------------------------------------------------------ the real files
+needs_cli = pytest.mark.skipif(
+    not have_cli(), reason="Backlog.md CLI not installed (cd tools/backlog && npm ci)"
+)
+
+# One task as `backlog task list --json` (schemaVersion 1) prints it, from Backlog.md 1.57.4.
+REAL = {
+    "id": "TASK-1", "title": "Set up restic to a real remote", "status": "To Do",
+    "archived": False, "type": "action", "priority": "high", "project": None,
+    "assignees": ["@owner"], "reporter": None, "labels": [], "milestone": None,
+    "parentTaskId": None, "acceptanceCriteriaCompleted": 0, "acceptanceCriteriaCount": 0,
+    "dependencies": [], "references": [], "modifiedFiles": [], "ordinal": 1000,
+    "createdAt": "2026-11-24T15:57:24Z", "updatedAt": None, "dueDate": None, "isReady": True,
+}  # fmt: skip
+CFG = tasks.Settings(
+    statuses=("To Do", "In Progress", "Done"),
+    types=("action", "work", "check"),
+    priorities=("High", "Medium", "Low"),
+    labels=("could-reveal-bugs", "never-run-for-real", "project-level", "stand-in-only"),
+)
 
 
-def test_the_repository_list_is_valid() -> None:
-    assert len(tasks.load()) > 0
+def task(description: str = "", **over: Any) -> Any:
+    return tasks.from_json({**REAL, **over}, description)
 
 
-def test_tasks_json_is_in_its_fixed_layout() -> None:
-    raw = tasks.TASKS.read_text(encoding="utf-8")
-    assert tasks.canonical(raw) == raw, "run: uv run python scripts/tasks.py render"
+# ------------------------------------------------------------------ Cairnward's rules
 
 
-def test_status_md_matches_the_list() -> None:
-    current = tasks.STATUS.read_text(encoding="utf-8")
-    wanted = tasks.render_status(current, tasks.load())
-    assert wanted == current, "run: uv run python scripts/tasks.py render"
-
-
-def test_check_command_passes_on_the_repository(capsys: pytest.CaptureFixture[str]) -> None:
-    assert tasks.main(["check"]) == 0
-    assert "are current" in capsys.readouterr().out
-
-
-# ------------------------------------------------------------------ validation
+def test_a_good_list_has_no_problems() -> None:
+    good = [
+        task("Why", id="TASK-1"),
+        task(id="TASK-2", type="work", assignees=["@agent"], priority="low"),
+        task(id="TASK-3", type="check", assignees=[], priority=None, labels=["project-level"]),
+        task(id="TASK-4", type="work", assignees=["@agent"], priority=None,
+             dependencies=["TASK-1"]),  # waiting, so no priority needed
+        task(id="TASK-5", status="Done", priority=None, updatedAt="2026-11-20T00:00:00Z"),
+    ]  # fmt: skip
+    assert tasks.problems(good, CFG) == []
 
 
 @pytest.mark.parametrize(
     ("over", "message"),
     [
-        ({"kind": "boss"}, "kind must be one of"),
-        ({"id": "W1"}, "id is A and a number"),
-        ({"state": "maybe"}, "state must be one of"),
-        ({"title": " "}, "no title"),
-        ({"priority": None}, "needs priority 1, 2 or 3"),
-        ({"priority": 7}, "priority must be 1, 2 or 3"),
-        ({"state": "done", "done": "24/11/2026"}, "done must be a date"),
-        ({"done": "2026-11-24"}, "has a done date but its state is open"),
-        ({"state": "blocked"}, "names what blocks it"),
-        ({"state": "blocked", "blocked_by": ["A99"]}, "A99, which isn't in the list"),
+        ({"status": "Blocked"}, "status 'Blocked' isn't one of"),
+        ({"type": None}, "type must be one of action, work, check, not None"),
+        ({"type": "bug"}, "type must be one of"),
+        ({"priority": "urgent"}, "priority 'urgent' isn't one of"),
+        ({"labels": ["misc"]}, "label 'misc' isn't configured"),
+        ({"assignees": ["@agent"]}, "an action is the owner's"),
+        ({"type": "work"}, "work is an agent's"),
+        ({"priority": None}, "need a priority"),
+        ({"type": "check", "assignees": [], "priority": None}, "exactly one label"),
+        ({"dependencies": ["TASK-99"]}, "depends on TASK-99, which isn't in the list"),
     ],
 )
-def test_bad_items_are_refused(over: dict[str, Any], message: str) -> None:
-    with pytest.raises(tasks.TaskError, match=message):
-        tasks.parse({"items": [item(**over)]})
+def test_each_rule(over: dict[str, Any], message: str) -> None:
+    found = tasks.problems([task(**over)], CFG)
+    assert any(message in p for p in found), found
 
 
-def test_a_check_needs_a_group() -> None:
-    with pytest.raises(tasks.TaskError, match="a check needs a group"):
-        tasks.parse({"items": [item(id="C1", kind="check", priority=None)]})
-
-
-def test_ids_are_unique() -> None:
-    with pytest.raises(tasks.TaskError, match="A1: used twice"):
-        tasks.parse({"items": [item(), item(title="Again")]})
-
-
-def test_every_problem_is_reported_at_once() -> None:
-    with pytest.raises(tasks.TaskError) as e:
-        tasks.parse({"items": [item(kind="boss"), item(id="A2", title="")]})
-    assert "kind must be one of" in str(e.value) and "no title" in str(e.value)
-
-
-def test_done_and_dropped_items_need_no_priority() -> None:
-    parsed = tasks.parse(
-        {
-            "items": [
-                item(priority=None, state="done", done="2026-11-24"),
-                item(id="A2", priority=None, state="dropped"),
-            ]
-        }
-    )
-    assert [t.state for t in parsed] == ["done", "dropped"]
+def test_problems_name_the_task_and_all_are_reported() -> None:
+    found = tasks.problems([task(id="TASK-7", type="bug", priority="urgent")], CFG)
+    assert len(found) == 2 and all(p.startswith("TASK-7 (Set up restic") for p in found)
 
 
 # ------------------------------------------------------------------ rendering
 
 
 def sample() -> list[Any]:
-    rows = [
-        item(id="A2", priority=2, title="Second"),
-        item(id="A1", priority=1, title="First", detail="Why"),
-        item(id="A3", priority=None, state="done", done="2026-11-20", title="Old"),
-        item(id="W1", kind="agent", priority=None, state="blocked", blocked_by=["A1"]),
-        item(id="W2", kind="agent", priority=3, title="Small"),
-        item(id="C1", kind="check", priority=None, group="Real runs", title="Try it"),
-        item(id="C2", kind="check", priority=None, group="Real runs", state="done"),
-    ]
-    rows[3]["title"] = "Later"
-    rows[6].update(done="2026-11-01", title="Tried", detail="Passed")
-    parsed: list[Any] = tasks.parse({"items": rows})
-    return parsed
+    return [
+        task("Second why", id="TASK-2", priority="medium", title="Second"),
+        task("Why | with a pipe", id="TASK-1", title="First"),
+        task("Old", id="TASK-3", status="Done", priority=None, updatedAt="2026-11-20T05:00:00Z"),
+        task("", id="TASK-4", type="work", assignees=["@agent"], priority=None,
+             dependencies=["TASK-1"], title="Later"),
+        task("See [ops](/docs/operations.md)", id="TASK-5", type="work", assignees=["@agent"],
+             priority="low", title="Small"),
+        task("", id="TASK-6", type="check", assignees=[], priority=None,
+             labels=["never-run-for-real"], title="Try it"),
+        task("Passed", id="TASK-7", type="check", assignees=[], priority=None, status="Done",
+             labels=["never-run-for-real"], title="Tried", updatedAt="2026-11-01T00:00:00Z"),
+    ]  # fmt: skip
 
 
-def test_owner_table_lists_open_items_by_priority_then_done() -> None:
+def test_owner_table_is_by_priority_then_done_newest_first() -> None:
     text = tasks.render_owner(sample())
-    assert text.index("| A1 | P1 | First | Why |") < text.index("| A2 | P2 | Second |")
-    assert "- **A3** (2026-11-20): Old" in text
-    assert "W1" not in text and "C1" not in text
-
-
-def test_agent_list_puts_blocked_work_last() -> None:
-    text = tasks.render_agent(sample())
-    assert text.index("**W2** (P3)") < text.index("**W1** (waiting on A1)")
-
-
-def test_checks_are_grouped_with_open_ones_first() -> None:
-    text = tasks.render_checks(sample())
-    assert text.startswith("### Real runs")
-    assert text.index("- [ ] Try it (C1)") < text.index("- [x] Tried, 2026-11-01: Passed (C2)")
-
-
-def test_render_replaces_only_the_marked_blocks_and_is_stable() -> None:
-    page = (
-        "# Status\n\nKept.\n\n"
-        "<!-- tasks:owner -->\nstale\n<!-- /tasks:owner -->\n\nAlso kept.\n\n"
-        "<!-- tasks:agent -->\n<!-- /tasks:agent -->\n\n"
-        "<!-- tasks:checks -->\nold\nlines\n<!-- /tasks:checks -->\n"
+    assert text.index("| TASK-1 | High | First | Why \\| with a pipe |") < text.index(
+        "| TASK-2 | Medium | Second | Second why |"
     )
-    once = tasks.render_status(page, sample())
-    assert "stale" not in once and "old\nlines" not in once
-    assert "Kept." in once and "Also kept." in once
-    assert tasks.render_status(once, sample()) == once
+    assert "- **TASK-3** (2026-11-20): Set up restic to a real remote. Old" in text
+    assert "TASK-4" not in text and "TASK-6" not in text
 
 
-def test_render_refuses_a_page_without_the_markers() -> None:
+def test_agent_list_puts_waiting_work_last_and_fixes_links() -> None:
+    text = tasks.render_agent(sample())
+    assert text.index("**TASK-5** (Low): Small. See [ops](operations.md)") < text.index(
+        "**TASK-4** (waiting on TASK-1): Later"
+    )
+
+
+def test_a_dependency_that_is_done_no_longer_blocks() -> None:
+    done_first = [task(id="TASK-1", status="Done", priority=None), sample()[3]]
+    assert "(waiting on" not in tasks.render_agent(done_first)
+
+
+def test_checks_are_grouped_open_first() -> None:
+    text = tasks.render_checks(sample(), CFG)
+    assert text.startswith("### Never run for real")
+    assert text.index("- [ ] Try it (TASK-6)") < text.index(
+        "- [x] Tried, 2026-11-01: Passed (TASK-7)"
+    )
+
+
+def test_links_from_the_root_work_from_docs() -> None:
+    assert tasks.for_docs("[a](/docs/x.md) [b](/README.md) [c](https://x.org)") == (
+        "[a](x.md) [b](../README.md) [c](https://x.org)"
+    )
+
+
+def test_render_replaces_only_marked_blocks_and_is_stable() -> None:
+    page = (
+        "# Status\n\nKept.\n\n<!-- tasks:owner -->\nstale\n<!-- /tasks:owner -->\n\nAlso kept.\n\n"
+        "<!-- tasks:agent -->\n<!-- /tasks:agent -->\n\n<!-- tasks:checks -->\nold\n"
+        "<!-- /tasks:checks -->\n"
+    )
+    once = tasks.render_status(page, sample(), CFG)
+    assert "stale" not in once and "Kept." in once and "Also kept." in once
+    assert tasks.render_status(once, sample(), CFG) == once
     with pytest.raises(tasks.TaskError, match="no <!-- tasks:owner --> block"):
-        tasks.render_status("# Status\n", sample())
+        tasks.render_status("# Status\n", sample(), CFG)
 
 
 def test_next_lists_open_work_most_urgent_first() -> None:
-    lines = tasks.next_lines(sample(), kind=None, limit=10)
-    ids = [line.split()[0] for line in lines]
-    assert ids[0] == "A1" and ids[-1] == "W1"
-    assert "A3" not in ids and "C2" not in ids
-    assert [line.split()[0] for line in tasks.next_lines(sample(), "agent", 10)] == ["W2", "W1"]
+    ids = [line.split()[0] for line in tasks.next_lines(sample(), None, 10)]
+    assert ids[0] == "TASK-1" and ids[-1] == "TASK-4"
+    assert "TASK-3" not in ids and "TASK-7" not in ids
 
 
-def test_canonical_layout_is_stable() -> None:
-    raw = json.dumps({"about": "x", "items": [item()]})
-    once = tasks.canonical(raw)
-    assert tasks.canonical(once) == once and once.endswith("\n")
+def test_load_reads_descriptions_and_refuses_an_unknown_schema() -> None:
+    def fake(args: list[str]) -> str:
+        if args[:2] == ["task", "list"]:
+            return json.dumps({"schemaVersion": 1, "kind": "task-list", "tasks": [REAL]})
+        return json.dumps({"schemaVersion": 1, "kind": "task-view", "task": {"description": "Why"}})
+
+    assert tasks.load(fake)[0].description == "Why"
+    with pytest.raises(tasks.TaskError, match=r"unexpected Backlog\.md JSON schema 2"):
+        tasks.load(lambda args: '{"schemaVersion": 2, "tasks": []}')
+
+
+# ------------------------------------------------------------------ the real CLI
+
+
+@pytest.fixture
+def scratch(tmp_path: Path) -> Any:
+    """A backlog made by the real CLI with Cairnward's configuration."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "backlog").mkdir()
+    shutil.copy(ROOT / "backlog" / "config.yml", tmp_path / "backlog" / "config.yml")
+    return tasks.cli_in(tmp_path)
+
+
+@needs_cli
+def test_real_cli_round_trip(scratch: Any) -> None:
+    scratch(["task", "create", "Back up", "--type", "action", "-a", "@owner",
+             "--priority", "high", "-d", "Why", "--plain"])  # fmt: skip
+    scratch(["task", "create", "Test it", "--type", "work", "-a", "@agent",
+             "--dep", "TASK-1", "--plain"])  # fmt: skip
+    loaded = sorted(tasks.load(scratch), key=lambda t: t.number)
+    assert [(t.id, t.type, t.description) for t in loaded] == [
+        ("TASK-1", "action", "Why"), ("TASK-2", "work", "")]  # fmt: skip
+    assert tasks.problems(loaded, tasks.settings(scratch)) == []
+    tasks.doctor(scratch)
+
+
+@needs_cli
+def test_real_cli_refuses_bad_values_but_hand_edits_need_our_check(
+    scratch: Any, tmp_path: Path
+) -> None:
+    with pytest.raises(tasks.TaskError, match="Invalid priority"):
+        scratch(["task", "create", "x", "--priority", "urgent", "--plain"])
+    scratch(["task", "create", "Back up", "--type", "action", "-a", "@owner",
+             "--priority", "high", "--plain"])  # fmt: skip
+    path = next((tmp_path / "backlog" / "tasks").glob("task-1 - *.md"))
+    path.write_text(path.read_text().replace("priority: high", "priority: urgent"))
+    found = tasks.problems(tasks.load(scratch), tasks.settings(scratch))
+    assert any("priority 'urgent'" in p for p in found)
+
+
+@needs_cli
+def test_real_doctor_catches_a_duplicate_id(scratch: Any, tmp_path: Path) -> None:
+    scratch(["task", "create", "One", "--plain"])
+    path = next((tmp_path / "backlog" / "tasks").glob("task-1 - *.md"))
+    shutil.copy(path, path.with_name("task-1 - copy.md"))
+    with pytest.raises(tasks.TaskError, match="doctor failed"):
+        tasks.doctor(scratch)
+
+
+@needs_cli
+def test_the_repository_follows_the_rules_and_status_md_is_current(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert tasks.main(["check"]) == 0, capsys.readouterr().err
