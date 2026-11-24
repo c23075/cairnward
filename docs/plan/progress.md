@@ -8,7 +8,7 @@ Before 2026-11-24 each session wrote a separate handoff:
 [2026-11-10](handoff-2026-11-10.md), [2026-11-05](handoff-2026-11-05.md). They're kept as
 history; their open items are now in the task list.
 
-## 2026-11-24: one task list and a progress log (this PR)
+## 2026-11-24: one task list and a progress log (PR 69)
 - Pending work moved into [tasks.json](tasks.json): the owner's A-numbers from status.md, the
   handoff's "next steps" as W1–W7, and status.md's testing checklist as C1–C27.
   `scripts/tasks.py` validates it, prints what's next, and renders status.md's sections from it;
