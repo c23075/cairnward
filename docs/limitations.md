@@ -59,7 +59,8 @@ disagree with the code, the code was checked, and this page follows it.
   - It offers only HTTP/1.1, and doesn't read WebSocket messages after the upgrade.
   - It breaks tools that pin certificates or ignore `SSL_CERT_FILE` (I27, I30).
   - Its CA key could impersonate any site to the tools that trust it (T-33). Sandboxed runs
-    can't read it, but with isolation off an agent running as you can (I37).
+    can't read it. Runs with isolation off are refused, unless you set
+    `allow_without_isolation`, and then an agent running as you can read it (I37, D85).
 - **Plain HTTP is allowed in two places,** with a warning or an audit record but no requirement
   to encrypt: to backends on your local network (I3), and from tools to allowed hosts (I4).
 - **The gateway doesn't check `Origin`,** so desktop apps that send one keep working. A web page
@@ -169,7 +170,9 @@ disagree with the code, the code was checked, and this page follows it.
   shown (badge, `privacy show`, dashboard) and audited, but not prevented. Nothing stops the
   machine's owner from loosening policy.
 - **A client's own API key can name any environment** in the model it asks for
-  (`cw/<environment>:<effort>`), and so pick a more open privacy level. Only run keys from
-  `cairnward run` and plugins are pinned to one environment (spec §4.1, I39).
+  (`cw/<environment>:<effort>`), and so pick a more open privacy level, unless `clients.toml`
+  limits it (D86). `cairnward client add` limits new clients to the default environment, and
+  `doctor` warns about keys left unlimited. Keys made before 2026-11-24 stay unlimited until
+  you limit them (spec §4.1, I39).
 - **The configuration is plain files in your config folder.** There's no central policy, signing
   or enforcement across machines.

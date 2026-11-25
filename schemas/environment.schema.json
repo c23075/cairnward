@@ -407,6 +407,12 @@
       "additionalProperties": false,
       "description": "Decrypting third-party HTTPS in cairnward-egress (FR-NET-2, ADR-0018). Off by default and\nnever set by a preset: tools in this environment must trust Cairnward's local CA, and\nCairnward then sees their requests.",
       "properties": {
+        "allow_without_isolation": {
+          "default": false,
+          "description": "run with inspection even while this environment's isolation is off: an agent running as you can then read the CA key (I37, D85)",
+          "title": "Allow Without Isolation",
+          "type": "boolean"
+        },
         "enabled": {
           "default": false,
           "title": "Enabled",
@@ -587,6 +593,7 @@
     "tls_inspection": {
       "$ref": "#/$defs/TlsInspection",
       "default": {
+        "allow_without_isolation": false,
         "enabled": false,
         "rules": [],
         "skip_hosts": [],

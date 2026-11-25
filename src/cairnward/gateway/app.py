@@ -25,6 +25,7 @@ from cairnward.config.loader import Config
 from cairnward.config.models import LOOPBACK_HOSTS
 from cairnward.gateway.clients import ClientKeys, RunKeys
 from cairnward.gateway.models import (
+    PREFIX,
     Resolved,
     UnknownModel,
     resolve,
@@ -227,6 +228,27 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         await asyncio.to_thread(deps.engine.audit_deny, Decision(action, "deny", "high", why))
         return _error(403, why, "run_environment")
 
+    async def outside_client_environments(
+        resolved: Resolved, client: str, run_id: str | None
+    ) -> JSONResponse | None:
+        """A 403 if a client's own key names an environment it isn't allowed, audited (I39, D86).
+        Runs are pinned to their environment instead (outside_run_environment)."""
+        known = cfg.clients.clients.get(client)
+        if run_id or known is None or known.may_use(resolved.environment):
+            return None
+        allowed = ", ".join(known.environments or [])
+        why = f"client '{client}' may use {allowed}, not '{resolved.environment}'"
+        action = Action(
+            kind="model.call",
+            target=resolved.backend,
+            environment=resolved.environment,
+            client=client,
+            actor=f"client:{client}",
+            details={"virtual_model": resolved.name, "allowed": known.environments},
+        )
+        await asyncio.to_thread(deps.engine.audit_deny, Decision(action, "deny", "high", why))
+        return _error(403, why, "client_environment")
+
     client_usage = deps.client_usage or ClientUsage.at(deps.config.paths.state_dir)
     reasoning_leaks = deps.reasoning_leaks or ReasoningLeaks.at(deps.config.paths.state_dir)
 
@@ -287,8 +309,18 @@ def create_app(deps: GatewayDeps) -> FastAPI:
 
     @app.get("/v1/models", response_model=None)
     async def list_models(request: Request) -> dict[str, Any] | JSONResponse:
-        if client_of(request) is None:
+        ident = identity(request)
+        if ident is None:
             return _error(401, "missing or unknown API key (cairnward client add <name>)", "auth")
+        known = cfg.clients.clients.get(ident[0])
+        pinned = run_environment(ident[1])
+
+        def listed(mid: str) -> bool:
+            """Only the environments this key may use (run: its own; client: its list)."""
+            allowed = [pinned] if pinned else (known.environments if known else None)
+            return allowed is None or not any(
+                mid.startswith(f"{PREFIX}{e}:") for e in cfg.environments if e not in allowed
+            )
 
         def owner(mid: str) -> str:
             """☁ marks virtual models that go to a hosted backend (FR-BACK-4)."""
@@ -303,6 +335,7 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         data = [
             {"id": mid, "object": "model", "created": 0, "owned_by": owner(mid)}
             for mid in virtual_model_ids(cfg)
+            if listed(mid)
         ]
         return {"object": "list", "data": data}
 
@@ -318,13 +351,15 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             run_use.requests += 1
         client_cfg = cfg.clients.clients.get(client)
         default_env = run_environment(run_id) or (
-            client_cfg.default_environment if client_cfg else None
+            client_cfg.home_environment() if client_cfg else None
         )
         try:
             resolved = resolve_embedding(cfg, body.model, default_environment=default_env)
         except UnknownModel as exc:
             return _error(404, str(exc), "invalid_request_error", "model_not_found")
         if refused := await outside_run_environment(resolved, client, run_id):
+            return refused
+        if refused := await outside_client_environments(resolved, client, run_id):
             return refused
         if over := await client_over_budget(client, run_id, resolved.environment):
             return over
@@ -393,13 +428,15 @@ def create_app(deps: GatewayDeps) -> FastAPI:
         client, run_id = ident
         client_cfg = cfg.clients.clients.get(client)
         default_env = run_environment(run_id) or (
-            client_cfg.default_environment if client_cfg else None
+            client_cfg.home_environment() if client_cfg else None
         )
         try:
             resolved = resolve(cfg, body.model, default_environment=default_env, client=client)
         except UnknownModel as exc:
             return _error(404, str(exc), "invalid_request_error", "model_not_found")
         if refused := await outside_run_environment(resolved, client, run_id):
+            return refused
+        if refused := await outside_client_environments(resolved, client, run_id):
             return refused
 
         usage_of_run = deps.run_keys.usage.get(run_id) if run_id else None
@@ -766,7 +803,11 @@ def create_app(deps: GatewayDeps) -> FastAPI:
 
         def default_environment(client: str) -> str:
             c = cfg.clients.clients.get(client)
-            return (c.default_environment if c else None) or cfg.main.defaults.environment
+            return (c.home_environment() if c else None) or cfg.main.defaults.environment
+
+        def client_may_use(client: str, environment: str) -> bool:
+            c = cfg.clients.clients.get(client)
+            return c is None or c.may_use(environment)
 
         def not_a_plugin(request: Request) -> tuple[str, str | None] | None:
             """A plugin's key is for its services: other plugins' tools would be capabilities it
@@ -775,7 +816,8 @@ def create_app(deps: GatewayDeps) -> FastAPI:
             return None if ident and ident[1] and ident[1].startswith("plugin-") else ident
 
         add_mcp_routes(app, deps.mcp, not_a_plugin, default_environment=default_environment,
-                       run_environment=deps.run_keys.environment.get)  # fmt: skip
+                       run_environment=deps.run_keys.environment.get,
+                       client_may_use=client_may_use)  # fmt: skip
 
     return app
 

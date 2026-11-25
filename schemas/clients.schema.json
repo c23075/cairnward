@@ -40,6 +40,23 @@
           "title": "Enabled",
           "type": "boolean"
         },
+        "environments": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "the environments this client's own key may use; unset = any (I39, D86)",
+          "title": "Environments"
+        },
         "kind": {
           "enum": [
             "chat",

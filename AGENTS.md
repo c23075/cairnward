@@ -7,7 +7,7 @@ A local privacy gateway (model gateway, egress proxy, policy engine, audit log, 
 vault, MCP proxy, plugin contract) for one person's machine. Literature research is a separate project
 (`literature-review-agent-plugin`, ADR-0017): nothing here may depend on it.
 Python 3.12+, uv, Apache-2.0. Docs index by reader: `docs/README.md`; overview and stack
-position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D84), ADRs in
+position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D86), ADRs in
 `docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. All pending work is
 in `docs/plan/tasks.json` (ADR-0022); what each session did is in `docs/plan/progress.md`;
 requirement status is in `docs/plan/requirements-status.md`. `docs/status.md` is the owner's

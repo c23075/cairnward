@@ -30,6 +30,13 @@ def snapshot(cfg: Config) -> dict[str, Any]:
         out: dict[str, Any] = {n: eff.value(n) for n in SETTINGS}
         out["label"] = eff.label
         out["network_allow_hosts"] = sorted(eff.network_allow_hosts)
+        tls = cfg.environments[env].tls_inspection if env else None
+        if tls is not None and tls.enabled:
+            # Recorded only when on, so turning it on (or allowing it without isolation, I37)
+            # shows as a change; environments without it keep their earlier snapshots.
+            out["tls_inspection"] = (
+                "on, allowed without isolation" if tls.allow_without_isolation else "on"
+            )
         return out
 
     # A list, not a dict keyed by name: environment names must never be read as detail keys.
@@ -37,6 +44,12 @@ def snapshot(cfg: Config) -> dict[str, Any]:
         "global": one(None),
         "environments": [{"name": name, **one(name)} for name in sorted(cfg.environments)],
         "plugin_weakenings": weakenings(cfg.mcp),
+        # I39, D86: which environments each client's own key may use (unlimited = all)
+        "client_environments": [
+            {"client": name, "environments": c.environments}
+            for name, c in sorted(cfg.clients.clients.items())
+            if c.environments is not None
+        ],
         "storage": {
             "encrypted": dbkey.enabled(cfg.paths),
             "key_reference": bool(cfg.main.storage.key),
@@ -56,6 +69,10 @@ def diff(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
     if before.get("storage") != after.get("storage") and "storage" in after:
         old, new = before.get("storage"), after.get("storage")
         changes.append({"scope": "storage", "setting": "storage", "before": old, "after": new})
+    if before.get("client_environments", []) != after.get("client_environments", []):
+        changes.append({"scope": "clients", "setting": "client_environments",
+                        "before": before.get("client_environments", []),
+                        "after": after.get("client_environments", [])})  # fmt: skip
     if before.get("plugin_weakenings", []) != after.get("plugin_weakenings", []):
         changes.append({"scope": "plugins", "setting": "plugin_weakenings",
                         "before": before.get("plugin_weakenings", []),

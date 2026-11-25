@@ -197,6 +197,12 @@ def management_app(
     def start_run(body: RunIn) -> dict[str, Any]:
         if body.environment not in cfg.environments:
             raise HTTPException(404, f"unknown environment '{body.environment}'")
+        if why := cfg.tls_inspection_refused(body.environment):
+            if audit:
+                audit.append("run.refused", actor="user", environment=body.environment,
+                             client=body.client, target=body.program,
+                             details={"reason": why})  # fmt: skip
+            raise HTTPException(403, why)
         run_id = str(uuid.uuid4())
         env_budget = cfg.environments[body.environment].run_budget
         budget = Budget(
