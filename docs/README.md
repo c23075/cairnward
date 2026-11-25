@@ -19,7 +19,7 @@ Grouped by what you're here to do. Start with the [overview](overview.md) if you
 - [CHANGELOG](../CHANGELOG.md): what changed in each release
 
 ## Design
-- [Specification](spec.md): the design, its decisions (D1–D83) and current behaviour
+- [Specification](spec.md): the design, its decisions (D1–D84) and current behaviour
 - [Requirements](requirements.md), with their status in [plan/requirements-status.md](plan/requirements-status.md)
 - [Architecture decisions](adr/): one ADR per significant decision
 - [Architecture in UML](architecture-uml.md): deployment, classes, request sequences and vault states
@@ -28,5 +28,5 @@ Grouped by what you're here to do. Start with the [overview](overview.md) if you
 ## Contributing and planning
 - [CONTRIBUTING](../CONTRIBUTING.md) and [SECURITY](../SECURITY.md)
 - [Managing the repository](repository-management.md): branches, PRs, CI, releases
-- [Plans](plan/): milestone plans, the newest handoff (current state and next steps), and the [enterprise proof of concept, LLMOps and model risk management](plan/enterprise-poc.md) plan
+- [Plans](plan/): the [task list](plan/tasks.json) (all pending work), the [progress log](plan/progress.md) (what each session did), milestone plans, and the [enterprise proof of concept, LLMOps and model risk management](plan/enterprise-poc.md) plan
 - [Reviews](reviews/): threat-model and design reviews (NFR-S2)

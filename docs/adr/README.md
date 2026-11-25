@@ -27,5 +27,6 @@ ADRs are never edited after acceptance except to change their status; a changed 
 | [0019](0019-sqlcipher-encrypt-everything.md) | SQLCipher "encrypt everything" mode, key wrapped with a passphrase (D80) | Accepted |
 | [0020](0020-rust-egress-and-audit.md) | Rust egress data path and audit writer, split from Python policy, in stages | Accepted; stages 1–5 done, opt-in until run for real (A18) |
 | [0021](0021-managed-mode.md) | Managed mode: an opt-in link to an enterprise control plane (Cairnsteward) | Proposed |
+| [0022](0022-one-task-list-and-a-progress-log.md) | One task list and a progress log | Proposed |
 
 Template: copy [`template.md`](template.md).

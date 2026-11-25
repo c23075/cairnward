@@ -7,11 +7,27 @@ A local privacy gateway (model gateway, egress proxy, policy engine, audit log, 
 vault, MCP proxy, plugin contract) for one person's machine. Literature research is a separate project
 (`literature-review-agent-plugin`, ADR-0017): nothing here may depend on it.
 Python 3.12+, uv, Apache-2.0. Docs index by reader: `docs/README.md`; overview and stack
-position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D83), ADRs in
-`docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. The current
-state and next steps are in the newest `docs/plan/handoff-*.md`; requirement status is in
-`docs/plan/requirements-status.md`, so a new handoff doesn't copy it. `docs/status.md` is the
-owner's view of the project: keep it current when issues or test results change.
+position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D84), ADRs in
+`docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. All pending work is
+in `docs/plan/tasks.json` (ADR-0022); what each session did is in `docs/plan/progress.md`;
+requirement status is in `docs/plan/requirements-status.md`. `docs/status.md` is the owner's
+view: its action, agent and testing sections are generated from the task list, and the rest
+(known issues, recent changes) is kept current by hand.
+
+## Each session
+**Start:**
+1. `git log --oneline -15` and the top two entries of `docs/plan/progress.md`.
+2. `uv run python scripts/tasks.py next` for open work, most urgent first. When the owner asks
+   what's pending, answer from this, not from older handoff files.
+
+**End:**
+1. In `docs/plan/tasks.json`: set the state of each item you finished (`done`, with the date) or
+   that's now blocked. Add new work with the next free ID: A for the owner, W for agents, C for
+   checks to run for real. Change an item's wording only if the owner asks.
+2. `uv run python scripts/tasks.py render`. CI fails if status.md is behind the list.
+3. Add an entry at the top of `docs/plan/progress.md`: what changed, what ran for real and what
+   only against a stand-in, what was found, and the task IDs it touched.
+4. Update status.md's known issues and recent changes if they changed.
 
 ## Commands
 ```bash
@@ -31,6 +47,13 @@ uv run python scripts/bench_egress.py --dir <folder on the data disk>   # both e
 - Browser test (`tests/e2e/`) skips unless node can load playwright and axe-core:
   `cd tests/e2e && npm ci && npx playwright install chromium`.
 - A long state-dir path breaks Unix sockets (107 bytes); tests use short tmp paths.
+- **In a fresh container** many tests skip quietly. Install first: `apt-get install restic
+  openssh-client bubblewrap socat ripgrep`; `npm ci` in `spikes/t06-sandbox` with `CAIRNWARD_SRT`
+  set as above; `cargo build --manifest-path rust/Cargo.toml` for the Rust differential tests.
+  SQLCipher comes with `uv sync` on Linux x86-64.
+- `mypy --platform win32` reports errors for Linux-only calls (`flock`, `killpg`, Unix sockets) in
+  `backup.py`, `replication.py`, `mcp/launch.py`, `run/runner.py` and `core/server.py`. CI's mypy
+  runs on Linux only.
 
 ## Conventions
 - mypy strict, ruff (line length 100). Hand-aligned calls keep `# fmt: skip`.
