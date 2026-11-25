@@ -14,7 +14,7 @@ Name: **Cairnward**. Cairns mark a trail (the audit trail), and *ward* means to 
 - [`threat-model.md`](threat-model.md): STRIDE and LINDDUN, mapped to the OWASP Top 10 for LLM Applications (2025).
 - [`limitations.md`](limitations.md): what the protections do not do.
 - [`adr/`](adr/): architecture decision records.
-- [`plan/`](plan/): milestones, plans, the task list ([tasks.json](plan/tasks.json)) and the [progress log](plan/progress.md).
+- [`plan/`](plan/): milestones, plans and the [progress log](plan/progress.md). Pending work is in [`backlog/`](../backlog/) (D84).
 - [`bench/`](bench/): benchmark instructions and results.
 
 ---
@@ -97,7 +97,7 @@ These are the current decisions. Superseded decisions are listed at the end, wit
 | D81 | Rust audit verifier, not writer (2026-11-10) | ADR-0020 stage 4 builds an independent verifier (`cairnward-audit-rs`), not a Rust writer. With D80, a Rust writer would need a second process that holds the database key. The verifier recomputes the hashes, the chain and the Merkle roots from an export. | [0020](adr/0020-rust-egress-and-audit.md) |
 | D82 | Read-only views for an observer (2026-11-11) | The management socket gains `GET /v1/runs` (active runs, without keys or tokens) and `GET /v1/audit/since?seq=&limit=` (records after a sequence number, as `audit log --json` writes them). They change nothing and aren't audited. [Cairnsteward](https://github.com/c23075/cairnsteward) (formerly Cairnward Keep), the fleet control plane, reads them through an agent on each host and never writes to the socket. | — |
 | D83 | Agent instructions and repository checks (2026-11-24) | `AGENTS.md` holds the instructions for every coding agent; `CLAUDE.md` only points to it, so Claude, Codex, OpenCode and others read the same rules. Each clone can install pre-commit hooks that refuse a commit holding a secret (gitleaks) and run ruff. OpenSSF Scorecard grades the repository's settings weekly and on each push to `main`; its results stay on GitHub. See [repository-management.md](repository-management.md). | — |
-| D84 | One task list (2026-11-24) | Pending work is kept in `docs/plan/tasks.json`: owner actions (A), agent work (W) and checks to run for real (C). `scripts/tasks.py` renders status.md's action, agent and testing sections from it, and a test fails CI when they differ. `docs/plan/progress.md` replaces the dated handoffs. | [0022](adr/0022-one-task-list-and-a-progress-log.md) |
+| D84 | One task list (2026-11-24, revised 2026-11-25) | Pending work is kept with Backlog.md in `backlog/`: owner actions (`action`), agent work (`work`) and checks to run for real (`check`), each a `TASK-n`, with topic labels, and milestones for the 0.1.0 release and production readiness. Changes go through its CLI or MCP tools; the CLI is pinned in `tools/backlog`. CI's `tasks` job runs `scripts/tasks.py check`: Backlog.md's `doctor`, Cairnward's rules on every task, and whether status.md's action, agent and testing sections match the list. `docs/plan/progress.md` replaces the dated handoffs. | [0022](adr/0022-one-task-list-and-a-progress-log.md) |
 | D85 | TLS inspection needs isolation (2026-11-24, I37) | With `[tls_inspection]` on and the environment's isolation off, an agent running as the owner could read the local CA's key. Runs there are refused, by `cairnward run` and by the core, unless the environment sets `allow_without_isolation = true`. Either way it shows as a privacy warning, and turning inspection on or allowing it without isolation is recorded in the audit log's settings snapshot. A refused run is audited as `run.refused`. | — |
 | D86 | Environments per client (2026-11-24, I39) | `environments = [...]` in `[clients.<name>]` limits which environments that client's own key may use. A request naming another gets `403` (`client_environment`) and an audited deny; `/v1/models` lists only the allowed ones; MCP refuses them too. Unset means any, as before. `cairnward client add` gives a new client the default environment unless told otherwise (`--environment`, `--any-environment`); an existing client changes only when asked. `doctor` warns about keys that can reach a more open environment. Run keys stay pinned to their run's environment. | — |
 | D5, D19 | Model backends | Pluggable: Ollama (default), llama.cpp, or any OpenAI-compatible server. Set per role, environment or effort level. | [0004](adr/0004-pluggable-backends.md) |
@@ -220,7 +220,7 @@ See [ADR-0005](adr/0005-local-core-service-and-api-hardening.md).
 - It asks a decision service in the Python process (`egress/decisions.py`, a 0600 Unix socket) for sessions, policy, approvals, certificates, request verdicts and audit records. Each of these therefore has one implementation.
 - The decision socket requires a secret on every connection. The binary gets the secret on its standard input. This matters because the isolated core can reach any Unix socket (T-39).
 - Every egress, egress-fuzz and TLS-inspection test runs against both data paths. Both cost the same ([bench](bench/results-2026-11-10-egress-rust.md)), and the Rust path was reviewed ([review](reviews/rust-data-path-2026-11-10.md)).
-- The default stays `python` until the Rust path has run for real (status A18).
+- The default stays `python` until the Rust path has run for real (TASK-10).
 
 **Isolated mode** (built in T0.13). srt gives the sandbox its own private loopback, so the core cannot listen on the host's `127.0.0.1:<gateway_port>` itself.
 - The core (gateway, management API, vault, policy) runs inside srt. It serves **Unix sockets** in the state folder (folder 0700, sockets 0600).
@@ -686,7 +686,7 @@ See [threat-model.md](threat-model.md). It treats third-party clients and agents
 ### 5.6 Supply chain
 - Hash-locked dependencies: `uv.lock`, `redaction_engines/locks/`, `tests/e2e/package-lock.json`, `rust/Cargo.lock`.
 - CI checks: pip-audit, `cargo audit --deny warnings`, npm audit for the sandbox, a license check of runtime dependencies, pinned CI actions, CodeQL.
-- Releases carry an SBOM (CycloneDX) and Sigstore signatures. The release workflow has not run yet (status A8).
+- Releases carry an SBOM (CycloneDX) and Sigstore signatures. The release workflow has not run yet (TASK-4).
 - Pinned MCP servers and plugins.
 - Model files: GGUF and safetensors only.
 
@@ -763,7 +763,7 @@ Details in [plan/phase0.md](plan/phase0.md).
 - **M2, security features and dashboard:** approvals inbox, risk tiers, provenance dialog, redaction, egress report, vault browser, locking, audit anchoring, the MCP proxy with pinning, all four coding agents and three clients tested.
 - **M3, sync and connectors:** hardening, the MCP SDK, backups with purge rewrite, hosted backends ([plan/m3.md](plan/m3.md)). Multi-device replication (D72), deferred by D71, was built later.
 - **Built after M3 (2026-11-10):** Merkle checkpoints (D79), database encryption (D80), and the Rust plan of [ADR-0020](adr/0020-rust-egress-and-audit.md): an opt-in egress data path with TLS inspection, and an audit verifier (D81).
-- **Later, no date:** an Ollama-compatible endpoint. Switching the egress default to Rust, after it has run for real (status A18).
+- **Later, no date:** an Ollama-compatible endpoint. Switching the egress default to Rust, after it has run for real (TASK-10).
 
 ## 10. Testing strategy
 - **Unit and property tests** for every component, with real sockets for anything that talks HTTP or starts a worker.

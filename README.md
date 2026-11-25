@@ -172,7 +172,7 @@ one but the assistant that wrote the code has reviewed its security. It's meant 
 Windows it runs [inside WSL2](docs/wsl2.md), which hasn't been tried on a real machine yet; CI
 also runs the unit tests on Windows.
 
-Pending work is in one [task list](docs/plan/tasks.json), shown in [status](docs/status.md); what
+Pending work is in one [task list](backlog/) (Backlog.md), shown in [status](docs/status.md); what
 each session did is in the [progress log](docs/plan/progress.md), and each requirement's status in
 [requirements-status.md](docs/plan/requirements-status.md).
 

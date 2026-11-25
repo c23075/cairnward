@@ -13,16 +13,16 @@ disagree with the code, the code was checked, and this page follows it.
   - It listens only on this machine, and won't bind elsewhere.
   - Whoever controls the OS account controls Cairnward.
 - **Not production ready.** The same assistant that wrote the code also reviewed it and wrote
-  the threat model. No independent security review has been done (A10).
+  the threat model. No independent security review has been done (TASK-9).
   - Several features have only been tested against stand-ins: hosted model providers, remote MCP
     servers and OAuth, chat clients, OpenShell, TLS inspection with real agents, and restic to a
     real remote.
-  - It has run on real WSL2 once, on 2026-11-16 (A1), and CI doesn't test WSL2 (I19), so Windows
+  - It has run on real WSL2 once, on 2026-11-16 (TASK-54), and CI doesn't test WSL2 (I19), so Windows
     support rests on one machine.
-  - A real backup has never been restored (A5).
-  - The release and signing workflow has never run on GitHub (A8).
+  - A real backup has never been restored (TASK-3).
+  - The release and signing workflow has never run on GitHub (TASK-4).
   - The egress proxy and audit log, the most security-critical parts, are Python with a large
-    dependency tree (hash-locked). A Rust data path exists as an opt-in (`[egress] implementation = "rust"`, ADR-0020): measured at the same cost and reviewed, but not yet run for real outside tests (A18). The audit writer stays in Python by decision (D81), with an independent Rust verifier.
+    dependency tree (hash-locked). A Rust data path exists as an opt-in (`[egress] implementation = "rust"`, ADR-0020): measured at the same cost and reviewed, but not yet run for real outside tests (TASK-10). The audit writer stays in Python by decision (D81), with an independent Rust verifier.
   - The threat model maps to the OWASP Top 10 for LLM Applications, not yet to the Top 10 for
     Agentic Applications ([landscape.md](landscape.md)).
   - See the status page's testing lists for the full picture.
@@ -97,7 +97,7 @@ disagree with the code, the code was checked, and this page follows it.
   key sits unwrapped in `keys.db`, on the same disk as the vault. Per-conversation encryption is
   there to make deletion reliable (crypto-shredding). Three things keep the data from someone
   who has the disk: locking a conversation with a passphrase, database encryption (`store
-  encrypt`, D80, off by default and Linux x86-64 only), and full-disk encryption (A7).
+  encrypt`, D80, off by default and Linux x86-64 only), and full-disk encryption (TASK-8).
 - **With database encryption on,** the files are protected only while Cairnward isn't running
   with the key in memory, and only as well as the passphrase. A `[storage] key` reference is as
   safe as wherever it points (an `env:` reference stays readable in that process's `/proc`). While

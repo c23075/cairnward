@@ -2,11 +2,50 @@
 
 One entry per working session or merged change, newest first (ADR-0022). Say what changed, what
 was tested for real and what only against a stand-in, and what was found. Pending work isn't
-written here: it goes in [tasks.json](tasks.json), and the entry names the task IDs it touched.
+written here: it goes in the [task list](../../backlog/), and the entry names the task IDs it
+touched.
 
 Before 2026-11-24 each session wrote a separate handoff:
 [2026-11-10](handoff-2026-11-10.md), [2026-11-05](handoff-2026-11-05.md). They're kept as
 history; their open items are now in the task list.
+
+## 2026-11-25: topics and milestones
+- The owner asked for categories. Every task now has at least one topic label (16 topics:
+  audit, backup, clients, dashboard, decision, deploy, egress, evals, models, performance,
+  plugins, release, repo, sandbox, security, wsl2), and checks keep their group label.
+- Two milestones: **0.1.0 release** (TASK-4, TASK-5, TASK-6, TASK-36: the release, and the
+  repository safety settings to have on before it) and **Production ready** (TASK-1, TASK-2,
+  TASK-3, TASK-42 for a restored backup; TASK-11, TASK-67 for WSL2; TASK-9, TASK-39 for an outside
+  review), taken from status.md's summary. Topics and milestone choices are a first pass for the
+  owner to adjust.
+- The CI check now requires a topic on every task, a group label on checks only, and milestones
+  that exist. status.md gains a Milestones section and a Topic column; `tasks.py next --topic`.
+- Done through the CLI; finish dates kept. Tested: tests/test_tasks.py, 31 tests.
+
+## 2026-11-25: the task list moves to Backlog.md
+- The owner chose Backlog.md (option 5 in the revised [ADR-0022](../adr/0022-one-task-list-and-a-progress-log.md)),
+  with a CI check. `docs/plan/tasks.json` is gone; tasks are in [backlog/](../../backlog/), one
+  file each, created through the Backlog.md CLI so each was checked as it was written.
+- The CLI is pinned in `tools/backlog` (Backlog.md 1.57.4, every platform by hash) and Dependabot
+  updates it. Its settings keep it local. Traced on 2026-11-25: no outside connections for list,
+  view, create, doctor or overview; the board listens only on 127.0.0.1.
+- CI's new `tasks` job runs `scripts/tasks.py check`: Backlog.md's `doctor`, Cairnward's rules on
+  every task, and whether status.md matches. Backlog.md accepts a hand-edited file with a made-up
+  priority, so the rules matter; a test shows the check catching it.
+- Every task was compared with its original after the move (type, assignee, priority, status,
+  labels, dependencies, finish date, and every word of title and description). Eleven long titles
+  were shortened, because the file is named after the title and Windows limits paths; the rest
+  of each title moved to its description.
+- New: TASK-67, whether the 2026-11-16 WSL2 run already covered I1 (status.md still says it
+  hasn't run there).
+- Tested: tests/test_tasks.py, 24 tests, 4 of them with the real CLI; `check` on the real list.
+  Not yet run on GitHub.
+
+### IDs before 2026-11-25
+Each task's notes keep its old ID. Documents written before this change use the old ones.
+- **Owner actions:** A1 → TASK-54, A3 → TASK-1, A4 → TASK-2, A5 → TASK-3, A7 → TASK-8, A8 → TASK-4, A10 → TASK-9, A11 → TASK-17, A12 → TASK-18, A13 → TASK-49, A14 → TASK-50, A15 → TASK-51, A16 → TASK-52, A17 → TASK-53, A18 → TASK-10, A19 → TASK-11, A20 → TASK-19, A21 → TASK-5, A22 → TASK-12, A23 → TASK-13, A24 → TASK-20, A25 → TASK-21, A26 → TASK-6, A27 → TASK-14, A28 → TASK-15, A29 → TASK-22, A30 → TASK-7, A31 → TASK-16
+- **Agent work:** W1 → TASK-23, W2 → TASK-24, W3 → TASK-56, W4 → TASK-57, W5 → TASK-26, W6 → TASK-29, W7 → TASK-55, W8 → TASK-25, W9 → TASK-27, W10 → TASK-28
+- **Checks:** C1 → TASK-61, C2 → TASK-62, C3 → TASK-30, C4 → TASK-66, C5 → TASK-31, C6 → TASK-58, C7 → TASK-63, C8 → TASK-32, C9 → TASK-64, C10 → TASK-59, C11 → TASK-33, C12 → TASK-34, C13 → TASK-35, C14 → TASK-65, C15 → TASK-60, C16 → TASK-36, C17 → TASK-37, C18 → TASK-38, C19 → TASK-39, C20 → TASK-40, C21 → TASK-41, C22 → TASK-42, C23 → TASK-43, C24 → TASK-44, C25 → TASK-45, C26 → TASK-46, C27 → TASK-47, C28 → TASK-48
 
 ## 2026-11-24: TLS inspection needs isolation; environments per client (W3, W4)
 - The owner approved both proposals. **W3 (I37, D85):** runs in an environment with TLS

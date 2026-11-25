@@ -110,6 +110,27 @@ jobs:
           uv sync --no-dev --frozen
           uvx pip-licenses@5.5.5 --python .venv/bin/python --ignore-packages pyrage --allow-only="Apache-2.0;Apache-2.0 OR BSD-3-Clause;BSD License;BSD-3-Clause;BSD-3-Clause, Apache-2.0, dependency licenses;MIT;MIT License;MIT License, Apache License, Version 2.0;MIT-0;Mozilla Public License 2.0 (MPL 2.0);PSF-2.0"
 
+  tasks:
+    # ADR-0022: the task list in backlog/ follows Backlog.md's doctor and Cairnward's rules, and
+    # docs/status.md's generated sections match it. Fails until `scripts/tasks.py render` is run.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install the pinned Backlog.md CLI
+        working-directory: tools/backlog
+        run: npm ci --no-audit --no-fund --ignore-scripts
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uv sync
+      - name: Task list rules and status page
+        run: uv run python scripts/tasks.py check
+      - name: Task list tests, with the real CLI
+        run: uv run pytest -v tests/test_tasks.py
+
   dashboard-e2e:
     # T2.7: the dashboard in Chromium against a running `cairnward serve`.
     runs-on: ubuntu-24.04

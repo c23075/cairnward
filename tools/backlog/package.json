@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Backlog.md, the task list's tool (ADR-0022). Installed by `npm ci --ignore-scripts` here; scripts/tasks.py and CI use it.",
+  "dependencies": {
+    "backlog.md": "1.57.4"
+  }
+}

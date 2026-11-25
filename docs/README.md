@@ -28,5 +28,5 @@ Grouped by what you're here to do. Start with the [overview](overview.md) if you
 ## Contributing and planning
 - [CONTRIBUTING](../CONTRIBUTING.md) and [SECURITY](../SECURITY.md)
 - [Managing the repository](repository-management.md): branches, PRs, CI, releases
-- [Plans](plan/): the [task list](plan/tasks.json) (all pending work), the [progress log](plan/progress.md) (what each session did), milestone plans, and the [enterprise proof of concept, LLMOps and model risk management](plan/enterprise-poc.md) plan
+- [Plans](plan/): the [task list](../backlog/) (all pending work, kept with Backlog.md), the [progress log](plan/progress.md) (what each session did), milestone plans, and the [enterprise proof of concept, LLMOps and model risk management](plan/enterprise-poc.md) plan
 - [Reviews](reviews/): threat-model and design reviews (NFR-S2)

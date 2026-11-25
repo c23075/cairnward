@@ -17,7 +17,7 @@ Neither adds a component, data flow or trust boundary. Both narrow what an exist
   Each fails with its fix switched off. Model backends are a fake, as in the other gateway
   tests. Nothing here ran with the real sandbox or a real client.
 - The reviewer is the coding assistant that wrote the change, so an outside review is still
-  outstanding (A10).
+  outstanding (TASK-9).
 
 ## What changed in the model
 - **T-33** (the CA key): its residual risk now applies only where the owner sets
@@ -32,7 +32,7 @@ Neither adds a component, data flow or trust boundary. Both narrow what an exist
 |---|---|---|---|
 | R1 | **The refusal has to be in the core, not only in `cairnward run`.** Runs also start through the management API, and a plugin or script could ask for one directly | Medium | **Done.** The core refuses (`403`, `run.refused` in the audit log) before it issues a key or an egress session. `cairnward run` refuses first only to say why sooner |
 | R2 | **Refusing, not skipping inspection.** Running without inspection would drop the environment's path rules silently, a weaker result than the owner configured | Medium | **Done.** The run is refused, so nothing runs with fewer checks than configured |
-| R3 | **Keys made before this change stay unlimited.** Limiting them automatically could break clients that use another environment today | Low | **Accepted.** `doctor` warns about each one that can reach a more open environment, and A31 asks the owner to limit them |
+| R3 | **Keys made before this change stay unlimited.** Limiting them automatically could break clients that use another environment today | Low | **Accepted.** `doctor` warns about each one that can reach a more open environment, and TASK-16 asks the owner to limit them |
 | R4 | **The default install warns.** `scratch` is more open than `coding`, so every unlimited key gets a `doctor` warning | Low | **Intended.** It points at the limit to set |
-| R5 | **MCP refusals aren't audited,** like MCP's existing run-environment refusals; chat and embeddings refusals are | Low | **Open.** Recorded as W10 |
+| R5 | **MCP refusals aren't audited,** like MCP's existing run-environment refusals; chat and embeddings refusals are | Low | **Open.** Recorded as TASK-28 |
 | R6 | **An environment's own openness isn't checked:** a client limited to an open environment is still open | Low | **Accepted.** That is the owner's choice of environment, already shown by its privacy label |
