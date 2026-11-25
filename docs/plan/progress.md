@@ -9,6 +9,15 @@ Before 2026-11-24 each session wrote a separate handoff:
 [2026-11-10](handoff-2026-11-10.md), [2026-11-05](handoff-2026-11-05.md). They're kept as
 history; their open items are now in the task list.
 
+## 2026-11-25: MCP Apps and elicitation
+- Found while answering how chat apps show interactive views: Cairnward's MCP proxy passes no
+  `resources`, so MCP Apps (`ui://` pages, the first official MCP extension) never show through
+  it, and it refuses elicitation on purpose (`mcp/upstream.py`). Both stay that way for now.
+- New tasks: TASK-68 (threat-model them first) and TASK-69 (let them through behind a switch,
+  off by default; waits on TASK-68). No code changed; nothing ran beyond `tasks.py check`.
+- PRs 69, 70 and 71 were merged into their stacked base branches, not into main, so main had
+  only PR 68. The PR that adds this entry goes to main and carries all three.
+
 ## 2026-11-25: topics and milestones
 - The owner asked for categories. Every task now has at least one topic label (16 topics:
   audit, backup, clients, dashboard, decision, deploy, egress, evals, models, performance,
