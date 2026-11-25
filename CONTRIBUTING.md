@@ -9,9 +9,19 @@ You need Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
+uv run pre-commit install                                           # once per clone
 uv run ruff check . && uv run ruff format --check . && uv run mypy   # what CI's lint job runs
 uv run pytest -q                                                    # about 4 minutes
 ```
+
+**The pre-commit hooks** run before each commit:
+- gitleaks refuses a commit whose staged changes hold a key, token or password;
+- ruff checks lint and formatting;
+- a few file checks (YAML, TOML, merge markers, large files).
+
+The first commit takes a minute while pre-commit builds gitleaks. If gitleaks flags something,
+take it out of the commit, and rotate it if it was ever a real secret. A made-up value that a test
+needs goes in `.gitleaks.toml`, matched exactly. Don't skip the hooks with `--no-verify`.
 
 **If you change anything in `src/cairnward/config/models.py`,** regenerate the committed schemas:
 `uv run cairnward config schema`.
@@ -65,6 +75,7 @@ CI runs all of them, on Linux, Debian and Windows.
 **Commits**
 - A subject in the imperative, under about 70 characters.
 - A body that says why.
+- AI coding agents follow [AGENTS.md](AGENTS.md).
 - If an AI assistant helped, credit it with a `Co-Authored-By` trailer. Don't put model names or
   version identifiers in commits or docs.
 

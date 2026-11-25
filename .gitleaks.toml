@@ -1,0 +1,16 @@
+# gitleaks settings: the default rules, plus the fake credentials the redaction tests use.
+# Each value is allowed exactly, not by file, so a real key added to a test is still caught.
+# Add a value here only when it is made up and a test needs it to look real.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake credentials in the redaction and MCP tests"
+regexTarget = "secret"
+regexes = [
+  '''^AKIAABCDEFGHIJKLMNOP$''',
+  '''^abcd1234efgh$''',
+  # Its signature segment decodes to "signature-value".
+  '''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.c2lnbmF0dXJlLXZhbHVl$''',
+]

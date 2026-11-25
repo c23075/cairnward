@@ -1,0 +1,44 @@
+name: Scorecard
+
+# OpenSSF Scorecard grades the repository's security practices: branch protection, pinned
+# dependencies, token permissions, a security policy, code scanning and more. Results go to the
+# repository's Security tab (Code scanning), as alerts. It changes nothing in the repository.
+# See docs/repository-management.md, section 8.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"  # Mondays
+  # Scorecard reads repository rulesets with the default token. Classic branch protection
+  # needs an admin token, so prefer rulesets (docs/repository-management.md, section 1).
+  branch_protection_rule:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write  # upload the results to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Off: results stay on GitHub. Turning it on sends them to api.scorecard.dev,
+          # which a README badge needs, and the job then needs `id-token: write`.
+          publish_results: false
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+      - uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: results.sarif
