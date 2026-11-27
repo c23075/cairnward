@@ -433,6 +433,11 @@ class Client(_Strict):
     backend: str | None = Field(default=None, description="this client's backend (all roles)")
     models: dict[Role, str] = Field(default_factory=dict, description="this client's models")
     budget: ClientBudget = ClientBudget()
+    environments: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        description="the environments this client's own key may use; unset = any (I39, D86)",
+    )
 
     @model_validator(mode="after")
     def _profile_matches_kind(self) -> Client:
@@ -440,6 +445,27 @@ class Client(_Strict):
         if self.profile not in get_args(allowed):
             raise ValueError(f"profile '{self.profile}' is not a known {self.kind} profile")
         return self
+
+    @model_validator(mode="after")
+    def _default_is_allowed(self) -> Client:
+        if (
+            self.environments is not None
+            and self.default_environment is not None
+            and self.default_environment not in self.environments
+        ):
+            raise ValueError(
+                f"default_environment '{self.default_environment}' isn't in environments"
+            )
+        return self
+
+    def home_environment(self) -> str | None:
+        """The environment a request goes to when it doesn't name one."""
+        if self.default_environment is not None:
+            return self.default_environment
+        return self.environments[0] if self.environments else None
+
+    def may_use(self, environment: str) -> bool:
+        return self.environments is None or environment in self.environments
 
 
 class ClientsConfig(_Strict):
@@ -593,6 +619,11 @@ class TlsInspection(_Strict):
     rules: list[HttpRule] = Field(default_factory=list)
     unmatched: Literal["allow", "deny"] = Field(
         default="allow", description="requests no rule matches (the host itself is allowed)"
+    )
+    allow_without_isolation: bool = Field(
+        default=False,
+        description="run with inspection even while this environment's isolation is off: an "
+        "agent running as you can then read the CA key (I37, D85)",
     )
 
 

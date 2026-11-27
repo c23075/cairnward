@@ -58,12 +58,36 @@ class Config:
                 "cairnward-egress decrypts their HTTPS (a stolen CA key could impersonate any "
                 "site to them)"
             )
+            if why := self.tls_inspection_refused(environment):
+                eff.warnings.append(f"runs in this environment are refused: {why}")
+            elif eff.value("isolation") == "off":
+                eff.warnings.append(
+                    "tls_inspection is allowed without isolation (allow_without_isolation): "
+                    "agents running here can read the CA key, which can impersonate any site "
+                    "to tools that trust it (I37)"
+                )
         if env.sandbox == "openshell" and eff.value("isolation") == "on":
             eff.notes.append(
                 "sandbox = openshell: runs start in an OpenShell sandbox. Its gateway sends "
                 "anonymous telemetry unless OPENSHELL_TELEMETRY_ENABLED=false is set for it."
             )
         return eff
+
+    def tls_inspection_refused(self, environment: str) -> str | None:
+        """Why runs in this environment are refused, if they are (I37, D85): TLS inspection is on
+        but isolation is off, so an agent running as you could read the local CA's key and
+        impersonate any site to tools that trust it. The owner can accept that per environment."""
+        env = self.environments[environment]
+        tls = env.tls_inspection
+        if not tls.enabled or tls.allow_without_isolation:
+            return None
+        if resolve_privacy(self.main.privacy, env.privacy, environment).value("isolation") == "on":
+            return None
+        return (
+            f"tls_inspection is on in '{environment}' but isolation is off, so an agent could "
+            "read the CA key (I37). Turn isolation on, or set [tls_inspection] "
+            "allow_without_isolation = true to accept that"
+        )
 
     def effort_levels_ordered(self) -> list[str]:
         visible = [(lvl.order, name) for name, lvl in self.effort.items() if not lvl.hidden]
@@ -210,4 +234,8 @@ def _cross_check(cfg: Config) -> list[str]:
                 f"{p.clients_config}: clients.{name}.default_environment: unknown environment "
                 f"'{client.default_environment}'"
             )
+        for env_name in client.environments or []:
+            if env_name not in cfg.environments:
+                out.append(f"{p.clients_config}: clients.{name}.environments: unknown "
+                           f"environment '{env_name}'")  # fmt: skip
     return out

@@ -7,11 +7,57 @@ A local privacy gateway (model gateway, egress proxy, policy engine, audit log, 
 vault, MCP proxy, plugin contract) for one person's machine. Literature research is a separate project
 (`literature-review-agent-plugin`, ADR-0017): nothing here may depend on it.
 Python 3.12+, uv, Apache-2.0. Docs index by reader: `docs/README.md`; overview and stack
-position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D83), ADRs in
-`docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. The current
-state and next steps are in the newest `docs/plan/handoff-*.md`; requirement status is in
-`docs/plan/requirements-status.md`, so a new handoff doesn't copy it. `docs/status.md` is the
-owner's view of the project: keep it current when issues or test results change.
+position: `docs/overview.md`. Design: `docs/spec.md` (decisions D1–D86), ADRs in
+`docs/adr/`, requirements in `docs/requirements.md`, plans in `docs/plan/`. All pending work is
+in `backlog/`, kept with Backlog.md (ADR-0022); what each session did is in `docs/plan/progress.md`;
+requirement status is in `docs/plan/requirements-status.md`. `docs/status.md` is the owner's
+view: its action, agent and testing sections are generated from the task list, and the rest
+(known issues, recent changes) is kept current by hand.
+
+## Each session
+**Start:**
+1. `git log --oneline -15` and the top two entries of `docs/plan/progress.md`.
+2. `uv run python scripts/tasks.py next` for open work, most urgent first. When the owner asks
+   what's pending, answer from this, not from older handoff files.
+
+**End:**
+1. Update the task list with the Backlog.md CLI (below) or its MCP tools, never by editing
+   `backlog/` files by hand: mark what you finished `Done`, and add new work. Change a task's
+   wording only if the owner asks.
+2. `uv run python scripts/tasks.py render`. CI fails if status.md is behind the list, or a task
+   breaks the rules in `scripts/tasks.py`.
+3. Add an entry at the top of `docs/plan/progress.md`: what changed, what ran for real and what
+   only against a stand-in, what was found, and the task IDs it touched.
+4. Update status.md's known issues and recent changes if they changed.
+
+## The task list (Backlog.md)
+Install the pinned CLI once per clone: `cd tools/backlog && npm ci --ignore-scripts`. Then, with
+`B=tools/backlog/node_modules/.bin/backlog`:
+```bash
+$B task list --plain -s "To Do" --sort priority        # open tasks
+$B task view TASK-12 --plain
+$B task edit TASK-12 -s Done                             # finished
+$B task create "What to do" --type work -a @agent --priority medium -l egress -d "Why it matters"
+$B task create "What the owner does" --type action -a @owner --priority high -l backup -d "Why"
+$B task create "What to run for real" --type check -a "" -l never-run-for-real,sandbox
+$B task edit TASK-12 --add-label security -m "Production ready"   # another topic; a milestone
+$B milestone list --plain
+$B task edit TASK-29 --dep TASK-10                       # waits on another task
+$B browser                                               # the board, on 127.0.0.1
+```
+- **Types:** `action` is the owner's (`-a @owner`), `work` is an agent's (`-a @agent`), `check` is
+  something to run for real, with one group label (see `backlog/config.yml`). Open actions and
+  work need a priority (High, Medium, Low) unless they wait on another task.
+- **Topics:** every task has at least one topic label, such as `backup`, `release`, `repo`,
+  `security`, `egress` or `wsl2` (the full list is in `backlog/config.yml`; add one there if none
+  fits). `scripts/tasks.py next --topic backup` shows one topic.
+- **Milestones:** `0.1.0 release` and `Production ready`. Put a task in one when it has to be done
+  before that milestone; status.md shows each milestone's progress.
+- **Agents with MCP** can use `$B mcp start` (stdio) instead of the CLI.
+- **Keep titles short** (the file is named after it) and put details in the description. Links
+  in a task are from the repository root: `[ops](/docs/operations.md)`.
+- IDs before 2026-11-25 were A, W and C numbers; each task's notes keep its old one, and the
+  progress log has the map.
 
 ## Commands
 ```bash
@@ -31,6 +77,13 @@ uv run python scripts/bench_egress.py --dir <folder on the data disk>   # both e
 - Browser test (`tests/e2e/`) skips unless node can load playwright and axe-core:
   `cd tests/e2e && npm ci && npx playwright install chromium`.
 - A long state-dir path breaks Unix sockets (107 bytes); tests use short tmp paths.
+- **In a fresh container** many tests skip quietly. Install first: `apt-get install restic
+  openssh-client bubblewrap socat ripgrep`; `npm ci` in `spikes/t06-sandbox` with `CAIRNWARD_SRT`
+  set as above; `cargo build --manifest-path rust/Cargo.toml` for the Rust differential tests.
+  SQLCipher comes with `uv sync` on Linux x86-64.
+- `mypy --platform win32` reports errors for Linux-only calls (`flock`, `killpg`, Unix sockets) in
+  `backup.py`, `replication.py`, `mcp/launch.py`, `run/runner.py` and `core/server.py`. CI's mypy
+  runs on Linux only.
 
 ## Conventions
 - mypy strict, ruff (line length 100). Hand-aligned calls keep `# fmt: skip`.

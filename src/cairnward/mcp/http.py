@@ -89,6 +89,7 @@ def add_mcp_routes(
     *,
     default_environment: Callable[[str], str],
     run_environment: Callable[[str], str | None],
+    client_may_use: Callable[[str, str], bool] = lambda client, environment: True,
 ) -> None:
     cfg = hub.cfg
     lazy = _LazyManager(hub)
@@ -111,6 +112,9 @@ def add_mcp_routes(
                 return _rpc_error(None, -32600, f"this run is in '{environment}'", 403)
         else:
             environment = path_env or default_environment(client)
+            if not client_may_use(client, environment):  # I39, D86
+                return _rpc_error(None, -32600, f"client '{client}' may not use '{environment}'",
+                                  403)  # fmt: skip
         if environment not in cfg.environments:
             return _rpc_error(None, -32600, f"unknown environment '{environment}'", 404)
         return _McpSession(client, environment, run_id)

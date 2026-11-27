@@ -15,3 +15,6 @@ node_modules/
 
 # `cairnward check` reports are kept on the dev branch
 docs/bench/check-*
+
+# Backlog.md lock files (ADR-0022)
+backlog/.locks/

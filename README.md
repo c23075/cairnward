@@ -118,6 +118,9 @@ Then, in another terminal, create an API key for a client and open the dashboard
 uv run cairnward client add my-chat-app
 ```
 
+The key can use only the default environment; add `--environment <name>` (repeatable) to choose
+others.
+
 ```bash
 uv run cairnward dashboard
 ```
@@ -169,8 +172,9 @@ one but the assistant that wrote the code has reviewed its security. It's meant 
 Windows it runs [inside WSL2](docs/wsl2.md), which hasn't been tried on a real machine yet; CI
 also runs the unit tests on Windows.
 
-The current state and next steps are in the newest [handoff](docs/plan/), and each requirement's
-status in [requirements-status.md](docs/plan/requirements-status.md).
+Pending work is in one [task list](backlog/) (Backlog.md), shown in [status](docs/status.md); what
+each session did is in the [progress log](docs/plan/progress.md), and each requirement's status in
+[requirements-status.md](docs/plan/requirements-status.md).
 
 **What this doesn't protect against:** it controls traffic and tools that pass through it. It
 can't see what a chat app does outside its own sandbox if you run the app unconfined, and
