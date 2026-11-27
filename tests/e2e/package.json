@@ -3,7 +3,7 @@
   "private": true,
   "description": "Browser tests for the dashboard (CI only; Cairnward itself has no Node dependency here)",
   "dependencies": {
-    "axe-core": "4.14.0",
-    "playwright": "1.65.0"
+    "axe-core": "4.14.1",
+    "playwright": "1.65.1"
   }
 }
