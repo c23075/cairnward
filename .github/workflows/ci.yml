@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           python-version: ${{ matrix.python }}
       - name: Install restic (the backup tool under test)
@@ -76,7 +76,7 @@ jobs:
         run: cargo test --locked
       - working-directory: rust
         run: cargo build --locked
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: uv sync
       - name: Rust and Python agree (differential tests, and every egress test on both paths)
         run: uv run pytest -q tests/test_egress_rust.py tests/test_egress.py tests/test_egress_decisions.py tests/test_egress_rust_runner.py tests/test_tls_inspection.py tests/test_audit_rust.py
@@ -88,7 +88,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: uv sync
       - run: uv run pytest
 
@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - name: Check dependencies for known vulnerabilities
         run: |
           uv export --format requirements-txt --all-groups --no-emit-project -o requirements-audit.txt
@@ -124,7 +124,7 @@ jobs:
       - name: Install the pinned Backlog.md CLI
         working-directory: tools/backlog
         run: npm ci --no-audit --no-fund --ignore-scripts
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - run: uv sync
       - name: Task list rules and status page
         run: uv run python scripts/tasks.py check
@@ -146,7 +146,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - name: Dashboard end to end
         run: |
           uv sync
@@ -191,7 +191,7 @@ jobs:
         run: |
           rustup toolchain install 1.97.0 --profile minimal
           cargo +1.97.0 build --locked --manifest-path rust/Cargo.toml
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - name: Isolated serve + cairnward run + plugins, end to end
         env:
           CAIRNWARD_SRT: node ${{ github.workspace }}/spikes/t06-sandbox/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js
